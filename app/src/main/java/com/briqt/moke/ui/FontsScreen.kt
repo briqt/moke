@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,16 +59,28 @@ private fun fmtSize(bytes: Long): String = when {
 fun FontsScreen(
     primaryId: String,
     fallbackId: String,
+    fonts: List<FontSpec>,
     states: Map<String, FontInstallState>,
     resolveTypeface: (String, String) -> Typeface,
     onDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
     onSetPrimary: (String) -> Unit,
     onSetFallback: (String) -> Unit,
+    onImport: (android.net.Uri) -> Unit,
+    importError: String?,
+    onClearImportError: () -> Unit,
     onBack: () -> Unit,
 ) {
     val previewTf = remember(primaryId, fallbackId, states) { resolveTypeface(primaryId, fallbackId) }
     val onSurfaceArgb = MaterialTheme.colorScheme.onSurface.toArgb()
+    // 系统文件选择器：选本地 TTF/OTF 导入。用 */* 最大兼容（部分文件管理器不识别字体 MIME），导入时再校验。
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) onImport(uri) }
+    // 导入错误 4 秒后自动清除。
+    androidx.compose.runtime.LaunchedEffect(importError) {
+        if (importError != null) { kotlinx.coroutines.delay(4000); onClearImportError() }
+    }
 
     Scaffold(
         topBar = {
@@ -78,6 +91,7 @@ fun FontsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -125,7 +139,18 @@ fun FontsScreen(
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
-            items(FontCatalog.all, key = { it.id }) { spec ->
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("*/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("上传本地字体（TTF / OTF）") }
+                    if (importError != null) {
+                        Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            items(fonts, key = { it.id }) { spec ->
                 FontCard(
                     spec = spec,
                     state = states[spec.id] ?: FontInstallState.Absent,
@@ -170,6 +195,7 @@ private fun FontCard(
                 // 能力标签（比「中/英」二分更有信息量）：含中文可作回退；连字/内置各表其义。
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (spec.bundled) Badge("内置", MaterialTheme.colorScheme.tertiary)
+                    if (spec.userUploaded) Badge("本地", MaterialTheme.colorScheme.tertiary)
                     if (spec.cjk) Badge("含中文", MaterialTheme.colorScheme.primary)
                     if (spec.ligature) Badge("连字", MaterialTheme.colorScheme.secondary)
                 }

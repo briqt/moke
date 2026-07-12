@@ -50,27 +50,27 @@ sealed interface ExtraKey {
 }
 
 /**
- * 默认双排附加键（参考 termux 的两排布局 + 倒 T 方向键）。均匀铺满宽度、不横向滚动。
- * 翻页键左右对称：行1 右端 PgUp、行2 右端 PgDn。文本段输入入口在终端顶栏右上角，不占键位。
+ * 默认双排附加键（参考 termux 两排布局 + 倒 T 方向键）。均匀铺满宽度、不横向滚动。
+ * 每排 7 键；右端两格放「文本」段入口（行1）与回车（行2），故终端顶栏右上角留空。
  */
 val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
     listOf(
         ExtraKey.Seq("ESC", ""),
         ExtraKey.Seq("/", "/"),
-        ExtraKey.Seq("-", "-"),
-        ExtraKey.Seq("HOME", "[H"),
+        ExtraKey.Seq("HOME","[H"),
         ExtraKey.Seq("↑", "[A"),
         ExtraKey.Seq("END", "[F"),
         ExtraKey.Seq("PgUp", "[5~"),
+        ExtraKey.Action("文本", "composer"),
     ),
     listOf(
         ExtraKey.Seq("TAB", "\t"),
         ExtraKey.Mod("CTRL", ctrl = true),
-        ExtraKey.Mod("ALT", ctrl = false),
         ExtraKey.Seq("←", "[D"),
         ExtraKey.Seq("↓", "[B"),
         ExtraKey.Seq("→", "[C"),
         ExtraKey.Seq("PgDn", "[6~"),
+        ExtraKey.Seq("↵", "\r"),
     ),
 )
 
@@ -86,11 +86,11 @@ fun ExtraKeys(
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             rows.forEach { row ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { key ->
                         val active = key is ExtraKey.Mod && ((key.ctrl && ctrlOn) || (!key.ctrl && altOn))
                         KeyCap(
@@ -114,10 +114,11 @@ fun ExtraKeys(
 
 @Composable
 private fun KeyCap(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    // 近乎平直的键帽（3dp 微圆角），更贴合终端页面；高度 36dp（较原 40 压平约 1/10）。
     Surface(
         onClick = onClick,
-        modifier = modifier.height(40.dp),
-        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.height(36.dp),
+        shape = RoundedCornerShape(3.dp),
         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
@@ -163,11 +164,12 @@ fun TextBlockComposer(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 限定输入框高度上限：内容再多也在框内滚动，不会把下方的发送按钮顶出屏幕。
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp).focusRequester(focusRequester),
-                minLines = 4,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 108.dp, max = 200.dp).focusRequester(focusRequester),
+                minLines = 3,
                 label = { Text("要发送的内容") },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
             )

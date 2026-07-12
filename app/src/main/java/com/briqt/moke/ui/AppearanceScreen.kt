@@ -64,6 +64,7 @@ fun AppearanceScreen(
     schemeId: String,
     primaryFontId: String,
     fallbackFontId: String,
+    fonts: List<com.briqt.moke.terminal.FontSpec>,
     fontStates: Map<String, FontInstallState>,
     fontSizeSp: Int,
     lineSpacing: Float,
@@ -85,11 +86,12 @@ fun AppearanceScreen(
     fun installed(id: String) = fontStates[id] is FontInstallState.Installed
     fun capTags(spec: com.briqt.moke.terminal.FontSpec) = buildList {
         if (spec.bundled) add("内置")
+        if (spec.userUploaded) add("本地")
         if (spec.cjk) add("含中文")
         if (spec.ligature) add("连字")
     }
-    // 主字体：内置 + 已安装
-    val primaryOptions = FontCatalog.all.filter { it.bundled || installed(it.id) }.map { spec ->
+    // 主字体：内置 + 已安装（含用户上传）
+    val primaryOptions = fonts.filter { it.bundled || installed(it.id) }.map { spec ->
         DropdownOption(
             id = spec.id,
             title = spec.nameZh,
@@ -98,9 +100,10 @@ fun AppearanceScreen(
         )
     }
     // 回退字体：无 + 已安装的含中文字体（回退用来补 Latin 缺失字形，如中文）
+    // 回退候选：含中文的字体（补 CJK 字形）+ 用户上传字体（未知覆盖，允许自选）。
     val fallbackOptions = listOf(DropdownOption(id = "", title = "无（系统兜底）")) +
-        FontCatalog.all.filter { (it.bundled || installed(it.id)) && it.cjk }.map { spec ->
-            DropdownOption(id = spec.id, title = spec.nameZh, subtitle = spec.name, tags = listOf("含中文"))
+        fonts.filter { (it.bundled || installed(it.id)) && (it.cjk || it.userUploaded) }.map { spec ->
+            DropdownOption(id = spec.id, title = spec.nameZh, subtitle = spec.name, tags = if (spec.userUploaded) listOf("本地") else listOf("含中文"))
         }
     // 下拉底部的「下载更多」入口（主字体 + 回退共用）——即便字体变多、菜单需滚动也在末尾可达。
     val downloadFooter: @Composable (dismiss: () -> Unit) -> Unit = { dismiss ->
@@ -134,6 +137,7 @@ fun AppearanceScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -143,6 +147,8 @@ fun AppearanceScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // 预览高度随样张行数与当前字号/行距估算：样张 5 行 + 1 行余量，不再固定占大块。
+            val previewHeight = (fontSizeSp * lineSpacing * 1.35f * 6 + 24).dp
             // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
             AppearancePreview(
                 schemeId = schemeId,
@@ -156,7 +162,7 @@ fun AppearanceScreen(
                 resolveTypeface = resolveTypeface,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
+                    .height(previewHeight)
                     .padding(12.dp)
                     .clip(RoundedCornerShape(12.dp)),
             )

@@ -7,13 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,8 +24,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -107,17 +106,20 @@ fun TerminalScreen(
         }
     }
 
-    // 热切换：设置变更时对当前活动终端即时生效。
+    // 热切换：设置变更时对当前活动终端即时生效（含空闲会话——强制重绘，不必等新输出）。
     LaunchedEffect(ts.id, primaryFontId, fallbackFontId) {
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
+        view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, fontSizeSp) {
         val px = (fontSizeSp * context.resources.displayMetrics.density).toInt()
         view.setTextSize(px)
         controller.fontSizeSp = fontSizeSp
+        view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, lineSpacing, letterSpacing) {
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, cursorStyle) {
         controller.cursorStyle = cursorStyle
@@ -143,26 +145,16 @@ fun TerminalScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(title, maxLines = 1, style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    // 文本段输入入口（点击终端本身即可唤起软键盘，故不再放键盘按钮）。
-                    IconButton(onClick = { showComposer = true }) {
-                        Icon(Icons.Filled.EditNote, contentDescription = "文本段输入")
-                    }
-                },
-                expandedHeight = 52.dp,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+            // 双行顶栏：主标题（会话名）+ 细小副标题（user@host · 协议 · 延迟）。
+            // 连接信息收进顶栏，不再单独占用终端区域。
+            TerminalTopBar(
+                title = title,
+                host = "${ts.host.username}@${ts.host.host}",
+                protocol = ts.host.protocol,
+                alive = alive,
+                latencyMs = latency,
+                showLatency = !ts.host.useMosh,
+                onBack = onBack,
             )
         },
     ) { padding ->
@@ -175,7 +167,6 @@ fun TerminalScreen(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            TerminalStatusBar(ts = ts, alive = alive, latencyMs = latency)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -224,7 +215,7 @@ fun TerminalScreen(
                 onSeq = { seq -> ts.session.write(seq) },
                 onToggleCtrl = { ctrlOn = !ctrlOn; controller.ctrlActive = ctrlOn },
                 onToggleAlt = { altOn = !altOn; controller.altActive = altOn },
-                onAction = { },
+                onAction = { id -> if (id == "composer") showComposer = true },
             )
         }
     }
@@ -250,37 +241,65 @@ fun TerminalScreen(
 fun letterSpacingEm(mul: Float): Float = (mul - 1f) * 0.5f
 
 /**
- * 终端顶部状态条（克制）：协议 + user@host:port（左）· 网络往返延迟（右，SSH 实时探测）。
- * 单行、等宽、弱化色，与连接卡副标题风格一致，不喧宾夺主。
+ * 终端双行顶栏：返回 · 主标题（会话名）+ 副标题（user@host · 协议 · 延迟）· 文本段入口。
+ * 连接信息收进副标题，弱化色、等宽、单行省略，不占用终端渲染区域。延迟仅 SSH 实时探测。
  */
 @Composable
-private fun TerminalStatusBar(ts: TermSession, alive: Boolean, latencyMs: Int?) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+private fun TerminalTopBar(
+    title: String,
+    host: String,
+    protocol: String,
+    alive: Boolean,
+    latencyMs: Int?,
+    showLatency: Boolean,
+    onBack: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(54.dp)
+                .padding(start = 4.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                "${ts.host.protocol} · ${ts.host.username}@${ts.host.host}:${ts.host.port}",
-                fontFamily = MokeMono,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            when {
-                !alive -> Text("离线", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                latencyMs != null -> Text(
-                    "$latencyMs ms",
-                    fontFamily = MokeMono,
-                    fontSize = 11.sp,
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
-                    color = latencyColor(latencyMs),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
-                ts.host.useMosh -> {} // mosh 暂不显示延迟
-                else -> Text("…", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        host,
+                        fontFamily = MokeMono,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text("· $protocol", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    when {
+                        !alive -> Text("· 离线", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        latencyMs != null -> Text(
+                            "· $latencyMs ms",
+                            fontFamily = MokeMono,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = latencyColor(latencyMs),
+                            maxLines = 1,
+                        )
+                        showLatency -> Text("· …", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        else -> {}
+                    }
+                }
             }
         }
     }

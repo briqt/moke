@@ -125,8 +125,8 @@ class FontRepository(private val context: Context) {
 
     /** 合成主字体 + 回退字体为一个 Typeface（供 TerminalView.setTypeface）。 */
     fun resolveTypeface(primaryId: String?, fallbackId: String?): Typeface {
-        val primary = FontCatalog.byId(primaryId)
-        val fallback = fallbackId?.takeIf { it.isNotBlank() }?.let { FontCatalog.byId(it) }
+        val primary = specFor(primaryId) ?: FontCatalog.byId(FontCatalog.DEFAULT_ID)
+        val fallback = fallbackId?.takeIf { it.isNotBlank() }?.let { specFor(it) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return buildWithFallback(primary, fallback) ?: bundledTypeface()
         }
@@ -134,6 +134,19 @@ class FontRepository(private val context: Context) {
         val f = if (!primary.bundled) fileFor(primary.id) else null
         return if (f != null && f.exists()) runCatching { Typeface.createFromFile(f) }.getOrNull()
             ?: bundledTypeface() else bundledTypeface()
+    }
+
+    /** id → FontSpec：先查内置目录；否则若本地已有该字体文件（下载/用户上传）则合成一个非内置 spec。 */
+    private fun specFor(id: String?): FontSpec? {
+        if (id.isNullOrBlank()) return null
+        FontCatalog.all.firstOrNull { it.id == id }?.let { return it }
+        if (fileFor(id).exists()) {
+            return FontSpec(
+                id = id, name = id, nameZh = id, license = "", cjk = true,
+                bundled = false, url = null, archive = false, entryHint = "", approxBytes = 0,
+            )
+        }
+        return null
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -147,9 +160,34 @@ class FontRepository(private val context: Context) {
                 builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
             }
         }
+        // 符号回退（内置 Noto Sans Symbols 2）：补 ⏵/媒体/几何/杂项符号等主-回退字体常缺的终端字形。
+        loadSymbolsFont()?.let {
+            builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
+        }
         builder.setSystemFallback("sans-serif")
         builder.build()
     }.getOrNull()
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun loadSymbolsFont(): android.graphics.fonts.Font? = runCatching {
+        android.graphics.fonts.Font.Builder(context.resources, R.font.noto_sans_symbols2).build()
+    }.getOrNull()
+
+    /** 导入本地字体文件（TTF/OTF）：拷进 fonts 目录并校验可加载，返回生成的字体 id。 */
+    suspend fun importFont(uri: android.net.Uri): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            fontsDir.mkdirs()
+            val id = "user_" + java.util.UUID.randomUUID().toString().take(8)
+            val out = fileFor(id)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                out.outputStream().use { input.copyTo(it) }
+            } ?: error("无法读取所选文件")
+            if (runCatching { Typeface.createFromFile(out) }.getOrNull() == null) {
+                out.delete(); error("不是有效的字体文件（需 TTF / OTF）")
+            }
+            id
+        }
+    }
 
     /** 内置字体 id → res/font 资源。 */
     private fun bundledResId(id: String): Int? = when (id) {

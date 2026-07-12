@@ -13,8 +13,13 @@ import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.TerminalThemes
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "moke_settings")
+
+/** 用户上传的本地字体记录（文件存于 filesDir/fonts/<id>.ttf）。 */
+data class UserFont(val id: String, val name: String)
 
 /** 应用设置持久化：配色方案 + 终端主字体/回退字体。 */
 class SettingsStore(private val context: Context) {
@@ -28,6 +33,7 @@ class SettingsStore(private val context: Context) {
     private val hostSortKey = stringPreferencesKey("host_sort")
     private val lineSpacingKey = floatPreferencesKey("line_spacing_mul")
     private val letterSpacingKey = floatPreferencesKey("letter_spacing_mul")
+    private val userFontsKey = stringPreferencesKey("user_fonts")
 
     companion object {
         const val DEFAULT_FONT_SIZE_SP = 14
@@ -117,5 +123,41 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setLetterSpacing(v: Float) {
         context.settingsDataStore.edit { it[letterSpacingKey] = v.coerceIn(MIN_SPACING, MAX_SPACING) }
+    }
+
+    /** 用户上传字体清单。 */
+    val userFonts: Flow<List<UserFont>> = context.settingsDataStore.data.map { prefs ->
+        parseUserFonts(prefs[userFontsKey])
+    }
+
+    suspend fun addUserFont(font: UserFont) {
+        context.settingsDataStore.edit { prefs ->
+            val list = parseUserFonts(prefs[userFontsKey]).toMutableList()
+            if (list.none { it.id == font.id }) list.add(font)
+            prefs[userFontsKey] = encodeUserFonts(list)
+        }
+    }
+
+    suspend fun removeUserFont(id: String) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[userFontsKey] = encodeUserFonts(parseUserFonts(prefs[userFontsKey]).filterNot { it.id == id })
+        }
+    }
+
+    private fun parseUserFonts(s: String?): List<UserFont> {
+        if (s.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                UserFont(o.getString("id"), o.getString("name"))
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeUserFonts(list: List<UserFont>): String {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name)) }
+        return arr.toString()
     }
 }

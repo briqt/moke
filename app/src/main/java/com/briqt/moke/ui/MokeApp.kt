@@ -39,7 +39,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val schemeId by vm.colorSchemeId.collectAsState()
     val primaryFontId by vm.primaryFontId.collectAsState()
     val fallbackFontId by vm.fallbackFontId.collectAsState()
+    val fontCatalog by vm.fontCatalog.collectAsState()
     val fontStates by vm.fontStates.collectAsState()
+    val importError by vm.importError.collectAsState()
     val fontSizeSp by vm.fontSizeSp.collectAsState()
     val lineSpacing by vm.lineSpacing.collectAsState()
     val letterSpacing by vm.letterSpacing.collectAsState()
@@ -128,6 +130,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             schemeId = schemeId,
             primaryFontId = primaryFontId,
             fallbackFontId = fallbackFontId,
+            fonts = fontCatalog,
             fontStates = fontStates,
             fontSizeSp = fontSizeSp,
             lineSpacing = lineSpacing,
@@ -150,12 +153,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
         is Screen.Fonts -> FontsScreen(
             primaryId = primaryFontId,
             fallbackId = fallbackFontId,
+            fonts = fontCatalog,
             states = fontStates,
             resolveTypeface = vm.fonts::resolveTypeface,
             onDownload = { vm.downloadFont(it) },
             onDelete = { vm.deleteFont(it) },
             onSetPrimary = { vm.setPrimaryFont(it) },
             onSetFallback = { vm.setFallbackFont(it) },
+            onImport = { vm.importFont(it) },
+            importError = importError,
+            onClearImportError = { vm.clearImportError() },
             onBack = { screen = Screen.Appearance },
         )
 
