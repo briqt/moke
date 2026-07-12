@@ -1,0 +1,24 @@
+.*
+!.gitignore
+!.github
+
+# 构建产物
+build/
+/local.properties
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# mosh native 产物：由 scripts/build-mosh-native.sh 生成（GPLv3 二进制不入库）
+app/src/main/jniLibs/**/*.so
+
+# 密钥/签名
+*.keystore
+*.jks
+
+# 内部：AI/协作开发指引（不公开）
+/CLAUDE.md
+# 内部设计文档（不公开）
+/ARCHITECTURE.md

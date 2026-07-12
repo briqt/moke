@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moke 图标背景：墨色底 + 极淡水墨晕染 + 几点墨玉微光。viewport 1024 映射到 108dp。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M0,0 L1024,0 L1024,1024 L0,1024 Z" />
+    <!-- 水墨晕染 -->
+    <path
+        android:fillColor="#143B28"
+        android:fillAlpha="0.30"
+        android:pathData="M180,517 C180,332 325,190 517,190 C669,190 797,267 846,397 C889,510 859,652 771,743 C687,829 554,864 425,825 C278,781 180,666 180,517 Z" />
+    <!-- 墨玉微光 -->
+    <path
+        android:fillColor="#3CF18A"
+        android:fillAlpha="0.16"
+        android:pathData="M797,292 a21,21 0 1 0 42,0 a21,21 0 1 0 -42,0 z" />
+    <path
+        android:fillColor="#3CF18A"
+        android:fillAlpha="0.12"
+        android:pathData="M844,345 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 z" />
+    <path
+        android:fillColor="#3CF18A"
+        android:fillAlpha="0.12"
+        android:pathData="M175,694 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0 z" />
+</vector>

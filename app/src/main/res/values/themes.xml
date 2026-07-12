@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 承载 Activity 窗口样式；应用内 UI 由 Compose Material3 主题渲染。 -->
+    <style name="Theme.Moke" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/moke_bg</item>
+        <item name="android:statusBarColor">@color/moke_bg</item>
+        <item name="android:navigationBarColor">@color/moke_bg</item>
+    </style>
+</resources>

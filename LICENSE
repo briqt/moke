@@ -1,0 +1,17 @@
+moke（墨客）
+
+Copyright (c) 2026 briqt. All rights reserved.
+
+本仓库的 moke 产品层代码（主要为 `app/` 模块）为源码可见（source-available），
+但**尚未授予开源许可**：未经版权持有者书面许可，不得复制、修改、分发或用于商业目的。
+最终开源/商业许可策略待定（见 README 路线图）。
+
+—— 第三方组件 ——
+
+本项目包含 vendored 的第三方组件，它们各自遵循其原始许可，不受上述声明限制：
+
+- `terminal-emulator/`、`terminal-view/` 源自 termux/termux-app，采用 Apache License 2.0。
+  其中 `terminal-emulator/.../TerminalSession.java` 由 moke 修改（移除本地 PTY，改为传输无关）。
+
+完整第三方清单与许可见 THIRD_PARTY_NOTICES.md。Apache-2.0 全文见
+https://www.apache.org/licenses/LICENSE-2.0

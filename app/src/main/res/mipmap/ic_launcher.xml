@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 24–25 回退图标（无 adaptive-icon 支持时使用）：整块墨色瓦片 + M 字形 + 光标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M20,4 L88,4 A16,16 0 0 1 104,20 L104,88 A16,16 0 0 1 88,104 L20,104 A16,16 0 0 1 4,88 L4,20 A16,16 0 0 1 20,4 Z" />
+    <!-- M 右半（墨白） -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E6EDF3"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30,72 L30,38 L54,62 L78,38 L78,72" />
+    <!-- M 左半（墨玉） -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#7FE3C4"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30,72 L30,38 L54,62" />
+    <!-- 终端光标 -->
+    <path
+        android:fillColor="#E6EDF3"
+        android:pathData="M65,80 l14,0 a2.5,2.5 0 0 1 0,5 l-14,0 a2.5,2.5 0 0 1 0,-5 z" />
+</vector>
