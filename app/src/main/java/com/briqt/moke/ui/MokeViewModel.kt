@@ -53,13 +53,16 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val fallbackFontId: StateFlow<String> = settings.fallbackFontId
         .stateIn(viewModelScope, SharingStarted.Eagerly, "noto_sans_sc")
 
-    val fontSizeSp: StateFlow<Int> = settings.fontSizeSp
+    val fontSizeSp: StateFlow<Float> = settings.fontSizeSp
         .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_FONT_SIZE_SP)
 
     val cursorStyle: StateFlow<Int> = settings.cursorStyle
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     val cursorBlink: StateFlow<Boolean> = settings.cursorBlink
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     val hostSort: StateFlow<HostSort> = settings.hostSort
@@ -100,6 +103,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val importError: StateFlow<String?> = _importError.asStateFlow()
     fun clearImportError() { _importError.value = null }
 
+    /** 字体导入进行中（UI 显示 loading、禁用按钮）。 */
+    private val _importing = MutableStateFlow(false)
+    val importing: StateFlow<Boolean> = _importing.asStateFlow()
+
+    /** 导入成功提示（字体名，一次性）。 */
+    private val _importSuccess = MutableStateFlow<String?>(null)
+    val importSuccess: StateFlow<String?> = _importSuccess.asStateFlow()
+    fun clearImportSuccess() { _importSuccess.value = null }
+
     fun save(host: Host) = viewModelScope.launch { store.upsert(host, hosts.value) }
 
     fun delete(host: Host) = viewModelScope.launch { store.delete(host, hosts.value) }
@@ -115,6 +127,12 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setHostSort(sort: HostSort) = viewModelScope.launch { settings.setHostSort(sort) }
+
+    /** 手动拖动重排：持久化新的连接顺序（切到「手动」排序时生效）。 */
+    fun reorderHosts(newOrder: List<Host>) = viewModelScope.launch { store.save(newOrder) }
+
+    /** 拖动重排会话（仅内存，无持久化）。 */
+    fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
 
     /** 记录最近连接时间（用于"最近连接"排序）。 */
     fun touchHost(host: Host) = viewModelScope.launch {
@@ -142,7 +160,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setFallbackFont(id: String) = viewModelScope.launch { settings.setFallbackFont(id) }
 
-    fun setFontSize(sp: Int) = viewModelScope.launch { settings.setFontSize(sp) }
+    fun setFontSize(sp: Float) = viewModelScope.launch { settings.setFontSize(sp) }
 
     fun setCursorStyle(style: Int) = viewModelScope.launch { settings.setCursorStyle(style) }
 
@@ -151,6 +169,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setLineSpacing(v: Float) = viewModelScope.launch { settings.setLineSpacing(v) }
 
     fun setLetterSpacing(v: Float) = viewModelScope.launch { settings.setLetterSpacing(v) }
+
+    fun setExtraKeysVisible(visible: Boolean) = viewModelScope.launch { settings.setExtraKeysVisible(visible) }
+
+    /** 恢复外观默认（配色/字体/字号/行距/字距/光标）。 */
+    fun resetAppearanceDefaults() = viewModelScope.launch { settings.resetAppearanceDefaults() }
 
     fun downloadFont(id: String) {
         val spec = FontCatalog.byId(id)
@@ -171,10 +194,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 从系统文件选择器导入本地 TTF/OTF 字体。 */
     fun importFont(uri: android.net.Uri) = viewModelScope.launch {
         val name = displayNameOf(uri)
+        _importing.value = true
+        _importError.value = null
         fonts.importFont(uri).fold(
-            onSuccess = { id -> settings.addUserFont(UserFont(id, name)); _importError.value = null },
+            onSuccess = { id -> settings.addUserFont(UserFont(id, name)); _importSuccess.value = name },
             onFailure = { _importError.value = it.message ?: "导入失败" },
         )
+        _importing.value = false
     }
 
     private fun displayNameOf(uri: android.net.Uri): String {

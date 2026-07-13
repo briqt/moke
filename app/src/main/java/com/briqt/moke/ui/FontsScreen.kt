@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -69,6 +70,9 @@ fun FontsScreen(
     onImport: (android.net.Uri) -> Unit,
     importError: String?,
     onClearImportError: () -> Unit,
+    importing: Boolean,
+    importSuccess: String?,
+    onClearImportSuccess: () -> Unit,
     onBack: () -> Unit,
 ) {
     val previewTf = remember(primaryId, fallbackId, states) { resolveTypeface(primaryId, fallbackId) }
@@ -77,9 +81,23 @@ fun FontsScreen(
     val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) onImport(uri) }
-    // 导入错误 4 秒后自动清除。
+    // 导入错误 / 成功提示 4 秒后自动清除。
     androidx.compose.runtime.LaunchedEffect(importError) {
         if (importError != null) { kotlinx.coroutines.delay(4000); onClearImportError() }
+    }
+    androidx.compose.runtime.LaunchedEffect(importSuccess) {
+        if (importSuccess != null) { kotlinx.coroutines.delay(4000); onClearImportSuccess() }
+    }
+    // 已下载 / 已上传的排在前面，其次内置，未安装的可下载项垫底（同级保持目录顺序）。
+    val sortedFonts = remember(fonts, states) {
+        fonts.sortedBy { spec ->
+            when {
+                spec.userUploaded -> 0
+                !spec.bundled && states[spec.id] is FontInstallState.Installed -> 1
+                spec.bundled -> 2
+                else -> 3
+            }
+        }
     }
 
     Scaffold(
@@ -143,14 +161,28 @@ fun FontsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     OutlinedButton(
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
+                        enabled = !importing,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("上传本地字体（TTF / OTF）") }
+                    ) {
+                        if (importing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Text("  导入中…")
+                        } else {
+                            Text("上传本地字体（TTF / OTF）")
+                        }
+                    }
                     if (importError != null) {
                         Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
+                    if (importSuccess != null) {
+                        Text("已导入「$importSuccess」", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
-            items(fonts, key = { it.id }) { spec ->
+            items(sortedFonts, key = { it.id }) { spec ->
                 FontCard(
                     spec = spec,
                     state = states[spec.id] ?: FontInstallState.Absent,

@@ -105,14 +105,11 @@ fun AboutScreen(onBack: () -> Unit) {
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 开源与许可（规整的 标签:值 行）
+            // 开源与许可：只做简单声明 + 指向完整清单（细节留给 THIRD_PARTY_NOTICES）。
             Text("开源与许可", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            InfoRow("终端内核", "termux terminal-view / emulator · Apache-2.0")
-            InfoRow("SSH 传输", "sshj")
-            InfoRow("mosh", "native mosh-client · GPLv3")
             Text(
-                "完整第三方清单见项目 THIRD_PARTY_NOTICES。",
-                style = MaterialTheme.typography.bodySmall,
+                "本应用基于多个开源项目构建，完整许可清单见项目 THIRD_PARTY_NOTICES。",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -127,12 +124,4 @@ private fun InfoLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.width(72.dp),
     )
-}
-
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(verticalAlignment = Alignment.Top) {
-        InfoLabel(label)
-        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-    }
 }

@@ -11,12 +11,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,17 +61,19 @@ fun TerminalScreen(
     ts: TermSession,
     primaryFontId: String,
     fallbackFontId: String,
-    fontSizeSp: Int,
+    fontSizeSp: Float,
     lineSpacing: Float,
     letterSpacing: Float,
     cursorStyle: Int,
     cursorBlink: Boolean,
     schemeId: String,
+    extraKeysVisible: Boolean,
     resolveTypeface: (String, String) -> android.graphics.Typeface,
     onBack: () -> Unit,
     onReconnect: () -> Unit,
     onClose: () -> Unit,
-    onFontSize: (Int) -> Unit,
+    onFontSize: (Float) -> Unit,
+    onToggleExtraKeys: () -> Unit,
 ) {
     val context = LocalContext.current
     val title by ts.title.collectAsState()
@@ -74,7 +86,7 @@ fun TerminalScreen(
     // 文本段草稿：提升到此，关闭 sheet 保留、发送后清空。
     var composerText by remember(ts.id) { mutableStateOf("") }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
-    var zoomHintSp by remember(ts.id) { mutableStateOf<Int?>(null) }
+    var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
 
     val controller = ts.controller
     // View 按会话 id 记忆：切换会话得到全新 View，attach 到既有 session 后滚屏/连接保留。
@@ -92,7 +104,7 @@ fun TerminalScreen(
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // 注意顺序：先 setTextSize 创建 renderer，再 setTypeface（其读取 mRenderer 不判空）。
-        val px = (fontSizeSp * context.resources.displayMetrics.density).toInt()
+        val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
         view.setTextSize(px)
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
@@ -112,7 +124,7 @@ fun TerminalScreen(
         view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, fontSizeSp) {
-        val px = (fontSizeSp * context.resources.displayMetrics.density).toInt()
+        val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
         view.setTextSize(px)
         controller.fontSizeSp = fontSizeSp
         view.onScreenUpdated()
@@ -154,6 +166,10 @@ fun TerminalScreen(
                 alive = alive,
                 latencyMs = latency,
                 showLatency = !ts.host.useMosh,
+                fontSizeSp = fontSizeSp,
+                extraKeysVisible = extraKeysVisible,
+                onFontSize = onFontSize,
+                onToggleExtraKeys = onToggleExtraKeys,
                 onBack = onBack,
             )
         },
@@ -208,15 +224,17 @@ fun TerminalScreen(
                 }
             }
 
-            ExtraKeys(
-                rows = DEFAULT_EXTRA_KEYS,
-                ctrlOn = ctrlOn,
-                altOn = altOn,
-                onSeq = { seq -> ts.session.write(seq) },
-                onToggleCtrl = { ctrlOn = !ctrlOn; controller.ctrlActive = ctrlOn },
-                onToggleAlt = { altOn = !altOn; controller.altActive = altOn },
-                onAction = { id -> if (id == "composer") showComposer = true },
-            )
+            if (extraKeysVisible) {
+                ExtraKeys(
+                    rows = DEFAULT_EXTRA_KEYS,
+                    ctrlOn = ctrlOn,
+                    altOn = altOn,
+                    onSeq = { seq -> ts.session.write(seq) },
+                    onToggleCtrl = { ctrlOn = !ctrlOn; controller.ctrlActive = ctrlOn },
+                    onToggleAlt = { altOn = !altOn; controller.altActive = altOn },
+                    onAction = { id -> if (id == "composer") showComposer = true },
+                )
+            }
         }
     }
 
@@ -240,6 +258,10 @@ fun TerminalScreen(
 /** 字间距倍数（1.0=正常）→ Android Paint 的 letterSpacing（em）。±0.1 倍 ≈ ±0.05em，微调而不过火。 */
 fun letterSpacingEm(mul: Float): Float = (mul - 1f) * 0.5f
 
+/** 字号显示：整数省略小数（11），半档保留一位（11.5）。 */
+fun fmtFontSize(sp: Float): String =
+    if (sp % 1f == 0f) sp.toInt().toString() else String.format("%.1f", sp)
+
 /**
  * 终端双行顶栏：返回 · 主标题（会话名）+ 副标题（user@host · 协议 · 延迟）· 文本段入口。
  * 连接信息收进副标题，弱化色、等宽、单行省略，不占用终端渲染区域。延迟仅 SSH 实时探测。
@@ -252,6 +274,10 @@ private fun TerminalTopBar(
     alive: Boolean,
     latencyMs: Int?,
     showLatency: Boolean,
+    fontSizeSp: Float,
+    extraKeysVisible: Boolean,
+    onFontSize: (Float) -> Unit,
+    onToggleExtraKeys: () -> Unit,
     onBack: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
@@ -260,7 +286,7 @@ private fun TerminalTopBar(
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .height(54.dp)
-                .padding(start = 4.dp, end = 16.dp),
+                .padding(start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
@@ -301,6 +327,50 @@ private fun TerminalTopBar(
                     }
                 }
             }
+            // 右上角折叠菜单：底部快捷键显隐 · 字号 ±0.5 · 恢复默认字号。
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                // offset 把菜单右缘推到贴近屏幕右侧（抵消锚点内边距造成的缝隙）。
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    offset = androidx.compose.ui.unit.DpOffset(x = 8.dp, y = 0.dp),
+                ) {
+                    // 字号步进（点 ± 不关闭菜单，便于连续调整）。
+                    Row(
+                        modifier = Modifier.padding(start = 16.dp, end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("字号", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                        IconButton(onClick = { onFontSize(fontSizeSp - 0.5f) }) {
+                            Icon(Icons.Filled.Remove, contentDescription = "减小", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Text(fmtFontSize(fontSizeSp), fontFamily = MokeMono, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width(52.dp))
+                        IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }) {
+                            Icon(Icons.Filled.Add, contentDescription = "增大", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    DropdownMenuItem(
+                        text = { Text("恢复默认字号") },
+                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
+                        onClick = { menuOpen = false; onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(if (extraKeysVisible) "隐藏底部快捷键" else "显示底部快捷键") },
+                        leadingIcon = {
+                            Icon(
+                                if (extraKeysVisible) Icons.Filled.KeyboardHide else Icons.Filled.Keyboard,
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = { menuOpen = false; onToggleExtraKeys() },
+                    )
+                }
+            }
         }
     }
 }
@@ -312,10 +382,10 @@ private fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     else -> MaterialTheme.colorScheme.error
 }
 
-/** 捏合缩放提示：字号 sp + 相对默认(14sp)的百分比；非默认时提供「恢复默认」。 */
+/** 捏合缩放提示：字号 sp + 相对默认的百分比；非默认时提供「恢复默认」。 */
 @Composable
-private fun ZoomHint(sp: Int, onResetDefault: () -> Unit, modifier: Modifier = Modifier) {
-    val pct = (sp * 100) / TerminalController.DEFAULT_FONT_SIZE_SP
+private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier = Modifier) {
+    val pct = Math.round(sp * 100 / TerminalController.DEFAULT_FONT_SIZE_SP)
     Surface(
         color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
         contentColor = MaterialTheme.colorScheme.inverseOnSurface,
@@ -327,7 +397,7 @@ private fun ZoomHint(sp: Int, onResetDefault: () -> Unit, modifier: Modifier = M
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("字号 ${sp}sp · $pct%", fontFamily = MokeMono, fontWeight = FontWeight.Medium)
+            Text("字号 ${fmtFontSize(sp)}sp · $pct%", fontFamily = MokeMono, fontWeight = FontWeight.Medium)
             if (sp != TerminalController.DEFAULT_FONT_SIZE_SP) {
                 TextButton(onClick = onResetDefault) {
                     Text("恢复默认", color = MaterialTheme.colorScheme.inversePrimary)

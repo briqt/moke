@@ -42,11 +42,14 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val fontCatalog by vm.fontCatalog.collectAsState()
     val fontStates by vm.fontStates.collectAsState()
     val importError by vm.importError.collectAsState()
+    val importing by vm.importing.collectAsState()
+    val importSuccess by vm.importSuccess.collectAsState()
     val fontSizeSp by vm.fontSizeSp.collectAsState()
     val lineSpacing by vm.lineSpacing.collectAsState()
     val letterSpacing by vm.letterSpacing.collectAsState()
     val cursorStyle by vm.cursorStyle.collectAsState()
     val cursorBlink by vm.cursorBlink.collectAsState()
+    val extraKeysVisible by vm.extraKeysVisible.collectAsState()
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
     val backEnabled = screen !is Screen.Home || homeTab != HomeTab.Connections
@@ -74,8 +77,10 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onDuplicateHost = { vm.duplicate(it) },
             onDeleteHost = { vm.delete(it) },
             onConnectHost = { host -> screen = Screen.Terminal(vm.openSession(host)) },
+            onReorderHosts = { vm.reorderHosts(it) },
             onOpenSession = { id -> screen = Screen.Terminal(id) },
             onCloseSession = { id -> vm.closeSession(id) },
+            onReorderSessions = { vm.reorderSessions(it) },
             onOpenAppearance = { screen = Screen.Appearance },
             onOpenAbout = { screen = Screen.About },
         )
@@ -109,6 +114,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         cursorStyle = cursorStyle,
                         cursorBlink = cursorBlink,
                         schemeId = schemeId,
+                        extraKeysVisible = extraKeysVisible,
                         resolveTypeface = vm.fonts::resolveTypeface,
                         onBack = { screen = Screen.Home },
                         onReconnect = {
@@ -121,6 +127,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                             screen = Screen.Home; homeTab = HomeTab.Sessions
                         },
                         onFontSize = { vm.setFontSize(it) },
+                        onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
                     )
                 }
             }
@@ -146,6 +153,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onLetterSpacing = { vm.setLetterSpacing(it) },
             onCursorStyle = { vm.setCursorStyle(it) },
             onCursorBlink = { vm.setCursorBlink(it) },
+            onResetDefaults = { vm.resetAppearanceDefaults() },
             onOpenFonts = { screen = Screen.Fonts },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
@@ -163,6 +171,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onImport = { vm.importFont(it) },
             importError = importError,
             onClearImportError = { vm.clearImportError() },
+            importing = importing,
+            importSuccess = importSuccess,
+            onClearImportSuccess = { vm.clearImportSuccess() },
             onBack = { screen = Screen.Appearance },
         )
 

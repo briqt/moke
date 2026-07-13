@@ -70,6 +70,16 @@ class SessionManager(context: Context) {
 
     fun get(id: String): TermSession? = _sessions.value.firstOrNull { it.id == id }
 
+    /** 拖动重排：按给定的 id 顺序重排会话列表（仅内存）。未知 id 忽略、缺失的追加在末尾。 */
+    fun reorder(orderedIds: List<String>) {
+        _sessions.update { list ->
+            val byId = list.associateBy { it.id }
+            val front = orderedIds.mapNotNull { byId[it] }
+            val rest = list.filter { it.id !in orderedIds }
+            (front + rest).takeIf { it.size == list.size } ?: list
+        }
+    }
+
     /** 关闭并从列表移除（关传输幂等）。 */
     fun close(id: String) {
         val ts = get(id) ?: return

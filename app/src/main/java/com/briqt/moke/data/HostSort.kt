@@ -5,6 +5,7 @@ enum class HostSort(val label: String) {
     GROUP("分组"),
     NAME("名称"),
     RECENT("最近连接"),
+    MANUAL("手动"),
     ;
 
     companion object {

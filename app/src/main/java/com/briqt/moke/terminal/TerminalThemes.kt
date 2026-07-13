@@ -62,14 +62,6 @@ object TerminalThemes {
         listOf("#757575", "#825D4D", "#728C62", "#ADA16D", "#4D7B82", "#8A7267", "#729494", "#E0E0E0", "#8A8A8A", "#CF937A", "#98D9AA", "#FAE79D", "#7AC3CF", "#D6B2A1", "#ADE0E0", "#E0E0E0")),
     TermColorScheme("night", "Night", "夜", true, "#363B40", "#ffffff", "#82AAFF",
         listOf("#1F2226", "#F07178", "#C3E88D", "#FFCB6B", "#82AAFF", "#C792EA", "#89DDFF", "#BFC7D5", "#676E95", "#FF8B92", "#D2EE9F", "#FFD68A", "#9CBEFF", "#D5A8F0", "#A5E5FF", "#FFFFFF")),
-    TermColorScheme("solarized_light", "Solarized Light", "Solarized 亮", false, "#FDF6E3", "#586E75", "#2AA198",
-        listOf("#073642", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#EEE8D5", "#002B36", "#CB4B16", "#586E75", "#657B83", "#839496", "#6C71C4", "#93A1A1", "#FDF6E3")),
-    TermColorScheme("ayu_light", "Ayu Light", "Ayu 亮", false, "#FCFCFC", "#5C6166", "#4196DF",
-        listOf("#010101", "#E7666A", "#80AB24", "#EBA54D", "#4196DF", "#9870C3", "#51B891", "#C1C1C1", "#343434", "#EE9295", "#9FD32F", "#F0BC7B", "#6DAEE6", "#B294D2", "#75C7A8", "#DBDBDB")),
-    TermColorScheme("one_light", "One Light", "One 亮", false, "#F8F8F8", "#2A2B33", "#3E953A",
-        listOf("#000000", "#DE3D35", "#3E953A", "#D2B67B", "#2F5AF3", "#A00095", "#3E953A", "#BBBBBB", "#000000", "#DE3D35", "#3E953A", "#D2B67B", "#2F5AF3", "#A00095", "#3E953A", "#FFFFFF")),
-    TermColorScheme("paper", "Paper", "纸张", false, "#FCFBF9", "#1A1A1A", "#2B5A38",
-        listOf("#1A1A1A", "#A33A3A", "#2B5A38", "#A85A20", "#4A7A8A", "#4A3A6A", "#3A7A6A", "#C1BEB5", "#8C8A80", "#C36A6A", "#6B9A78", "#C88A50", "#7A9AAA", "#8A7A9A", "#6ABAAA", "#EBEBE6")),
     )
 
     fun byId(id: String?): TermColorScheme = all.firstOrNull { it.id == id } ?: all.first()

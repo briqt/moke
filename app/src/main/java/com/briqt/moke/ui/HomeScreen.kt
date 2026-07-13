@@ -6,6 +6,8 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -88,8 +91,10 @@ fun HomeScreen(
     onDuplicateHost: (Host) -> Unit,
     onDeleteHost: (Host) -> Unit,
     onConnectHost: (Host) -> Unit,
+    onReorderHosts: (List<Host>) -> Unit,
     onOpenSession: (String) -> Unit,
     onCloseSession: (String) -> Unit,
+    onReorderSessions: (List<String>) -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
@@ -135,8 +140,8 @@ fun HomeScreen(
         },
     ) { padding ->
         when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, sort, onSort, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, onOpenSession, onCloseSession)
+            HomeTab.Connections -> ConnectionsContent(padding, hosts, sort, onSort, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost, onReorderHosts)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, onOpenSession, onCloseSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
         }
     }
@@ -176,6 +181,7 @@ private fun ConnectionsContent(
     onDuplicate: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     onConnect: (Host) -> Unit,
+    onReorder: (List<Host>) -> Unit,
 ) {
     if (hosts.isEmpty()) {
         EmptyState(
@@ -186,43 +192,63 @@ private fun ConnectionsContent(
         )
         return
     }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
-    ) {
-        // 排序选择（分组 / 名称 / 最近连接）——仅多于 1 台时显示
+    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+        // 排序选择（分组 / 名称 / 最近连接 / 手动）——仅多于 1 台时显示；横向可滚免挤。
         if (hosts.size > 1) {
-            item(key = "sort") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    HostSort.entries.forEach { s ->
-                        FilterChip(selected = sort == s, onClick = { onSort(s) }, label = { Text(s.label) })
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 12.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HostSort.entries.forEach { s ->
+                    FilterChip(selected = sort == s, onClick = { onSort(s) }, label = { Text(s.label) })
                 }
             }
         }
 
-        when (sort) {
-            HostSort.GROUP -> {
-                // 未分组排在最后，其余按组名字母序；组内按名称
-                val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED } }
-                    .toSortedMap(compareBy({ it == UNGROUPED }, { it }))
-                groups.forEach { (g, list) ->
-                    item(key = "hdr_$g") { GroupHeader(g) }
-                    items(list.sortedBy { it.displayName.lowercase() }, key = { it.id }) { host ->
-                        HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
-                    }
-                }
+        if (sort == HostSort.MANUAL) {
+            // 手动：按存储顺序展示，长按拖动重排并持久化。
+            ReorderableColumn(
+                items = hosts,
+                key = { it.id },
+                onReorder = onReorder,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) { host, dragging, handle ->
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
             }
-            else -> {
-                val sorted = if (sort == HostSort.NAME) {
-                    hosts.sortedBy { it.displayName.lowercase() }
-                } else {
-                    hosts.sortedByDescending { it.lastConnectedAt }
-                }
-                items(sorted, key = { it.id }) { host ->
-                    HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) {
+                when (sort) {
+                    HostSort.GROUP -> {
+                        // 未分组排在最后，其余按组名字母序；组内按名称
+                        val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED } }
+                            .toSortedMap(compareBy({ it == UNGROUPED }, { it }))
+                        groups.forEach { (g, list) ->
+                            item(key = "hdr_$g") { GroupHeader(g) }
+                            items(list.sortedBy { it.displayName.lowercase() }, key = { it.id }) { host ->
+                                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
+                            }
+                        }
+                    }
+                    else -> {
+                        val sorted = if (sort == HostSort.NAME) {
+                            hosts.sortedBy { it.displayName.lowercase() }
+                        } else {
+                            hosts.sortedByDescending { it.lastConnectedAt }
+                        }
+                        items(sorted, key = { it.id }) { host ->
+                            HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
+                        }
+                    }
                 }
             }
         }
@@ -243,17 +269,38 @@ private fun GroupHeader(name: String) {
 }
 
 @Composable
-private fun HostCard(host: Host, onConnect: () -> Unit, onEdit: () -> Unit, onDuplicate: () -> Unit, onDelete: () -> Unit) {
+private fun HostCard(
+    host: Host,
+    onConnect: () -> Unit,
+    onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+    dragHandle: Modifier? = null,
+    dragging: Boolean = false,
+) {
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onConnect),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (dragHandle != null) {
+                Box(modifier = dragHandle) {
+                    Icon(
+                        Icons.Filled.DragHandle,
+                        contentDescription = "拖动排序",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(host.displayName, fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -328,6 +375,7 @@ private fun SessionsContent(
     sessions: List<TermSession>,
     onOpen: (String) -> Unit,
     onClose: (String) -> Unit,
+    onReorder: (List<String>) -> Unit,
 ) {
     if (sessions.isEmpty()) {
         EmptyState(
@@ -338,29 +386,49 @@ private fun SessionsContent(
         )
         return
     }
-    LazyColumn(
+    // 会话长按拖动重排（仅内存顺序）。
+    ReorderableColumn(
+        items = sessions,
+        key = { it.id },
+        onReorder = { list -> onReorder(list.map { it.id }) },
         modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(vertical = 12.dp),
-    ) {
-        items(sessions, key = { it.id }) { ts ->
-            SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) })
-        }
+    ) { ts, dragging, handle ->
+        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, dragHandle = handle, dragging = dragging)
     }
 }
 
 @Composable
-private fun SessionCard(ts: TermSession, onOpen: () -> Unit, onClose: () -> Unit) {
+private fun SessionCard(
+    ts: TermSession,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+    dragHandle: Modifier? = null,
+    dragging: Boolean = false,
+) {
     val title by ts.title.collectAsState()
     val alive by ts.alive.collectAsState()
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (dragHandle != null) {
+                Box(modifier = dragHandle) {
+                    Icon(
+                        Icons.Filled.DragHandle,
+                        contentDescription = "拖动排序",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(9.dp)

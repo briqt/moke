@@ -19,7 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FontDownload
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -27,6 +30,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -36,7 +44,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,7 +79,7 @@ fun AppearanceScreen(
     fallbackFontId: String,
     fonts: List<com.briqt.moke.terminal.FontSpec>,
     fontStates: Map<String, FontInstallState>,
-    fontSizeSp: Int,
+    fontSizeSp: Float,
     lineSpacing: Float,
     letterSpacing: Float,
     cursorStyle: Int,
@@ -75,11 +88,12 @@ fun AppearanceScreen(
     onSelectScheme: (String) -> Unit,
     onSelectPrimary: (String) -> Unit,
     onSelectFallback: (String) -> Unit,
-    onFontSize: (Int) -> Unit,
+    onFontSize: (Float) -> Unit,
     onLineSpacing: (Float) -> Unit,
     onLetterSpacing: (Float) -> Unit,
     onCursorStyle: (Int) -> Unit,
     onCursorBlink: (Boolean) -> Unit,
+    onResetDefaults: () -> Unit,
     onOpenFonts: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -105,30 +119,21 @@ fun AppearanceScreen(
         fonts.filter { (it.bundled || installed(it.id)) && (it.cjk || it.userUploaded) }.map { spec ->
             DropdownOption(id = spec.id, title = spec.nameZh, subtitle = spec.name, tags = if (spec.userUploaded) listOf("本地") else listOf("含中文"))
         }
-    // 下拉底部的「下载更多」入口（主字体 + 回退共用）——即便字体变多、菜单需滚动也在末尾可达。
-    val downloadFooter: @Composable (dismiss: () -> Unit) -> Unit = { dismiss ->
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.FontDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("  管理 / 下载更多字体…", color = MaterialTheme.colorScheme.primary)
-                }
-            },
-            onClick = { dismiss(); onOpenFonts() },
-        )
-    }
     val schemeOptions = TerminalThemes.all.map { s ->
         DropdownOption(
             id = s.id,
             title = s.nameZh,
             subtitle = s.name,
-            tags = listOf(if (s.isDark) "暗色" else "亮色"),
             leading = { SchemeSwatches(s) },
         )
     }
 
+    val snackbarState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var overflowOpen by remember { mutableStateOf(false) }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarState) },
         topBar = {
             TopAppBar(
                 title = { Text("外观") },
@@ -137,18 +142,49 @@ fun AppearanceScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    Box {
+                        IconButton(onClick = { overflowOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                        }
+                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("恢复默认") },
+                                leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
+                                onClick = {
+                                    overflowOpen = false
+                                    // 先快照当前值，重置后用 Snackbar 提供「撤销」。
+                                    val pScheme = schemeId; val pPrimary = primaryFontId; val pFallback = fallbackFontId
+                                    val pSize = fontSizeSp; val pLine = lineSpacing; val pLetter = letterSpacing
+                                    val pCursor = cursorStyle; val pBlink = cursorBlink
+                                    onResetDefaults()
+                                    scope.launch {
+                                        val r = snackbarState.showSnackbar("已恢复默认", "撤销", duration = SnackbarDuration.Short)
+                                        if (r == SnackbarResult.ActionPerformed) {
+                                            onSelectScheme(pScheme); onSelectPrimary(pPrimary); onSelectFallback(pFallback)
+                                            onFontSize(pSize); onLineSpacing(pLine); onLetterSpacing(pLetter)
+                                            onCursorStyle(pCursor); onCursorBlink(pBlink)
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                },
                 expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                     navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
             )
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // 预览高度随样张行数与当前字号/行距估算：样张 5 行 + 1 行余量，不再固定占大块。
-            val previewHeight = (fontSizeSp * lineSpacing * 1.35f * 6 + 24).dp
+            // 预览高度按样张 5 行估算：含中文回退时行高偏大（≈ 字号×行距×1.6dp）+ 上下 padding。
+            // 上限 190dp：大字号时不至于吃掉整块滚动区（超出部分终端内部滚动，色带仍在底部可见）。
+            val previewHeight = (fontSizeSp * lineSpacing * 1.6f * 5 + 28).dp.coerceAtMost(190.dp)
             // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
             AppearancePreview(
                 schemeId = schemeId,
@@ -168,7 +204,7 @@ fun AppearanceScreen(
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 控制区（内容较少，通常不需滚动；小屏/横屏兜底可滚）
+            // 控制区分组：字体 → 排版 → 配色 → 光标。恢复默认收进顶栏 ⋮。
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -176,23 +212,56 @@ fun AppearanceScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                SectionHeader("字体")
                 RichDropdown(
                     label = "主字体",
                     options = primaryOptions,
                     selectedId = primaryFontId,
                     onSelect = onSelectPrimary,
-                    footer = downloadFooter,
                 )
                 RichDropdown(
-                    label = "回退字体（补中文等字形）",
+                    label = "中文 / 回退字体",
                     options = fallbackOptions,
                     selectedId = fallbackFontId,
                     onSelect = onSelectFallback,
-                    footer = downloadFooter,
                 )
-                // 独立常驻入口：不依赖下拉滚动，字体再多也点得到。
+                // 常驻入口：进入字体管理下载/上传/设角色。
                 FontManageEntry(onOpenFonts)
 
+                SectionHeader("排版")
+                // 字号 0.5 步进；行距/字距 0.1 步进。滑块快调 + ± 精调。
+                SliderRow(
+                    label = "字号",
+                    valueText = fmtFontSize(fontSizeSp),
+                    value = fontSizeSp,
+                    valueRange = 8f..32f,
+                    steps = 47,
+                    onValue = onFontSize,
+                    onMinus = { onFontSize(fontSizeSp - 0.5f) },
+                    onPlus = { onFontSize(fontSizeSp + 0.5f) },
+                )
+                SliderRow(
+                    label = "行距",
+                    valueText = String.format("%.1f", lineSpacing),
+                    value = lineSpacing,
+                    valueRange = 0.8f..1.6f,
+                    steps = 7,
+                    onValue = onLineSpacing,
+                    onMinus = { onLineSpacing((lineSpacing - 0.1f).coerceIn(0.8f, 1.6f)) },
+                    onPlus = { onLineSpacing((lineSpacing + 0.1f).coerceIn(0.8f, 1.6f)) },
+                )
+                SliderRow(
+                    label = "字间距",
+                    valueText = String.format("%.1f", letterSpacing),
+                    value = letterSpacing,
+                    valueRange = 0.8f..1.6f,
+                    steps = 7,
+                    onValue = onLetterSpacing,
+                    onMinus = { onLetterSpacing((letterSpacing - 0.1f).coerceIn(0.8f, 1.6f)) },
+                    onPlus = { onLetterSpacing((letterSpacing + 0.1f).coerceIn(0.8f, 1.6f)) },
+                )
+
+                SectionHeader("配色")
                 RichDropdown(
                     label = "配色方案",
                     options = schemeOptions,
@@ -200,39 +269,12 @@ fun AppearanceScreen(
                     onSelect = onSelectScheme,
                 )
 
-                // 字号
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("字号", color = MaterialTheme.colorScheme.onSurface)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { onFontSize(fontSizeSp - 1) }) {
-                            Icon(Icons.Filled.Remove, contentDescription = "减小", tint = MaterialTheme.colorScheme.primary)
-                        }
-                        Text("$fontSizeSp", fontFamily = MokeMono, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
-                        IconButton(onClick = { onFontSize(fontSizeSp + 1) }) {
-                            Icon(Icons.Filled.Add, contentDescription = "增大", tint = MaterialTheme.colorScheme.primary)
-                        }
+                SectionHeader("光标")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("方块", "下划线", "竖线").forEachIndexed { i, label ->
+                        FilterChip(selected = cursorStyle == i, onClick = { onCursorStyle(i) }, label = { Text(label) })
                     }
                 }
-
-                // 行距 / 字间距：0.1 步进微调（1.0=默认）。
-                SpacingStepper("行距", lineSpacing, onLineSpacing)
-                SpacingStepper("字间距", letterSpacing, onLetterSpacing)
-
-                // 光标样式
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("光标", color = MaterialTheme.colorScheme.onSurface)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("方块", "下划线", "竖线").forEachIndexed { i, label ->
-                            FilterChip(selected = cursorStyle == i, onClick = { onCursorStyle(i) }, label = { Text(label) })
-                        }
-                    }
-                }
-
-                // 光标闪烁
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -246,21 +288,54 @@ fun AppearanceScreen(
     }
 }
 
-/** 行距/字间距步进器：0.1 步进，范围 0.8–1.6，1.0 为默认。 */
+/** 分组小标题（字体 / 排版 / 配色 / 光标）。 */
 @Composable
-private fun SpacingStepper(label: String, value: Float, onChange: (Float) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurface)
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/**
+ * 数值滑块行：标题 + 当前值在上，滑块 + 两侧 ± 精调在下。
+ * 滑块快调（离散步进 [steps]），± 做单档精调（字号 0.5 / 行距字距 0.1）。
+ */
+@Composable
+private fun SliderRow(
+    label: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValue: (Float) -> Unit,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, color = MaterialTheme.colorScheme.onSurface)
+            Text(valueText, fontFamily = MokeMono, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onChange((value - 0.1f).coerceIn(0.8f, 1.6f)) }) {
+            IconButton(onClick = onMinus) {
                 Icon(Icons.Filled.Remove, contentDescription = "减小", tint = MaterialTheme.colorScheme.primary)
             }
-            Text(String.format("%.1f", value), fontFamily = MokeMono, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
-            IconButton(onClick = { onChange((value + 0.1f).coerceIn(0.8f, 1.6f)) }) {
+            Slider(
+                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+                onValueChange = onValue,
+                valueRange = valueRange,
+                steps = steps,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onPlus) {
                 Icon(Icons.Filled.Add, contentDescription = "增大", tint = MaterialTheme.colorScheme.primary)
             }
         }
@@ -316,7 +391,7 @@ private fun AppearancePreview(
     schemeId: String,
     primaryFontId: String,
     fallbackFontId: String,
-    fontSizeSp: Int,
+    fontSizeSp: Float,
     lineSpacing: Float,
     letterSpacing: Float,
     cursorStyle: Int,
@@ -337,7 +412,7 @@ private fun AppearancePreview(
         view.isFocusableInTouchMode = false
         controller.cursorStyle = cursorStyle
         controller.cursorBlink = cursorBlink
-        val px = (fontSizeSp * density).toInt()
+        val px = Math.round(fontSizeSp * density)
         view.setTextSize(px)
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
@@ -348,14 +423,21 @@ private fun AppearancePreview(
         }
     }
 
+    // 字号/字距/字体改列数 → 内核 reflow 会丢弃色带这类"全空格"行 → 每次重绘样张兜住（内容顶格、色带常在）。
     LaunchedEffect(primaryFontId, fallbackFontId) {
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
+        PreviewTransport.redraw(session)
+        view.onScreenUpdated()
     }
     LaunchedEffect(fontSizeSp) {
-        view.setTextSize((fontSizeSp * density).toInt())
+        view.setTextSize(Math.round(fontSizeSp * density))
+        PreviewTransport.redraw(session)
+        view.onScreenUpdated()
     }
     LaunchedEffect(lineSpacing, letterSpacing) {
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        PreviewTransport.redraw(session)
+        view.onScreenUpdated()
     }
     LaunchedEffect(cursorStyle) {
         controller.cursorStyle = cursorStyle

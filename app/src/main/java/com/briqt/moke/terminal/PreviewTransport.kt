@@ -12,8 +12,7 @@ import java.nio.charset.StandardCharsets
 class PreviewTransport : TerminalTransport {
 
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
-        val b = SAMPLE.toByteArray(StandardCharsets.UTF_8)
-        session.processToEmulator(b, b.size)
+        redraw(session)
     }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {}
@@ -22,7 +21,19 @@ class PreviewTransport : TerminalTransport {
 
     companion object {
         private const val E = ""
+        /**
+         * 重绘样张：样张自带清屏 + 清回滚 + 光标归位，可反复调用。
+         * 字号 / 字间距 / 字体变化会改列数触发内核 reflow，而 reflow 丢弃"全空格"行
+         * （色带正是背景色空格 → 被判为空行丢掉）；每次几何变化重绘即可保证色带常在、内容顶格。
+         */
+        fun redraw(session: TerminalSession) {
+            val b = SAMPLE.toByteArray(StandardCharsets.UTF_8)
+            session.processToEmulator(b, b.size)
+        }
+
+        // 样张 5 行（末行不换行，避免多占一行光标行）：提示符 / 中文+符号 / 编程符号 / 两条 0-15 色带。
         private val SAMPLE = buildString {
+            append("${E}[3J${E}[2J${E}[H")   // 清回滚 + 清屏 + 光标归位（自包含，可反复重绘）
             // 提示符（green + blue 走 0-15 号，随配色变）
             append("${E}[32mmoke${E}[0m:${E}[34m~${E}[0m\$ ls -la\r\n")
             // git 状态风格 + 中文
@@ -34,7 +45,7 @@ class PreviewTransport : TerminalTransport {
             for (i in 0..7) append("${E}[48;5;${i}m  ")
             append("${E}[0m\r\n ")
             for (i in 8..15) append("${E}[48;5;${i}m  ")
-            append("${E}[0m\r\n")
+            append("${E}[0m")
         }
     }
 }

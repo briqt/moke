@@ -31,9 +31,9 @@ class TerminalController(
     @Volatile var altActive = false
 
     /** 当前字号（sp），由 UI 初始化；捏合缩放时按 sp 步进，回调 [onFontSizeSp] 让上层持久化。 */
-    var fontSizeSp: Int = DEFAULT_FONT_SIZE_SP
+    var fontSizeSp: Float = DEFAULT_FONT_SIZE_SP
     /** 捏合缩放后回报新字号（sp），上层据此持久化 + 显示缩放提示。 */
-    var onFontSizeSp: ((Int) -> Unit)? = null
+    var onFontSizeSp: ((Float) -> Unit)? = null
 
     /** 光标样式（0=方块 1=下划线 2=竖线）与是否闪烁，由 UI 设置。 */
     @Volatile var cursorStyle: Int = 0
@@ -66,14 +66,14 @@ class TerminalController(
 
     // ---------- TerminalViewClient ----------
     override fun onScale(scale: Float): Float {
-        // TerminalView 传入的是累积缩放因子；超过阈值就调一档字号（±1sp）并把因子复位为 1。
+        // TerminalView 传入的是累积缩放因子；超过阈值就调一档字号（±0.5sp，与设置页一致）并把因子复位为 1。
         if (scale < 0.9f || scale > 1.1f) {
             val v = view ?: return 1.0f
-            val next = (if (scale > 1f) fontSizeSp + 1 else fontSizeSp - 1)
+            val next = (if (scale > 1f) fontSizeSp + FONT_SIZE_STEP else fontSizeSp - FONT_SIZE_STEP)
                 .coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
             if (next != fontSizeSp) {
                 fontSizeSp = next
-                v.setTextSize((next * appContext.resources.displayMetrics.density).toInt())
+                v.setTextSize(Math.round(next * appContext.resources.displayMetrics.density))
                 onFontSizeSp?.invoke(next)  // 让 UI 持久化 + 弹缩放提示
             }
             return 1.0f
@@ -117,8 +117,9 @@ class TerminalController(
     companion object {
         private const val TAG = "moke"
         // 与 SettingsStore 的字号范围/默认保持一致（避免耦合，此处复述常量）。
-        const val DEFAULT_FONT_SIZE_SP = 14
-        private const val MIN_FONT_SIZE_SP = 8
-        private const val MAX_FONT_SIZE_SP = 32
+        const val DEFAULT_FONT_SIZE_SP = 11f
+        const val FONT_SIZE_STEP = 0.5f
+        const val MIN_FONT_SIZE_SP = 8f
+        const val MAX_FONT_SIZE_SP = 32f
     }
 }
