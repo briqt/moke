@@ -80,6 +80,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onReorderHosts = { vm.reorderHosts(it) },
             onOpenSession = { id -> screen = Screen.Terminal(id) },
             onCloseSession = { id -> vm.closeSession(id) },
+            onDuplicateSession = { id -> vm.duplicateSession(id) },
             onReorderSessions = { vm.reorderSessions(it) },
             onOpenAppearance = { screen = Screen.Appearance },
             onOpenAbout = { screen = Screen.About },

@@ -146,14 +146,29 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 新建会话并返回其 id（UI 据此导航到终端页），并记录最近连接。解析跳板机（避免自引用）。 */
     fun openSession(host: Host): String {
         touchHost(host)
-        val jump = host.jumpHostId
-            .takeIf { it.isNotBlank() && it != host.id }
-            ?.let { id -> hosts.value.firstOrNull { it.id == id } }
-        val id = sessions.open(host, jump).id
-        // 拉起前台服务：退后台/关屏时保活会话（服务在会话归零时自行停止）。
+        val id = sessions.open(host, resolveJump(host)).id
+        ensureSessionService()
+        return id
+    }
+
+    /** 复制会话：用同一主机再开一个独立连接，沿用来源的标题/前缀并加不重复标记。源不存在时返回 null。 */
+    fun duplicateSession(id: String): String? {
+        val src = sessions.get(id) ?: return null
+        touchHost(src.host)
+        val newId = sessions.open(src.host, resolveJump(src.host), carryFrom = src).id
+        ensureSessionService()
+        return newId
+    }
+
+    /** 解析主机的跳板机（避免自引用；空/无效返回 null）。 */
+    private fun resolveJump(host: Host): Host? = host.jumpHostId
+        .takeIf { it.isNotBlank() && it != host.id }
+        ?.let { id -> hosts.value.firstOrNull { it.id == id } }
+
+    /** 拉起前台服务：退后台/关屏时保活会话（服务在会话归零时自行停止）。 */
+    private fun ensureSessionService() {
         val ctx = getApplication<Application>()
         runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, MokeSessionService::class.java)) }
-        return id
     }
 
     fun closeSession(id: String) = sessions.close(id)

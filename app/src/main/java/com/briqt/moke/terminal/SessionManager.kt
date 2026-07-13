@@ -37,6 +37,8 @@ class TermSession(
     val alive: StateFlow<Boolean>,
     /** 实时网络往返延迟（ms，null=未知/不适用）。 */
     val latency: StateFlow<Int?>,
+    /** 复制会话的不重复标记（如 "(2)"）；null=非复制。附加在展示标题最末，区分同源会话。 */
+    val copyMark: String? = null,
     val startedAt: Long,
 ) {
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
@@ -49,13 +51,15 @@ class TermSession(
         // 协议已由徽标标识，展示时去掉它。防御性地允许重复与多余空白/点。
         private val MOSH_PREFIX = Regex("^(?:\\[mosh][\\s.·]*)+", RegexOption.IGNORE_CASE)
 
-        /** 组合最终展示标题（见 [displayTitle] 语义）。 */
-        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, prefix: String?): String {
-            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        /** 组合最终展示标题（见 [displayTitle] 语义）。[mark] 为复制会话的不重复标记，附加在最末以区分同源会话。 */
+        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, prefix: String?, mark: String? = null): String {
+            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return appendMark(it, mark) }
             val base = if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
             val p = prefix?.trim()?.takeIf { it.isNotEmpty() }
-            return if (p != null) "$p $base" else base
+            return appendMark(if (p != null) "$p $base" else base, mark)
         }
+
+        private fun appendMark(t: String, mark: String?) = if (mark.isNullOrBlank()) t else "$t $mark"
     }
 }
 
@@ -72,11 +76,25 @@ class SessionManager(context: Context) {
     private val _sessions = MutableStateFlow<List<TermSession>>(emptyList())
     val sessions: StateFlow<List<TermSession>> = _sessions.asStateFlow()
 
-    /** 为主机新建一个会话（传输在首次 attach 到已测量的 View 时才真正 start）。[jumpHost] 为已解析的跳板机。 */
-    fun open(host: Host, jumpHost: Host? = null): TermSession {
-        val title = MutableStateFlow(host.displayName)
-        val customTitle = MutableStateFlow<String?>(null)
-        val titlePrefix = MutableStateFlow<String?>(null)
+    /**
+     * 为主机新建一个会话（传输在首次 attach 到已测量的 View 时才真正 start）。[jumpHost] 为已解析的跳板机。
+     *
+     * 标题默认：前缀=连接名（[Host.label]，空则无前缀），动态标题基座=`user@host`（不用 displayName，
+     * 否则有 label 时前缀与基座重复成 "prod prod"）；shell 上报 OSC 标题后基座被替换。
+     *
+     * 复制（[carryFrom] 非空）：沿用来源会话当前的自定义标题与前缀，并生成一个同主机内不重复的标记
+     * （如 "(2)"）附加在标题末尾，避免两个同源会话看起来一模一样。
+     */
+    fun open(host: Host, jumpHost: Host? = null, carryFrom: TermSession? = null): TermSession {
+        val baseTitle = baseTitleOf(host)
+        val initialPrefix = if (carryFrom != null) carryFrom.titlePrefix.value
+            else host.label.trim().ifBlank { null }
+        val initialCustom = carryFrom?.customTitle?.value
+        val mark = if (carryFrom != null) nextCopyMark(host.id) else null
+
+        val title = MutableStateFlow(baseTitle)
+        val customTitle = MutableStateFlow(initialCustom)
+        val titlePrefix = MutableStateFlow(initialPrefix)
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
         val controller = TerminalController(
@@ -90,8 +108,9 @@ class SessionManager(context: Context) {
         else SshTransport(host, appContext, jumpHost, onLatency = { latency.value = it })
         val session = TerminalSession(transport, 2000, controller)
         val displayTitle = combine(title, customTitle, titlePrefix) { raw, custom, prefix ->
-            TermSession.composeTitle(host.useMosh, raw, custom, prefix)
-        }.stateIn(scope, SharingStarted.Eagerly, host.displayName)
+            TermSession.composeTitle(host.useMosh, raw, custom, prefix, mark)
+        }.stateIn(scope, SharingStarted.Eagerly,
+            TermSession.composeTitle(host.useMosh, baseTitle, initialCustom, initialPrefix, mark))
         val ts = TermSession(
             id = UUID.randomUUID().toString(),
             host = host,
@@ -103,10 +122,29 @@ class SessionManager(context: Context) {
             displayTitle = displayTitle,
             alive = alive.asStateFlow(),
             latency = latency.asStateFlow(),
+            copyMark = mark,
             startedAt = System.currentTimeMillis(),
         )
         _sessions.update { it + ts }
         return ts
+    }
+
+    /** 动态标题基座（OSC 上报前）：优先 `user@host`；缺 host 回落 displayName、缺 user 只用 host。 */
+    private fun baseTitleOf(host: Host): String = when {
+        host.host.isBlank() -> host.displayName
+        host.username.isBlank() -> host.host
+        else -> "${host.username}@${host.host}"
+    }
+
+    /** 复制会话标记 "(n)"：在同一主机现有会话已用标记中取未占用的最小 n≥2（未标记会话隐含为 1）。 */
+    private fun nextCopyMark(hostId: String): String {
+        val used = _sessions.value
+            .filter { it.host.id == hostId }
+            .mapNotNull { it.copyMark?.trim()?.removeSurrounding("(", ")")?.toIntOrNull() }
+            .toSet()
+        var n = 2
+        while (n in used) n++
+        return "($n)"
     }
 
     fun get(id: String): TermSession? = _sessions.value.firstOrNull { it.id == id }

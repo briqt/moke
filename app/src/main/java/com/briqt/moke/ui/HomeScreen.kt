@@ -111,6 +111,7 @@ fun HomeScreen(
     onReorderHosts: (List<Host>) -> Unit,
     onOpenSession: (String) -> Unit,
     onCloseSession: (String) -> Unit,
+    onDuplicateSession: (String) -> Unit,
     onReorderSessions: (List<String>) -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -160,7 +161,7 @@ fun HomeScreen(
     ) { padding ->
         when (tab) {
             HomeTab.Connections -> ConnectionsContent(padding, hosts, sort, onSort, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost, onReorderHosts)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, onOpenSession, onCloseSession, onReorderSessions)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
         }
     }
@@ -417,6 +418,7 @@ private fun SessionsContent(
     sessions: List<TermSession>,
     onOpen: (String) -> Unit,
     onClose: (String) -> Unit,
+    onDuplicate: (String) -> Unit,
     onReorder: (List<String>) -> Unit,
 ) {
     if (sessions.isEmpty()) {
@@ -436,7 +438,7 @@ private fun SessionsContent(
         modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
         contentPadding = PaddingValues(vertical = 12.dp),
     ) { ts, dragging, handle ->
-        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, dragHandle = handle, dragging = dragging)
+        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
     }
 }
 
@@ -446,6 +448,7 @@ private fun SessionCard(
     ts: TermSession,
     onOpen: () -> Unit,
     onClose: () -> Unit,
+    onDuplicate: () -> Unit,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
 ) {
@@ -506,6 +509,10 @@ private fun SessionCard(
                             else -> {}
                         }
                     }
+                }
+                // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题/前缀并加不重复标记。
+                IconButton(onClick = onDuplicate) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = stringResource(R.string.duplicate_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = onClose) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)

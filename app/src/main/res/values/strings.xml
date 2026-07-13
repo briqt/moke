@@ -35,6 +35,7 @@
     <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
+    <string name="duplicate_session">Duplicate session</string>
     <string name="session_set_title">Set title</string>
     <string name="session_set_prefix">Title prefix</string>
     <string name="session_title_hint">Custom title (empty restores the dynamic title)</string>

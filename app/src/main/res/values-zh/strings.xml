@@ -35,6 +35,7 @@
     <string name="empty_sessions_hint">在「连接」里选择一台主机开始</string>
     <string name="session_ended_short">已结束</string>
     <string name="close_session">关闭会话</string>
+    <string name="duplicate_session">复制会话</string>
     <string name="session_set_title">修改标题</string>
     <string name="session_set_prefix">标题前缀</string>
     <string name="session_title_hint">自定义标题（留空则恢复动态标题）</string>
