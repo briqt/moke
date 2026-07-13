@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文（简体）。默认/兜底为 values/strings.xml（英文）。 -->
+<resources>
+    <string name="app_name">Moke</string>
+    <string name="app_title">Moke · 墨客</string>
+
+    <!-- 通用动作 -->
+    <string name="action_back">返回</string>
+    <string name="action_more">更多</string>
+    <string name="action_delete">删除</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_save">保存</string>
+    <string name="action_retry">重试</string>
+    <string name="action_close">关闭</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_connections">连接</string>
+    <string name="nav_sessions">会话</string>
+    <string name="nav_settings">设置</string>
+
+    <!-- 连接 / 主机列表 -->
+    <string name="add_host">添加主机</string>
+    <string name="empty_hosts_title">还没有主机</string>
+    <string name="empty_hosts_hint">点右下角 + 添加一台 SSH 服务器</string>
+    <string name="sort_label">排序</string>
+    <string name="ungrouped">未分组</string>
+    <string name="drag_to_reorder">拖动排序</string>
+    <string name="host_edit">编辑</string>
+    <string name="host_duplicate">创建副本</string>
+    <string name="host_copy_command">复制连接命令</string>
+    <string name="host_copied">已复制：%1$s</string>
+
+    <!-- 会话 -->
+    <string name="empty_sessions_title">暂无会话</string>
+    <string name="empty_sessions_hint">在「连接」里选择一台主机开始</string>
+    <string name="session_ended_short">已结束</string>
+    <string name="close_session">关闭会话</string>
+
+    <!-- 排序方式 -->
+    <string name="sort_group">分组</string>
+    <string name="sort_name">名称</string>
+    <string name="sort_recent">最近连接</string>
+    <string name="sort_manual">手动</string>
+
+    <!-- 设置菜单 -->
+    <string name="menu_appearance">外观</string>
+    <string name="menu_appearance_sub">字体 · 配色 · 字号 · 光标</string>
+    <string name="menu_about">关于</string>
+    <string name="menu_about_sub">版本 · 开源许可</string>
+    <string name="menu_language">语言</string>
+
+    <!-- 语言选择 -->
+    <string name="lang_system">跟随系统</string>
+    <string name="lang_zh">中文</string>
+    <string name="lang_en">English</string>
+
+    <!-- 主机编辑 -->
+    <string name="host_edit_title">编辑主机</string>
+    <string name="field_name">名称（可选）</string>
+    <string name="field_group">分组（可选）</string>
+    <string name="field_host">主机地址</string>
+    <string name="field_port">端口</string>
+    <string name="field_username">用户名</string>
+    <string name="field_password">密码</string>
+    <string name="auth_key">私钥</string>
+    <string name="field_private_key">私钥（PEM，粘贴内容）</string>
+    <string name="field_passphrase">私钥口令（可选）</string>
+    <string name="label_protocol">协议</string>
+    <string name="field_jump_host">跳板机（可选）</string>
+    <string name="jump_none">无（直连）</string>
+    <string name="field_login_command">登录后自动执行（可选）</string>
+    <string name="login_command_hint">如 cd /var/www &amp;&amp; ls</string>
+
+    <!-- 终端 -->
+    <string name="session_ended">会话已结束</string>
+    <string name="reconnect">重新连接</string>
+    <string name="offline">离线</string>
+    <string name="font_size">字号</string>
+    <string name="decrease">减小</string>
+    <string name="increase">增大</string>
+    <string name="reset_font_size">恢复默认字号</string>
+    <string name="hide_extra_keys">隐藏底部快捷键</string>
+    <string name="show_extra_keys">显示底部快捷键</string>
+    <string name="reset_default">恢复默认</string>
+    <string name="zoom_hint">字号 %1$ssp · %2$d%%</string>
+
+    <!-- 附加键 / 文本段 -->
+    <string name="key_text">文本</string>
+    <string name="composer_title">文本段输入</string>
+    <string name="composer_field">要发送的内容</string>
+    <string name="composer_clear">清空</string>
+    <string name="composer_send">发送</string>
+    <string name="composer_send_enter">发送并回车</string>
+
+    <!-- 外观 -->
+    <string name="section_font">字体</string>
+    <string name="section_typography">排版</string>
+    <string name="section_colors">配色</string>
+    <string name="section_cursor">光标</string>
+    <string name="primary_font">主字体</string>
+    <string name="fallback_font">中文 / 回退字体</string>
+    <string name="font_manage_title">字体管理</string>
+    <string name="font_manage_sub">下载更多字体 · 设置主字体 / 回退</string>
+    <string name="line_spacing">行距</string>
+    <string name="letter_spacing">字间距</string>
+    <string name="color_scheme">配色方案</string>
+    <string name="cursor_block">方块</string>
+    <string name="cursor_underline">下划线</string>
+    <string name="cursor_bar">竖线</string>
+    <string name="cursor_blink">光标闪烁</string>
+    <string name="reset_done">已恢复默认</string>
+    <string name="undo">撤销</string>
+    <string name="fallback_none">无（系统兜底）</string>
+
+    <!-- 字体能力标签 -->
+    <string name="tag_bundled">内置</string>
+    <string name="tag_local">本地</string>
+    <string name="tag_cjk">含中文</string>
+    <string name="tag_ligature">连字</string>
+
+    <!-- 字体管理 -->
+    <string name="fonts_title">字体</string>
+    <string name="fonts_desc">主字体决定 Latin 观感；回退字体补 Latin 缺失的字形（如中文）。选一款含中文的作回退，即可漂亮显示中文。</string>
+    <string name="font_upload">上传本地字体（TTF / OTF）</string>
+    <string name="font_importing">导入中…</string>
+    <string name="font_imported">已导入「%1$s」</string>
+    <string name="role_primary">主字体</string>
+    <string name="role_fallback">回退</string>
+    <string name="font_download">下载</string>
+    <string name="font_downloading">下载中 %1$d%%</string>
+
+    <!-- 关于 -->
+    <string name="about_title">关于</string>
+    <string name="app_tagline">Android 原生 SSH / mosh 终端</string>
+    <string name="label_version">版本</string>
+    <string name="check_update">检查更新</string>
+    <string name="up_to_date">已是最新</string>
+    <string name="new_version">新版 %1$s</string>
+    <string name="retry_with_msg">重试（%1$s）</string>
+    <string name="licenses_header">开源与许可</string>
+    <string name="licenses_body">本应用基于多个开源项目构建，完整许可清单见项目 THIRD_PARTY_NOTICES。</string>
+
+    <!-- ViewModel / 数据 -->
+    <string name="license_local">本地</string>
+    <string name="note_local_import">本地导入</string>
+    <string name="duplicate_suffix">副本</string>
+    <string name="download_failed">下载失败</string>
+    <string name="import_failed">导入失败</string>
+    <string name="font_default_name">字体</string>
+    <string name="unnamed">未命名</string>
+
+    <!-- 更新检查 -->
+    <string name="update_none">暂无公开发布</string>
+    <string name="update_parse_failed">无法解析版本</string>
+    <string name="update_timeout">超时</string>
+
+    <!-- 后台会话通知 -->
+    <string name="notif_channel_name">会话保持</string>
+    <string name="notif_channel_desc">在后台保持活动的 SSH / mosh 会话</string>
+    <string name="notif_sessions_active">%1$d 个会话在后台保持</string>
+
+    <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
+    <string name="ssh_via_jump">[moke] 经跳板机 %1$s 连接…</string>
+    <string name="ssh_connect_failed">[SSH 连接失败: %1$s]</string>
+    <string name="mosh_unavailable">[mosh 不可用] 此安装包未内置 mosh native 组件（当前仅 arm64-v8a）。请改用 SSH 协议，或安装含 mosh 的版本。</string>
+    <string name="mosh_bootstrapping">[moke] 正在通过 SSH 引导 mosh-server…</string>
+    <string name="mosh_client_starting">[moke] mosh-server UDP 端口 %1$d，启动 mosh-client…</string>
+    <string name="mosh_connect_failed">[mosh 连接失败: %1$s]</string>
+    <string name="hostkey_first_seen">首次连接 %1$s，已记录主机指纹 %2$s</string>
+    <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确为服务器变更，请删除该主机后重建。</string>
+</resources>

@@ -31,9 +31,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeMono
 import kotlinx.coroutines.delay
 
@@ -93,8 +95,10 @@ fun ExtraKeys(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { key ->
                         val active = key is ExtraKey.Mod && ((key.ctrl && ctrlOn) || (!key.ctrl && altOn))
+                        // 「文本」段入口键按语言本地化；其余键位（ESC/TAB/箭头等）为通用符号，保持原样。
+                        val label = if (key is ExtraKey.Action && key.id == "composer") stringResource(R.string.key_text) else key.label
                         KeyCap(
-                            label = key.label,
+                            label = label,
                             active = active,
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -156,28 +160,23 @@ fun TextBlockComposer(
                 .padding(bottom = 8.dp)
                 .navigationBarsPadding()
                 .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("文本段输入", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "编辑好整段再一次性发送——适合长命令 / 多行粘贴。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // 限定输入框高度上限：内容再多也在框内滚动，不会把下方的发送按钮顶出屏幕。
+            Text(stringResource(R.string.composer_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            // 限定输入框高度：默认 2 行起（不撑大空白），内容多则在框内滚动到上限，不顶出发送按钮。
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 108.dp, max = 200.dp).focusRequester(focusRequester),
-                minLines = 3,
-                label = { Text("要发送的内容") },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 200.dp).focusRequester(focusRequester),
+                minLines = 2,
+                label = { Text(stringResource(R.string.composer_field)) },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onValueChange("") }) { Text("清空") }
+                TextButton(onClick = { onValueChange("") }) { Text(stringResource(R.string.composer_clear)) }
                 Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = { onSend(value, false) }) { Text("发送") }
-                Button(onClick = { onSend(value, true) }) { Text("发送并回车") }
+                OutlinedButton(onClick = { onSend(value, false) }) { Text(stringResource(R.string.composer_send)) }
+                Button(onClick = { onSend(value, true) }) { Text(stringResource(R.string.composer_send_enter)) }
             }
         }
     }

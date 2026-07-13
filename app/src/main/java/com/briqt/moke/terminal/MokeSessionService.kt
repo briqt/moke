@@ -67,7 +67,7 @@ class MokeSessionService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Moke")
-            .setContentText("$count 个会话在后台保持")
+            .setContentText(getString(R.string.notif_sessions_active, count))
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(
@@ -81,8 +81,8 @@ class MokeSessionService : Service() {
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "会话保持", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "在后台保持活动的 SSH / mosh 会话"
+            val ch = NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                description = getString(R.string.notif_channel_desc)
                 setShowBadge(false)
             }
             notificationManager().createNotificationChannel(ch)

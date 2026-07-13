@@ -45,10 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.briqt.moke.R
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.ui.theme.MokeMono
@@ -209,15 +211,15 @@ fun TerminalScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("会话已结束", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.session_ended), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = onReconnect) {
                                 Icon(Icons.Filled.Refresh, contentDescription = null)
-                                Text("  重新连接")
+                                Text("  " + stringResource(R.string.reconnect))
                             }
                             TextButton(onClick = onClose) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
-                                Text("  关闭")
+                                Text("  " + stringResource(R.string.action_close))
                             }
                         }
                     }
@@ -290,7 +292,7 @@ private fun TerminalTopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -313,7 +315,7 @@ private fun TerminalTopBar(
                     )
                     Text("· $protocol", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     when {
-                        !alive -> Text("· 离线", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        !alive -> Text("· " + stringResource(R.string.offline), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         latencyMs != null -> Text(
                             "· $latencyMs ms",
                             fontFamily = MokeMono,
@@ -331,7 +333,7 @@ private fun TerminalTopBar(
             var menuOpen by remember { mutableStateOf(false) }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 // offset 把菜单右缘推到贴近屏幕右侧（抵消锚点内边距造成的缝隙）。
                 DropdownMenu(
@@ -344,23 +346,23 @@ private fun TerminalTopBar(
                         modifier = Modifier.padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("字号", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                        Text(stringResource(R.string.font_size), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                         IconButton(onClick = { onFontSize(fontSizeSp - 0.5f) }) {
-                            Icon(Icons.Filled.Remove, contentDescription = "减小", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary)
                         }
                         Text(fmtFontSize(fontSizeSp), fontFamily = MokeMono, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width(52.dp))
                         IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }) {
-                            Icon(Icons.Filled.Add, contentDescription = "增大", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                     DropdownMenuItem(
-                        text = { Text("恢复默认字号") },
+                        text = { Text(stringResource(R.string.reset_font_size)) },
                         leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
                         onClick = { menuOpen = false; onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text(if (extraKeysVisible) "隐藏底部快捷键" else "显示底部快捷键") },
+                        text = { Text(if (extraKeysVisible) stringResource(R.string.hide_extra_keys) else stringResource(R.string.show_extra_keys)) },
                         leadingIcon = {
                             Icon(
                                 if (extraKeysVisible) Icons.Filled.KeyboardHide else Icons.Filled.Keyboard,
@@ -397,10 +399,10 @@ private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier =
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("字号 ${fmtFontSize(sp)}sp · $pct%", fontFamily = MokeMono, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.zoom_hint, fmtFontSize(sp), pct), fontFamily = MokeMono, fontWeight = FontWeight.Medium)
             if (sp != TerminalController.DEFAULT_FONT_SIZE_SP) {
                 TextButton(onClick = onResetDefault) {
-                    Text("恢复默认", color = MaterialTheme.colorScheme.inversePrimary)
+                    Text(stringResource(R.string.reset_default), color = MaterialTheme.colorScheme.inversePrimary)
                 }
             }
         }

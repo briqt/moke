@@ -1,5 +1,6 @@
 package com.briqt.moke.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -30,10 +31,12 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -46,11 +49,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -64,10 +70,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.add
+import com.briqt.moke.LocaleManager
+import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostSort
 import com.briqt.moke.terminal.TermSession
@@ -104,9 +115,9 @@ fun HomeScreen(
                 title = {
                     Text(
                         when (tab) {
-                            HomeTab.Connections -> "Moke · 墨客"
-                            HomeTab.Sessions -> "会话"
-                            HomeTab.Settings -> "设置"
+                            HomeTab.Connections -> stringResource(R.string.app_title)
+                            HomeTab.Sessions -> stringResource(R.string.nav_sessions)
+                            HomeTab.Settings -> stringResource(R.string.nav_settings)
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -121,20 +132,22 @@ fun HomeScreen(
             )
         },
         bottomBar = {
-            // 略压高度（默认 80 → 72）扩大可见区，图标+文字不变。
+            // 略压高度（默认 80 → 72）扩大可见区。在系统底部 inset 之上再叠 6dp 顶部内边距，
+            // 让图标+文字整体下移一点、不贴底栏上边界。
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.height(72.dp),
+                windowInsets = NavigationBarDefaults.windowInsets.add(WindowInsets(top = 6.dp)),
             ) {
-                NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, "连接", null, onTab)
-                NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, "会话", sessions.size.takeIf { it > 0 }, onTab)
-                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, "设置", null, onTab)
+                NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, onTab)
+                NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, onTab)
+                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab)
             }
         },
         floatingActionButton = {
             if (tab == HomeTab.Connections) {
                 FloatingActionButton(onClick = onAddHost) {
-                    Icon(Icons.Filled.Add, contentDescription = "添加主机")
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_host))
                 }
             }
         },
@@ -187,8 +200,8 @@ private fun ConnectionsContent(
         EmptyState(
             padding = padding,
             icon = Icons.Filled.Dns,
-            title = "还没有主机",
-            hint = "点右下角 + 添加一台 SSH 服务器",
+            title = stringResource(R.string.empty_hosts_title),
+            hint = stringResource(R.string.empty_hosts_hint),
         )
         return
     }
@@ -203,9 +216,9 @@ private fun ConnectionsContent(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.sort_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HostSort.entries.forEach { s ->
-                    FilterChip(selected = sort == s, onClick = { onSort(s) }, label = { Text(s.label) })
+                    FilterChip(selected = sort == s, onClick = { onSort(s) }, label = { Text(stringResource(s.labelRes)) })
                 }
             }
         }
@@ -230,8 +243,8 @@ private fun ConnectionsContent(
                 when (sort) {
                     HostSort.GROUP -> {
                         // 未分组排在最后，其余按组名字母序；组内按名称
-                        val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED } }
-                            .toSortedMap(compareBy({ it == UNGROUPED }, { it }))
+                        val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED_KEY } }
+                            .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
                         groups.forEach { (g, list) ->
                             item(key = "hdr_$g") { GroupHeader(g) }
                             items(list.sortedBy { it.displayName.lowercase() }, key = { it.id }) { host ->
@@ -255,12 +268,14 @@ private fun ConnectionsContent(
     }
 }
 
-private const val UNGROUPED = "未分组"
+// 未分组分桶的哨兵键（不直接展示，展示时本地化为 R.string.ungrouped）。
+private const val UNGROUPED_KEY = " __ungrouped__"
 
 @Composable
 private fun GroupHeader(name: String) {
+    val display = if (name == UNGROUPED_KEY) stringResource(R.string.ungrouped) else name
     Text(
-        name,
+        display,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.primary,
@@ -295,7 +310,7 @@ private fun HostCard(
                 Box(modifier = dragHandle) {
                     Icon(
                         Icons.Filled.DragHandle,
-                        contentDescription = "拖动排序",
+                        contentDescription = stringResource(R.string.drag_to_reorder),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     )
@@ -316,32 +331,32 @@ private fun HostCard(
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
-                        text = { Text("编辑") },
+                        text = { Text(stringResource(R.string.host_edit)) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                         onClick = { menuOpen = false; onEdit() },
                     )
                     DropdownMenuItem(
-                        text = { Text("创建副本") },
+                        text = { Text(stringResource(R.string.host_duplicate)) },
                         leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
                         onClick = { menuOpen = false; onDuplicate() },
                     )
                     DropdownMenuItem(
-                        text = { Text("复制连接命令") },
+                        text = { Text(stringResource(R.string.host_copy_command)) },
                         leadingIcon = { Icon(Icons.Filled.Terminal, contentDescription = null) },
                         onClick = {
                             menuOpen = false
                             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             cm.setPrimaryClip(ClipData.newPlainText("moke", host.connectCommand))
-                            Toast.makeText(context, "已复制：${host.connectCommand}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.host_copied, host.connectCommand), Toast.LENGTH_SHORT).show()
                         },
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                         onClick = { menuOpen = false; onDelete() },
                     )
@@ -381,8 +396,8 @@ private fun SessionsContent(
         EmptyState(
             padding = padding,
             icon = Icons.Filled.Terminal,
-            title = "暂无会话",
-            hint = "在「连接」里选择一台主机开始",
+            title = stringResource(R.string.empty_sessions_title),
+            hint = stringResource(R.string.empty_sessions_hint),
         )
         return
     }
@@ -423,7 +438,7 @@ private fun SessionCard(
                 Box(modifier = dragHandle) {
                     Icon(
                         Icons.Filled.DragHandle,
-                        contentDescription = "拖动排序",
+                        contentDescription = stringResource(R.string.drag_to_reorder),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     )
@@ -438,14 +453,14 @@ private fun SessionCard(
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(
-                    "${ts.host.username}@${ts.host.host}:${ts.host.port}" + if (!alive) "  · 已结束" else "",
+                    "${ts.host.username}@${ts.host.host}:${ts.host.port}" + if (!alive) "  · " + stringResource(R.string.session_ended_short) else "",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = MokeMono,
                 )
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = "关闭会话", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -455,13 +470,66 @@ private fun SessionCard(
 
 @Composable
 private fun SettingsMenuContent(padding: PaddingValues, onOpenAppearance: () -> Unit, onOpenAbout: () -> Unit) {
+    val context = LocalContext.current
+    var langDialog by remember { mutableStateOf(false) }
+    val langTag = LocaleManager.currentTag(context)
+    val langLabel = when (langTag) {
+        LocaleManager.ZH -> stringResource(R.string.lang_zh)
+        LocaleManager.EN -> stringResource(R.string.lang_en)
+        else -> stringResource(R.string.lang_system)
+    }
     Column(
         modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        MenuCard(Icons.Filled.Palette, "外观", "字体 · 配色 · 字号 · 光标", onOpenAppearance)
-        MenuCard(Icons.Filled.Info, "关于", "版本 · 开源许可", onOpenAbout)
+        MenuCard(Icons.Filled.Palette, stringResource(R.string.menu_appearance), stringResource(R.string.menu_appearance_sub), onOpenAppearance)
+        MenuCard(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel) { langDialog = true }
+        MenuCard(Icons.Filled.Info, stringResource(R.string.menu_about), stringResource(R.string.menu_about_sub), onOpenAbout)
     }
+
+    if (langDialog) {
+        LanguageDialog(
+            current = langTag,
+            onDismiss = { langDialog = false },
+            onPick = { tag ->
+                langDialog = false
+                if (tag != langTag) {
+                    LocaleManager.setTag(context, tag)
+                    (context as? Activity)?.recreate()   // 重建 Activity → attachBaseContext 重新包裹语言
+                }
+            },
+        )
+    }
+}
+
+/** 语言选择弹窗：跟随系统 / 中文 / English。 */
+@Composable
+private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val options = listOf(
+        LocaleManager.SYSTEM to stringResource(R.string.lang_system),
+        LocaleManager.ZH to stringResource(R.string.lang_zh),
+        LocaleManager.EN to stringResource(R.string.lang_en),
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.menu_language)) },
+        text = {
+            Column {
+                options.forEach { (tag, label) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(tag) }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = current == tag, onClick = { onPick(tag) })
+                        Text(label, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
 }
 
 @Composable

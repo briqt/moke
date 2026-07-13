@@ -163,7 +163,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             fallbackId = fallbackFontId,
             fonts = fontCatalog,
             states = fontStates,
-            resolveTypeface = vm.fonts::resolveTypeface,
             onDownload = { vm.downloadFont(it) },
             onDelete = { vm.deleteFont(it) },
             onSetPrimary = { vm.setPrimaryFont(it) },

@@ -1,4 +1,171 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 默认语言 = English（兜底）；中文见 values-zh/strings.xml。 -->
 <resources>
     <string name="app_name">Moke</string>
+    <string name="app_title">Moke · 墨客</string>
+
+    <!-- 通用动作 -->
+    <string name="action_back">Back</string>
+    <string name="action_more">More</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_close">Close</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_connections">Hosts</string>
+    <string name="nav_sessions">Sessions</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- 连接 / 主机列表 -->
+    <string name="add_host">Add host</string>
+    <string name="empty_hosts_title">No hosts yet</string>
+    <string name="empty_hosts_hint">Tap + to add an SSH server</string>
+    <string name="sort_label">Sort</string>
+    <string name="ungrouped">Ungrouped</string>
+    <string name="drag_to_reorder">Drag to reorder</string>
+    <string name="host_edit">Edit</string>
+    <string name="host_duplicate">Duplicate</string>
+    <string name="host_copy_command">Copy connect command</string>
+    <string name="host_copied">Copied: %1$s</string>
+
+    <!-- 会话 -->
+    <string name="empty_sessions_title">No sessions</string>
+    <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
+    <string name="session_ended_short">ended</string>
+    <string name="close_session">Close session</string>
+
+    <!-- 排序方式 -->
+    <string name="sort_group">Group</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_recent">Recent</string>
+    <string name="sort_manual">Manual</string>
+
+    <!-- 设置菜单 -->
+    <string name="menu_appearance">Appearance</string>
+    <string name="menu_appearance_sub">Font · Colors · Size · Cursor</string>
+    <string name="menu_about">About</string>
+    <string name="menu_about_sub">Version · Licenses</string>
+    <string name="menu_language">Language</string>
+
+    <!-- 语言选择 -->
+    <string name="lang_system">System default</string>
+    <string name="lang_zh">中文</string>
+    <string name="lang_en">English</string>
+
+    <!-- 主机编辑 -->
+    <string name="host_edit_title">Edit host</string>
+    <string name="field_name">Name (optional)</string>
+    <string name="field_group">Group (optional)</string>
+    <string name="field_host">Host</string>
+    <string name="field_port">Port</string>
+    <string name="field_username">Username</string>
+    <string name="field_password">Password</string>
+    <string name="auth_key">Private key</string>
+    <string name="field_private_key">Private key (PEM, paste contents)</string>
+    <string name="field_passphrase">Key passphrase (optional)</string>
+    <string name="label_protocol">Protocol</string>
+    <string name="field_jump_host">Jump host (optional)</string>
+    <string name="jump_none">None (direct)</string>
+    <string name="field_login_command">Run on login (optional)</string>
+    <string name="login_command_hint">e.g. cd /var/www &amp;&amp; ls</string>
+
+    <!-- 终端 -->
+    <string name="session_ended">Session ended</string>
+    <string name="reconnect">Reconnect</string>
+    <string name="offline">offline</string>
+    <string name="font_size">Font size</string>
+    <string name="decrease">Decrease</string>
+    <string name="increase">Increase</string>
+    <string name="reset_font_size">Reset font size</string>
+    <string name="hide_extra_keys">Hide shortcut keys</string>
+    <string name="show_extra_keys">Show shortcut keys</string>
+    <string name="reset_default">Reset</string>
+    <string name="zoom_hint">Size %1$s sp · %2$d%%</string>
+
+    <!-- 附加键 / 文本段 -->
+    <string name="key_text">Text</string>
+    <string name="composer_title">Text block</string>
+    <string name="composer_field">Text to send</string>
+    <string name="composer_clear">Clear</string>
+    <string name="composer_send">Send</string>
+    <string name="composer_send_enter">Send + Enter</string>
+
+    <!-- 外观 -->
+    <string name="section_font">Font</string>
+    <string name="section_typography">Typography</string>
+    <string name="section_colors">Colors</string>
+    <string name="section_cursor">Cursor</string>
+    <string name="primary_font">Primary font</string>
+    <string name="fallback_font">Fallback font</string>
+    <string name="font_manage_title">Manage fonts</string>
+    <string name="font_manage_sub">Download fonts · set primary / fallback</string>
+    <string name="line_spacing">Line spacing</string>
+    <string name="letter_spacing">Letter spacing</string>
+    <string name="color_scheme">Color scheme</string>
+    <string name="cursor_block">Block</string>
+    <string name="cursor_underline">Underline</string>
+    <string name="cursor_bar">Bar</string>
+    <string name="cursor_blink">Cursor blink</string>
+    <string name="reset_done">Reset to defaults</string>
+    <string name="undo">Undo</string>
+    <string name="fallback_none">None (system default)</string>
+
+    <!-- 字体能力标签 -->
+    <string name="tag_bundled">Bundled</string>
+    <string name="tag_local">Local</string>
+    <string name="tag_cjk">CJK</string>
+    <string name="tag_ligature">Ligatures</string>
+
+    <!-- 字体管理 -->
+    <string name="fonts_title">Fonts</string>
+    <string name="fonts_desc">The primary font sets the Latin look; the fallback fills glyphs it lacks (such as Chinese). Pick a CJK font as the fallback for good-looking Chinese.</string>
+    <string name="font_upload">Upload local font (TTF / OTF)</string>
+    <string name="font_importing">Importing…</string>
+    <string name="font_imported">Imported \"%1$s\"</string>
+    <string name="role_primary">Primary</string>
+    <string name="role_fallback">Fallback</string>
+    <string name="font_download">Download</string>
+    <string name="font_downloading">Downloading %1$d%%</string>
+
+    <!-- 关于 -->
+    <string name="about_title">About</string>
+    <string name="app_tagline">Native SSH / mosh terminal for Android</string>
+    <string name="label_version">Version</string>
+    <string name="check_update">Check for updates</string>
+    <string name="up_to_date">Up to date</string>
+    <string name="new_version">Update to %1$s</string>
+    <string name="retry_with_msg">Retry (%1$s)</string>
+    <string name="licenses_header">Open source &amp; licenses</string>
+    <string name="licenses_body">Moke is built on several open-source projects; see the project THIRD_PARTY_NOTICES for the full license list.</string>
+
+    <!-- ViewModel / 数据 -->
+    <string name="license_local">Local</string>
+    <string name="note_local_import">Imported locally</string>
+    <string name="duplicate_suffix">copy</string>
+    <string name="download_failed">Download failed</string>
+    <string name="import_failed">Import failed</string>
+    <string name="font_default_name">Font</string>
+    <string name="unnamed">Unnamed</string>
+
+    <!-- 更新检查 -->
+    <string name="update_none">No public releases</string>
+    <string name="update_parse_failed">Could not parse version</string>
+    <string name="update_timeout">Timed out</string>
+
+    <!-- 后台会话通知 -->
+    <string name="notif_channel_name">Session keep-alive</string>
+    <string name="notif_channel_desc">Keeps SSH / mosh sessions alive in the background</string>
+    <string name="notif_sessions_active">%1$d session(s) kept in the background</string>
+
+    <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
+    <string name="ssh_via_jump">[moke] Connecting via jump host %1$s…</string>
+    <string name="ssh_connect_failed">[SSH failed: %1$s]</string>
+    <string name="mosh_unavailable">[mosh unavailable] This build has no bundled mosh native component (arm64-v8a only). Use SSH instead, or install a build with mosh.</string>
+    <string name="mosh_bootstrapping">[moke] Bootstrapping mosh-server over SSH…</string>
+    <string name="mosh_client_starting">[moke] mosh-server UDP port %1$d, starting mosh-client…</string>
+    <string name="mosh_connect_failed">[mosh failed: %1$s]</string>
+    <string name="hostkey_first_seen">First connection to %1$s; host fingerprint saved: %2$s</string>
+    <string name="hostkey_changed">⚠️ Host key changed!\n  saved:   %1$s\n  current: %2$s\nThis may be a man-in-the-middle attack; connection rejected. If the server really changed, delete this host and re-add it.</string>
 </resources>

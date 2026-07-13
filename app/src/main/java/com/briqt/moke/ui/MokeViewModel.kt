@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.briqt.moke.MokeApplication
+import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.data.HostSort
@@ -35,6 +36,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val store = HostStore(app)
     private val settings = SettingsStore(app)
     val fonts = FontRepository(app)
+
+    /** 取本地化字符串（随应用语言）。 */
+    private fun str(id: Int, vararg args: Any): String = getApplication<Application>().getString(id, *args)
 
     /** 多会话管理器：Application 作用域单例，跨导航/Activity 存活，配合前台服务后台保活。 */
     val sessions = (app as MokeApplication).sessions
@@ -79,9 +83,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .map { users ->
             FontCatalog.all + users.map { uf ->
                 FontSpec(
-                    id = uf.id, name = uf.name, nameZh = uf.name, license = "本地",
+                    id = uf.id, name = uf.name, nameZh = uf.name, license = str(R.string.license_local),
                     cjk = false, bundled = false, url = null, archive = false,
-                    entryHint = "", approxBytes = 0, userUploaded = true, note = "本地导入",
+                    entryHint = "", approxBytes = 0, userUploaded = true, note = str(R.string.note_local_import),
                 )
             }
         }
@@ -120,7 +124,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun duplicate(host: Host) = viewModelScope.launch {
         val copy = host.copy(
             id = java.util.UUID.randomUUID().toString(),
-            label = (host.label.ifBlank { host.displayName }) + " 副本",
+            label = (host.label.ifBlank { host.displayName }) + " " + str(R.string.duplicate_suffix),
             lastConnectedAt = 0L,
         )
         store.upsert(copy, hosts.value)
@@ -185,7 +189,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             _downloadStates.update { m ->
                 result.fold(
                     onSuccess = { m - id },   // 装好后移除瞬时态 → 由文件存在推导为「已装」
-                    onFailure = { m + (id to FontInstallState.Failed(it.message ?: "下载失败")) },
+                    onFailure = { m + (id to FontInstallState.Failed(it.message ?: str(R.string.download_failed))) },
                 )
             }
         }
@@ -198,7 +202,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         _importError.value = null
         fonts.importFont(uri).fold(
             onSuccess = { id -> settings.addUserFont(UserFont(id, name)); _importSuccess.value = name },
-            onFailure = { _importError.value = it.message ?: "导入失败" },
+            onFailure = { _importError.value = it.message ?: str(R.string.import_failed) },
         )
         _importing.value = false
     }
@@ -210,8 +214,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 if (c.moveToFirst()) c.getString(0) else null
             }
         }.getOrNull()
-        val raw = fromCursor ?: uri.lastPathSegment ?: "字体"
-        return raw.substringAfterLast('/').substringBeforeLast('.').ifBlank { "字体" }
+        val raw = fromCursor ?: uri.lastPathSegment ?: str(R.string.font_default_name)
+        return raw.substringAfterLast('/').substringBeforeLast('.').ifBlank { str(R.string.font_default_name) }
     }
 
     fun deleteFont(id: String) = viewModelScope.launch {

@@ -1,8 +1,5 @@
 package com.briqt.moke.ui
 
-import android.graphics.Typeface
-import android.widget.TextView
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,23 +34,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.briqt.moke.terminal.FontCatalog
+import com.briqt.moke.R
 import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.ui.theme.MokeMono
-
-private const val SAMPLE = "moke:~\$ ls -la  ● main\n墨客 · 你好世界 0123456789\n{} () []  != >= -> ::  ✓ ★ "
 
 private fun fmtSize(bytes: Long): String = when {
     bytes <= 0 -> ""
     bytes >= 1_000_000 -> "${bytes / 1_000_000} MB"
     else -> "${bytes / 1000} KB"
 }
+
+/** 当前 UI 是否中文（决定字体展示用中文名/说明还是英文名）。 */
+@Composable
+private fun isZh(): Boolean = LocalConfiguration.current.locales[0].language == "zh"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +61,6 @@ fun FontsScreen(
     fallbackId: String,
     fonts: List<FontSpec>,
     states: Map<String, FontInstallState>,
-    resolveTypeface: (String, String) -> Typeface,
     onDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
     onSetPrimary: (String) -> Unit,
@@ -75,8 +73,6 @@ fun FontsScreen(
     onClearImportSuccess: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val previewTf = remember(primaryId, fallbackId, states) { resolveTypeface(primaryId, fallbackId) }
-    val onSurfaceArgb = MaterialTheme.colorScheme.onSurface.toArgb()
     // 系统文件选择器：选本地 TTF/OTF 导入。用 */* 最大兼容（部分文件管理器不识别字体 MIME），导入时再校验。
     val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -103,13 +99,19 @@ fun FontsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("字体") },
+                title = {
+                    Text(
+                        stringResource(R.string.fonts_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
-                expandedHeight = 52.dp,
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -127,31 +129,8 @@ fun FontsScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
         ) {
             item {
-                // 实时预览：用合成后的 Typeface 渲染样张（Latin+中文+符号）
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceContainerLowest, RoundedCornerShape(12.dp))
-                        .padding(14.dp),
-                ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            TextView(ctx).apply {
-                                textSize = 15f
-                                setLineSpacing(6f, 1f)
-                            }
-                        },
-                        update = { tv ->
-                            tv.typeface = previewTf
-                            tv.setTextColor(onSurfaceArgb)
-                            tv.text = SAMPLE
-                        },
-                    )
-                }
-            }
-            item {
                 Text(
-                    "主字体决定 Latin 观感；回退字体补 Latin 缺失的字形（如中文）。选一款含中文的作回退，即可漂亮显示中文。",
+                    stringResource(R.string.fonts_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -169,16 +148,16 @@ fun FontsScreen(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
                             )
-                            Text("  导入中…")
+                            Text("  " + stringResource(R.string.font_importing))
                         } else {
-                            Text("上传本地字体（TTF / OTF）")
+                            Text(stringResource(R.string.font_upload))
                         }
                     }
                     if (importError != null) {
                         Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                     if (importSuccess != null) {
-                        Text("已导入「$importSuccess」", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.font_imported, importSuccess), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -209,6 +188,7 @@ private fun FontCard(
     onSetPrimary: () -> Unit,
     onSetFallback: () -> Unit,
 ) {
+    val zh = isZh()
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -216,7 +196,8 @@ private fun FontCard(
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(spec.nameZh, fontWeight = FontWeight.SemiBold)
+                    // 中文界面显示中文名，英文界面显示字体本名（英文）。
+                    Text(if (zh) spec.nameZh else spec.name, fontWeight = FontWeight.SemiBold)
                     Text(
                         spec.name + "  ·  " + spec.license,
                         fontFamily = MokeMono,
@@ -226,14 +207,15 @@ private fun FontCard(
                 }
                 // 能力标签（比「中/英」二分更有信息量）：含中文可作回退；连字/内置各表其义。
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (spec.bundled) Badge("内置", MaterialTheme.colorScheme.tertiary)
-                    if (spec.userUploaded) Badge("本地", MaterialTheme.colorScheme.tertiary)
-                    if (spec.cjk) Badge("含中文", MaterialTheme.colorScheme.primary)
-                    if (spec.ligature) Badge("连字", MaterialTheme.colorScheme.secondary)
+                    if (spec.bundled) Badge(stringResource(R.string.tag_bundled), MaterialTheme.colorScheme.tertiary)
+                    if (spec.userUploaded) Badge(stringResource(R.string.tag_local), MaterialTheme.colorScheme.tertiary)
+                    if (spec.cjk) Badge(stringResource(R.string.tag_cjk), MaterialTheme.colorScheme.primary)
+                    if (spec.ligature) Badge(stringResource(R.string.tag_ligature), MaterialTheme.colorScheme.secondary)
                 }
             }
 
-            if (spec.note.isNotBlank()) {
+            // 字体说明仅中文目录内有，英文界面不显示（避免英文里夹中文）。
+            if (zh && spec.note.isNotBlank()) {
                 Text(spec.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
@@ -246,7 +228,7 @@ private fun FontCard(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
-                            "下载中 ${(state.progress * 100).toInt()}%",
+                            stringResource(R.string.font_downloading, (state.progress * 100).toInt()),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -255,7 +237,7 @@ private fun FontCard(
                 is FontInstallState.Failed -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(state.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onDownload) { Text("重试") }
+                        TextButton(onClick = onDownload) { Text(stringResource(R.string.action_retry)) }
                     }
                 }
                 FontInstallState.Installed -> {
@@ -264,18 +246,18 @@ private fun FontCard(
                         FilterChip(
                             selected = isPrimary,
                             onClick = onSetPrimary,
-                            label = { Text("主字体") },
+                            label = { Text(stringResource(R.string.role_primary)) },
                             colors = FilterChipDefaults.filterChipColors(),
                         )
                         FilterChip(
                             selected = isFallback,
                             onClick = onSetFallback,
-                            label = { Text("回退") },
+                            label = { Text(stringResource(R.string.role_fallback)) },
                         )
                         Box(Modifier.weight(1f))
                         if (!spec.bundled) {
                             TextButton(onClick = onDelete) {
-                                Text("删除", color = MaterialTheme.colorScheme.error)
+                                Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
@@ -283,7 +265,7 @@ private fun FontCard(
                 FontInstallState.Absent -> {
                     AssistChip(
                         onClick = onDownload,
-                        label = { Text("下载" + fmtSize(spec.approxBytes).let { if (it.isNotBlank()) " · $it" else "" }) },
+                        label = { Text(stringResource(R.string.font_download) + fmtSize(spec.approxBytes).let { if (it.isNotBlank()) " · $it" else "" }) },
                         colors = AssistChipDefaults.assistChipColors(
                             labelColor = MaterialTheme.colorScheme.primary,
                         ),

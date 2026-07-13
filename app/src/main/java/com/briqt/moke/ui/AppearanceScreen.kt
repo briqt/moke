@@ -54,11 +54,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.briqt.moke.R
 import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.PreviewTransport
@@ -97,33 +100,41 @@ fun AppearanceScreen(
     onOpenFonts: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // 中文界面显示字体/配色的中文名，英文界面显示其本名（英文）。
+    val zh = LocalConfiguration.current.locales[0].language == "zh"
+    // 能力标签在 @Composable 作用域先取好（capTags 是普通局部函数，内部不能调 stringResource）。
+    val tagBundled = stringResource(R.string.tag_bundled)
+    val tagLocal = stringResource(R.string.tag_local)
+    val tagCjk = stringResource(R.string.tag_cjk)
+    val tagLigature = stringResource(R.string.tag_ligature)
+
     fun installed(id: String) = fontStates[id] is FontInstallState.Installed
     fun capTags(spec: com.briqt.moke.terminal.FontSpec) = buildList {
-        if (spec.bundled) add("内置")
-        if (spec.userUploaded) add("本地")
-        if (spec.cjk) add("含中文")
-        if (spec.ligature) add("连字")
+        if (spec.bundled) add(tagBundled)
+        if (spec.userUploaded) add(tagLocal)
+        if (spec.cjk) add(tagCjk)
+        if (spec.ligature) add(tagLigature)
     }
+    fun fontName(spec: com.briqt.moke.terminal.FontSpec) = if (zh) spec.nameZh else spec.name
     // 主字体：内置 + 已安装（含用户上传）
     val primaryOptions = fonts.filter { it.bundled || installed(it.id) }.map { spec ->
         DropdownOption(
             id = spec.id,
-            title = spec.nameZh,
+            title = fontName(spec),
             subtitle = "${spec.name} · ${spec.license}",
             tags = capTags(spec),
         )
     }
-    // 回退字体：无 + 已安装的含中文字体（回退用来补 Latin 缺失字形，如中文）
-    // 回退候选：含中文的字体（补 CJK 字形）+ 用户上传字体（未知覆盖，允许自选）。
-    val fallbackOptions = listOf(DropdownOption(id = "", title = "无（系统兜底）")) +
+    // 回退字体：无 + 已安装的含中文字体（回退用来补 Latin 缺失字形，如中文）。
+    val fallbackOptions = listOf(DropdownOption(id = "", title = stringResource(R.string.fallback_none))) +
         fonts.filter { (it.bundled || installed(it.id)) && (it.cjk || it.userUploaded) }.map { spec ->
-            DropdownOption(id = spec.id, title = spec.nameZh, subtitle = spec.name, tags = if (spec.userUploaded) listOf("本地") else listOf("含中文"))
+            DropdownOption(id = spec.id, title = fontName(spec), subtitle = spec.name, tags = if (spec.userUploaded) listOf(tagLocal) else listOf(tagCjk))
         }
     val schemeOptions = TerminalThemes.all.map { s ->
         DropdownOption(
             id = s.id,
-            title = s.nameZh,
-            subtitle = s.name,
+            title = if (zh) s.nameZh else s.name,
+            subtitle = if (zh) s.name else null,
             leading = { SchemeSwatches(s) },
         )
     }
@@ -131,25 +142,34 @@ fun AppearanceScreen(
     val snackbarState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var overflowOpen by remember { mutableStateOf(false) }
+    // Snackbar 文案在 @Composable 作用域先取好（协程里不能调 stringResource）。
+    val resetDoneMsg = stringResource(R.string.reset_done)
+    val undoLabel = stringResource(R.string.undo)
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarState) },
         topBar = {
             TopAppBar(
-                title = { Text("外观") },
+                title = {
+                    Text(
+                        stringResource(R.string.menu_appearance),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
                     Box {
                         IconButton(onClick = { overflowOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
                         DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("恢复默认") },
+                                text = { Text(stringResource(R.string.reset_default)) },
                                 leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
                                 onClick = {
                                     overflowOpen = false
@@ -159,7 +179,7 @@ fun AppearanceScreen(
                                     val pCursor = cursorStyle; val pBlink = cursorBlink
                                     onResetDefaults()
                                     scope.launch {
-                                        val r = snackbarState.showSnackbar("已恢复默认", "撤销", duration = SnackbarDuration.Short)
+                                        val r = snackbarState.showSnackbar(resetDoneMsg, undoLabel, duration = SnackbarDuration.Short)
                                         if (r == SnackbarResult.ActionPerformed) {
                                             onSelectScheme(pScheme); onSelectPrimary(pPrimary); onSelectFallback(pFallback)
                                             onFontSize(pSize); onLineSpacing(pLine); onLetterSpacing(pLetter)
@@ -171,7 +191,7 @@ fun AppearanceScreen(
                         }
                     }
                 },
-                expandedHeight = 52.dp,
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -212,15 +232,15 @@ fun AppearanceScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                SectionHeader("字体")
+                SectionHeader(stringResource(R.string.section_font))
                 RichDropdown(
-                    label = "主字体",
+                    label = stringResource(R.string.primary_font),
                     options = primaryOptions,
                     selectedId = primaryFontId,
                     onSelect = onSelectPrimary,
                 )
                 RichDropdown(
-                    label = "中文 / 回退字体",
+                    label = stringResource(R.string.fallback_font),
                     options = fallbackOptions,
                     selectedId = fallbackFontId,
                     onSelect = onSelectFallback,
@@ -228,10 +248,10 @@ fun AppearanceScreen(
                 // 常驻入口：进入字体管理下载/上传/设角色。
                 FontManageEntry(onOpenFonts)
 
-                SectionHeader("排版")
+                SectionHeader(stringResource(R.string.section_typography))
                 // 字号 0.5 步进；行距/字距 0.1 步进。滑块快调 + ± 精调。
                 SliderRow(
-                    label = "字号",
+                    label = stringResource(R.string.font_size),
                     valueText = fmtFontSize(fontSizeSp),
                     value = fontSizeSp,
                     valueRange = 8f..24f,
@@ -241,7 +261,7 @@ fun AppearanceScreen(
                     onPlus = { onFontSize(fontSizeSp + 0.5f) },
                 )
                 SliderRow(
-                    label = "行距",
+                    label = stringResource(R.string.line_spacing),
                     valueText = String.format("%.1f", lineSpacing),
                     value = lineSpacing,
                     valueRange = 0.7f..1.3f,
@@ -251,7 +271,7 @@ fun AppearanceScreen(
                     onPlus = { onLineSpacing((lineSpacing + 0.1f).coerceIn(0.7f, 1.3f)) },
                 )
                 SliderRow(
-                    label = "字间距",
+                    label = stringResource(R.string.letter_spacing),
                     valueText = String.format("%.1f", letterSpacing),
                     value = letterSpacing,
                     valueRange = 0.7f..1.3f,
@@ -261,17 +281,21 @@ fun AppearanceScreen(
                     onPlus = { onLetterSpacing((letterSpacing + 0.1f).coerceIn(0.7f, 1.3f)) },
                 )
 
-                SectionHeader("配色")
+                SectionHeader(stringResource(R.string.section_colors))
                 RichDropdown(
-                    label = "配色方案",
+                    label = stringResource(R.string.color_scheme),
                     options = schemeOptions,
                     selectedId = schemeId,
                     onSelect = onSelectScheme,
                 )
 
-                SectionHeader("光标")
+                SectionHeader(stringResource(R.string.section_cursor))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("方块", "下划线", "竖线").forEachIndexed { i, label ->
+                    listOf(
+                        stringResource(R.string.cursor_block),
+                        stringResource(R.string.cursor_underline),
+                        stringResource(R.string.cursor_bar),
+                    ).forEachIndexed { i, label ->
                         FilterChip(selected = cursorStyle == i, onClick = { onCursorStyle(i) }, label = { Text(label) })
                     }
                 }
@@ -280,7 +304,7 @@ fun AppearanceScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("光标闪烁", color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.cursor_blink), color = MaterialTheme.colorScheme.onSurface)
                     Switch(checked = cursorBlink, onCheckedChange = onCursorBlink)
                 }
             }
@@ -326,7 +350,7 @@ private fun SliderRow(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onMinus) {
-                Icon(Icons.Filled.Remove, contentDescription = "减小", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary)
             }
             Slider(
                 value = value.coerceIn(valueRange.start, valueRange.endInclusive),
@@ -336,7 +360,7 @@ private fun SliderRow(
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onPlus) {
-                Icon(Icons.Filled.Add, contentDescription = "增大", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -357,9 +381,9 @@ private fun FontManageEntry(onClick: () -> Unit) {
         ) {
             Icon(Icons.Filled.FontDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text("字体管理", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Text(stringResource(R.string.font_manage_title), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 Text(
-                    "下载更多字体 · 设置主字体 / 回退",
+                    stringResource(R.string.font_manage_sub),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

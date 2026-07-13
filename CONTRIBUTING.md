@@ -1,19 +1,21 @@
-# 参与 Moke
+# Contributing to Moke
 
-## 反馈方式
+**English** · [简体中文](CONTRIBUTING.zh-CN.md)
 
-本项目**只接受 issue 形式的问题反馈，不接受 Pull Request**。收到的 PR 会被自动关闭。
+## How to report
 
-请通过 [issue](https://github.com/briqt/moke/issues) 提交 bug 或建议。真机相关的问题请附上：设备型号、Android / 系统版本、服务器环境（是否装 mosh、locale 等）。
+This project **only accepts issue-based reports and does not accept pull requests**. PRs received will be closed automatically.
 
-## 本地构建
+Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issues). For device-specific problems, include: device model, Android / OS version, and the server environment (whether mosh is installed, locale, etc.).
 
-- JDK 17、Android SDK（compileSdk 35 / build-tools 35）
-- 在项目根创建 `local.properties`：`sdk.dir=/path/to/Android/sdk`
-- 构建：`./gradlew assembleDebug`；测试：`./gradlew testDebugUnitTest`
+## Local build
 
-## 约定
+- JDK 17, Android SDK (compileSdk 35 / build-tools 35)
+- Create `local.properties` at the project root: `sdk.dir=/path/to/Android/sdk`
+- Build: `./gradlew assembleDebug`; test: `./gradlew testDebugUnitTest`
 
-- 不修改 `terminal-view/`（vendored 上游 Apache-2.0）的核心行为；定制在 `app/` 或通过 `TerminalTransport` 完成。
-- 提交信息用 [Conventional Commits](https://www.conventionalcommits.org/)。
-- Kotlin 官方代码风格（`kotlin.code.style=official`）。
+## Conventions
+
+- Do not change the core behavior of `terminal-view/` (vendored upstream, Apache-2.0); customize in `app/` or through `TerminalTransport`.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages.
+- Follow the official Kotlin code style (`kotlin.code.style=official`).

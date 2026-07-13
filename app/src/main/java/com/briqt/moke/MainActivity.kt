@@ -1,6 +1,7 @@
 package com.briqt.moke
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -18,6 +19,11 @@ class MainActivity : ComponentActivity() {
 
     private val notifPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒绝也不影响会话，仅无常驻通知 */ }
+
+    // 应用内语言：按所选语言包裹 context（切换语言后 recreate() 重新走这里）。
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LocaleManager.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // 边到边：系统栏透明、内容延伸到栏下，由 Compose 统一处理 insets（消除系统栏色缝）。

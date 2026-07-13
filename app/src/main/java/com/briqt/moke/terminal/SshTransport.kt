@@ -1,6 +1,7 @@
 package com.briqt.moke.terminal
 
 import android.content.Context
+import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import com.termux.terminal.TerminalSession
@@ -48,7 +49,7 @@ class SshTransport(
         return SSHClient(config).apply {
             connectTimeout = 15000
             addHostKeyVerifier(
-                MokeHostKeyVerifier(KnownHosts(appContext)) { msg ->
+                MokeHostKeyVerifier(KnownHosts(appContext), appContext) { msg ->
                     val b = ("\r\n" + msg + "\r\n").toByteArray(StandardCharsets.UTF_8)
                     session.processToEmulator(b, b.size)
                 }
@@ -62,7 +63,7 @@ class SshTransport(
                 val client = newClient(session)
                 if (jumpHost != null) {
                     // 经跳板机：连 + 认证跳板 → direct-tcpip 到目标 → 在该通道上握手目标 SSH。
-                    feed(session, "\r\n[moke] 经跳板机 ${jumpHost.host} 连接…\r\n")
+                    feed(session, "\r\n" + appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
                     val j = newClient(session)
                     j.connect(jumpHost.host, jumpHost.port)
                     authenticate(j, jumpHost)
@@ -102,7 +103,7 @@ class SshTransport(
                 }
                 session.onTransportFinished(0)
             } catch (e: Exception) {
-                val msg = "\r\n[SSH 连接失败: ${e.message}]\r\n".toByteArray()
+                val msg = ("\r\n" + appContext.getString(R.string.ssh_connect_failed, e.message ?: "") + "\r\n").toByteArray()
                 session.processToEmulator(msg, msg.size)
                 session.onTransportFinished(1)
             }

@@ -2,7 +2,7 @@
 
 # Moke · 墨客
 
-**Android 原生 SSH / mosh 终端**（Kotlin + Jetpack Compose）
+**Native SSH / mosh terminal for Android** (Kotlin + Jetpack Compose)
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
@@ -10,58 +10,61 @@
 
 </div>
 
-## 这是什么
+<p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接建立连接，终端渲染复用 termux 的 `terminal-view` / `terminal-emulator`（Apache-2.0），不自研 ANSI 解析。
+## What is this
 
-## 功能
+Moke is a native SSH / mosh terminal for Android. It connects directly inside the app and reuses termux's `terminal-view` / `terminal-emulator` (Apache-2.0) for terminal rendering instead of writing its own ANSI parser.
 
-- **SSH**：密码 / 私钥（PEM）认证；主机密钥 TOFU 校验；跳板机（ProxyJump）；登录后自动执行命令；窗口 resize；保活心跳。
-- **mosh**：随包 native `mosh-client`，独立子进程 + PTY 运行，UDP 漫游（关屏 / 切网重连）。
-- **多会话**：会话常驻、跨页切换；前台服务在退到后台时保持连接。
-- **连接管理**：分组、排序；协议徽标；复制连接命令 / 创建副本。
-- **终端**：双排附加键 + 文本段输入；复制粘贴；捏合缩放；顶部状态条（协议 / 主机 / 延迟）。
-- **外观**：实时预览；多套配色；字体管理（主字体 + 中文回退，内置思源黑体子集，可下载 Fira Code / Maple / Hack）；行距 / 字间距可调。
-- **凭据**：连接凭据经 Android Keystore（AES-GCM）加密后存储。
+## Features
 
-## 截图
+- **SSH**: password / private-key (PEM) auth; TOFU host-key verification; jump host (ProxyJump); run-on-login command; window resize; keep-alive heartbeat.
+- **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (reconnect on screen-off / network switch).
+- **Multiple sessions**: sessions stay resident and switch across screens; a foreground service keeps connections alive in the background.
+- **Host management**: grouping and sorting (including manual drag-to-reorder); protocol badges; copy connect command / duplicate.
+- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; a top status bar (protocol / host / latency).
+- **Appearance**: live preview; multiple dark color schemes; font management (primary font + CJK fallback, a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple / Hack); adjustable line spacing / letter spacing / font size.
+- **Languages**: bilingual English / 中文 (i18n); follows the system language by default and can be switched in Settings.
+- **Credentials**: connection credentials are encrypted with the Android Keystore (AES-GCM) before being stored.
+
+## Screenshots
 
 <div align="center">
-<img src="docs/screenshot-terminal.png" alt="终端跑 Claude Code" width="264"/>&nbsp;<img src="docs/screenshot-connections.png" alt="连接管理" width="264"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="外观设置" width="264"/>
-<br/><sub>终端（SSH 跑 Claude Code）· 连接管理 · 外观设置</sub>
+<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code" width="264"/>&nbsp;<img src="docs/screenshot-connections.png" alt="Host management" width="264"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance settings" width="264"/>
+<br/><sub>Terminal (SSH running Claude Code) · Host management · Appearance</sub>
 </div>
 
-## 安装
+## Install
 
-前往 [Releases](https://github.com/briqt/moke/releases) 下载 `moke-vX.Y.Z.apk`，允许"安装未知来源应用"后安装。发布包使用固定签名，可覆盖升级。
+Download `moke-vX.Y.Z.apk` from [Releases](https://github.com/briqt/moke/releases), allow "install from unknown sources", and install. Release builds use a stable signature, so upgrades install over the top.
 
-## 模块
+## Modules
 
-| 模块 | 说明 | 许可 |
+| Module | Description | License |
 |---|---|---|
-| `app` | 产品层（Compose UI / 会话编排 / 传输实现） | 见 [LICENSE](LICENSE) |
-| `terminal-emulator` | 终端解析 / 状态内核（vendored；`TerminalSession` 改为传输无关） | Apache-2.0 |
-| `terminal-view` | 终端渲染 View（vendored；仅为行距 / 字间距做向后兼容小改动） | Apache-2.0 |
+| `app` | Product layer (Compose UI / session orchestration / transport implementations) | see [LICENSE](LICENSE) |
+| `terminal-emulator` | Terminal parsing / state core (vendored; `TerminalSession` made transport-agnostic) | Apache-2.0 |
+| `terminal-view` | Terminal rendering View (vendored; only small backward-compatible tweaks for line / letter spacing) | Apache-2.0 |
 
-## 构建
+## Build
 
-需要 JDK 17 + Android SDK（compileSdk 35 / build-tools 35）。在项目根创建 `local.properties` 指向 SDK：`sdk.dir=/path/to/Android/sdk`。
+Requires JDK 17 + Android SDK (compileSdk 35 / build-tools 35). Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
 
 ```bash
-./gradlew assembleDebug        # 调试 APK
-./gradlew testDebugUnitTest    # 单元测试
+./gradlew assembleDebug        # debug APK
+./gradlew testDebugUnitTest    # unit tests
 ```
 
-mosh native 产物由 [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) 从公开源码（mosh 1.4.0 + rjyo/mosh-android 预编译库）复现构建，需 NDK r29；GPLv3 二进制不入库。
+The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r29 is required, and the GPLv3 binaries are not checked in.
 
-## 反馈
+## Feedback
 
-仅接受 [issue](https://github.com/briqt/moke/issues) 形式的问题反馈，暂不接受 PR（详见 [CONTRIBUTING](CONTRIBUTING.md)）。
+Only [issue](https://github.com/briqt/moke/issues)-based reports are accepted; pull requests are not accepted for now (see [CONTRIBUTING](CONTRIBUTING.md)).
 
-## 致谢与第三方
+## Acknowledgements & third-party
 
-终端内核复用 [termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-emulator` / `terminal-view`（Apache-2.0，源自 [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)）。SSH 传输使用 [sshj](https://github.com/hierynomus/sshj)。mosh native 基于 [mobile-shell/mosh](https://github.com/mobile-shell/mosh)（GPLv3）与 [rjyo/mosh-android](https://github.com/rjyo/mosh-android)。内置中文字体为 [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（OFL）子集。完整清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/termux-app](https://github.com/termux/termux-app) (Apache-2.0, originally from [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)). SSH transport uses [sshj](https://github.com/hierynomus/sshj). The mosh native component is based on [mobile-shell/mosh](https://github.com/mobile-shell/mosh) (GPLv3) and [rjyo/mosh-android](https://github.com/rjyo/mosh-android). The bundled Chinese font is a subset of [Noto Sans SC](https://github.com/notofonts/noto-cjk) (OFL). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.
 
-## 许可
+## License
 
-见 [LICENSE](LICENSE)。vendored 的 `terminal-*` 模块为 Apache-2.0；mosh native 组件为 GPLv3（独立可执行、边界隔离）。
+See [LICENSE](LICENSE). The vendored `terminal-*` modules are Apache-2.0; the mosh native component is GPLv3 (a standalone executable, isolated at the boundary).

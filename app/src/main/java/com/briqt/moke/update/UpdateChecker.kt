@@ -1,5 +1,7 @@
 package com.briqt.moke.update
 
+import android.content.Context
+import com.briqt.moke.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -20,7 +22,7 @@ sealed interface UpdateStatus {
 object UpdateChecker {
     private const val LATEST_API = "https://api.github.com/repos/briqt/moke/releases/latest"
 
-    suspend fun check(current: String): UpdateStatus = withContext(Dispatchers.IO) {
+    suspend fun check(current: String, context: Context): UpdateStatus = withContext(Dispatchers.IO) {
         // 硬超时兜底：任何慢网络/卡住都在 12s 内收敛，spinner 不会永转。
         withTimeoutOrNull(12_000) {
             var conn: HttpURLConnection? = null
@@ -34,13 +36,13 @@ object UpdateChecker {
                 }
                 val code = conn.responseCode
                 // 404 = 仓库私有或尚无 Release（公开 REST API 不可见）——给出可读提示而非裸 HTTP 码。
-                if (code == 404) return@withTimeoutOrNull UpdateStatus.Failed("暂无公开发布")
+                if (code == 404) return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_none))
                 if (code !in 200..299) return@withTimeoutOrNull UpdateStatus.Failed("HTTP $code")
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val o = JSONObject(body)
                 val tag = o.optString("tag_name").ifBlank { o.optString("name") }
                 val url = o.optString("html_url").ifBlank { "https://github.com/briqt/moke/releases/latest" }
-                if (tag.isBlank()) return@withTimeoutOrNull UpdateStatus.Failed("无法解析版本")
+                if (tag.isBlank()) return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_parse_failed))
                 val latest = tag.removePrefix("v").removePrefix("V")
                 if (isNewer(latest, current)) UpdateStatus.Available(tag, url)
                 else UpdateStatus.UpToDate(current)
@@ -50,7 +52,7 @@ object UpdateChecker {
             } finally {
                 runCatching { conn?.disconnect() }
             }
-        } ?: UpdateStatus.Failed("超时")
+        } ?: UpdateStatus.Failed(context.getString(R.string.update_timeout))
     }
 
     /** 语义化版本数字段比较：a > b 返回 true。非数字段忽略。 */

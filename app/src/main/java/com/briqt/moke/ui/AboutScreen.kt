@@ -32,8 +32,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateStatus
@@ -53,13 +55,19 @@ fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("关于") },
+                title = {
+                    Text(
+                        stringResource(R.string.about_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
-                expandedHeight = 52.dp,
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -74,9 +82,9 @@ fun AboutScreen(onBack: () -> Unit) {
         ) {
             // 头部：名称 + 定位
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Moke · 墨客", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.app_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    "Android 原生 SSH / mosh 终端",
+                    stringResource(R.string.app_tagline),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -84,31 +92,31 @@ fun AboutScreen(onBack: () -> Unit) {
 
             // 版本 + 检查更新
             Row(verticalAlignment = Alignment.CenterVertically) {
-                InfoLabel("版本")
+                InfoLabel(stringResource(R.string.label_version))
                 Text("v$version", fontFamily = MokeMono, modifier = Modifier.weight(1f))
                 when (val u = update) {
                     UpdateStatus.Idle -> TextButton(onClick = {
                         update = UpdateStatus.Checking
-                        scope.launch { update = UpdateChecker.check(version) }
-                    }) { Text("检查更新") }
+                        scope.launch { update = UpdateChecker.check(version, context) }
+                    }) { Text(stringResource(R.string.check_update)) }
                     UpdateStatus.Checking -> CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
-                    is UpdateStatus.UpToDate -> Text("已是最新", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    is UpdateStatus.UpToDate -> Text(stringResource(R.string.up_to_date), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                     is UpdateStatus.Available -> Button(onClick = {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url))) }
-                    }) { Text("新版 ${u.latest}") }
+                    }) { Text(stringResource(R.string.new_version, u.latest)) }
                     is UpdateStatus.Failed -> TextButton(onClick = {
                         update = UpdateStatus.Checking
-                        scope.launch { update = UpdateChecker.check(version) }
-                    }) { Text("重试（${u.message}）") }
+                        scope.launch { update = UpdateChecker.check(version, context) }
+                    }) { Text(stringResource(R.string.retry_with_msg, u.message)) }
                 }
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             // 开源与许可：只做简单声明 + 指向完整清单（细节留给 THIRD_PARTY_NOTICES）。
-            Text("开源与许可", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.licenses_header), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "本应用基于多个开源项目构建，完整许可清单见项目 THIRD_PARTY_NOTICES。",
+                stringResource(R.string.licenses_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

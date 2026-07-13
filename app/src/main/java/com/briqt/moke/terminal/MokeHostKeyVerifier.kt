@@ -1,5 +1,7 @@
 package com.briqt.moke.terminal
 
+import android.content.Context
+import com.briqt.moke.R
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
 import java.security.PublicKey
 
@@ -12,6 +14,7 @@ import java.security.PublicKey
  */
 class MokeHostKeyVerifier(
     private val known: KnownHosts,
+    private val context: Context,
     private val onMessage: (String) -> Unit,
 ) : HostKeyVerifier {
 
@@ -21,12 +24,13 @@ class MokeHostKeyVerifier(
         return when (val saved = known.stored(id)) {
             null -> {
                 known.store(id, fp)
-                onMessage("首次连接 $id，已记录主机指纹 $fp")
+                onMessage(context.getString(R.string.hostkey_first_seen, id, fp))
                 true
             }
             fp -> true
             else -> {
-                onMessage("⚠️ 主机密钥已变更！\r\n  记录: $saved\r\n  当前: $fp\r\n可能存在中间人攻击，已拒绝连接。若确为服务器变更，请删除该主机后重建。")
+                // 资源里用 \n 断行，喂终端需 \r\n。
+                onMessage(context.getString(R.string.hostkey_changed, saved, fp).replace("\n", "\r\n"))
                 false
             }
         }

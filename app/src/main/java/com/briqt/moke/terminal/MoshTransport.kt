@@ -1,6 +1,7 @@
 package com.briqt.moke.terminal
 
 import android.content.Context
+import com.briqt.moke.R
 import android.os.ParcelFileDescriptor
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
@@ -52,17 +53,17 @@ class MoshTransport(
                 val moshBin = File("$nativeLibDir/libmosh-client.so")
                 val termuxBin = File("$nativeLibDir/libtermux.so")
                 if (!moshBin.exists() || !termuxBin.exists()) {
-                    feed(session, "\r\n[mosh 不可用] 此安装包未内置 mosh native 组件（当前仅 arm64-v8a）。请改用 SSH 协议，或安装含 mosh 的版本。\r\n")
+                    feed(session, "\r\n" + appContext.getString(R.string.mosh_unavailable) + "\r\n")
                     session.onTransportFinished(1)
                     return@Thread
                 }
 
                 // 1) SSH 引导：执行 mosh-server new，解析 MOSH CONNECT
-                feed(session, "\r\n[moke] 正在通过 SSH 引导 mosh-server…\r\n")
+                feed(session, "\r\n" + appContext.getString(R.string.mosh_bootstrapping) + "\r\n")
                 val bootstrap = sshBootstrap()
                 val connect = MoshBootstrap.parse(bootstrap)
                     ?: throw IllegalStateException("未从 mosh-server 输出解析到 MOSH CONNECT：\n$bootstrap")
-                feed(session, "[moke] mosh-server UDP 端口 ${connect.port}，启动 mosh-client…\r\n")
+                feed(session, appContext.getString(R.string.mosh_client_starting, connect.port) + "\r\n")
 
                 // 2) 独立子进程 + PTY 运行 native mosh-client
                 val bin = "$nativeLibDir/libmosh-client.so"
@@ -119,7 +120,7 @@ class MoshTransport(
                 session.onTransportFinished(0)
             } catch (e: Throwable) {
                 // 捕获 Throwable（含 UnsatisfiedLinkError 等 Error），保证任何 native/引导失败都只是终端里报错，绝不闪退。
-                val b = "\r\n[mosh 连接失败: ${e.message ?: e.javaClass.simpleName}]\r\n".toByteArray(StandardCharsets.UTF_8)
+                val b = ("\r\n" + appContext.getString(R.string.mosh_connect_failed, e.message ?: e.javaClass.simpleName) + "\r\n").toByteArray(StandardCharsets.UTF_8)
                 session.processToEmulator(b, b.size)
                 session.onTransportFinished(1)
             }
@@ -129,12 +130,12 @@ class MoshTransport(
     private fun sshBootstrap(): String {
         val client = SSHClient(DefaultConfig())
         client.connectTimeout = 15000
-        client.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext)) {})
+        client.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
         var jClient: SSHClient? = null
         if (jumpHost != null) {
             val j = SSHClient(DefaultConfig())
             j.connectTimeout = 15000
-            j.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext)) {})
+            j.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
             j.connect(jumpHost.host, jumpHost.port)
             authenticate(j, jumpHost)
             client.connectVia(j.newDirectConnection(host.host, host.port))
