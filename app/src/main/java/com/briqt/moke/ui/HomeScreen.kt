@@ -5,14 +5,17 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,6 +34,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
@@ -47,6 +51,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarDefaults
@@ -68,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -123,8 +129,8 @@ fun HomeScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                // 略压高度（默认 64 → 56）扩大可见区。
-                expandedHeight = 56.dp,
+                // 略压高度（默认 64 → 49，较原 56 再收约 1/8）扩大可见区；标题在栏内垂直居中，收窄自然把上/下间距平分。
+                expandedHeight = 49.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -169,16 +175,27 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
     count: Int?,
     onTab: (HomeTab) -> Unit,
 ) {
+    val selected = current == target
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    // 图标+文字整体塞进 icon 槽，用一个很小的 2dp 间隔（取代 M3 默认较大的图标-文字间距）；label 留空。
+    // indicator 透明 → 无选中背景块；颜色显式按选中态给，选中 primary、未选中中性色。
     NavigationBarItem(
-        selected = current == target,
+        selected = selected,
         onClick = { onTab(target) },
-        icon = { Icon(icon, contentDescription = null) },
-        label = { Text(if (count != null) "$label · $count" else label) },
-        colors = NavigationBarItemDefaults.colors(
-            selectedIconColor = MaterialTheme.colorScheme.primary,
-            selectedTextColor = MaterialTheme.colorScheme.primary,
-            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
+        icon = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    if (count != null) "$label · $count" else label,
+                    color = color,
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                )
+            }
+        },
+        colors = NavigationBarItemDefaults.colors(indicatorColor = Color.Transparent),
     )
 }
 
@@ -366,18 +383,28 @@ private fun HostCard(
     }
 }
 
-/** 协议徽标：mosh 用主色、SSH 用中性色。 */
+/** 协议徽标：mosh 用主色强调、SSH 用中性色。背景块紧贴文字（去字体额外行距，收紧内边距），供连接列表 / 会话列表 / 终端顶栏共用。 */
 @Composable
-private fun ProtocolBadge(mosh: Boolean) {
+fun ProtocolBadge(mosh: Boolean) {
     val color = if (mosh) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(5.dp)) {
+    Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
         Text(
             if (mosh) "mosh" else "SSH",
             color = color,
             fontSize = 10.sp,
+            lineHeight = 10.sp,
             fontWeight = FontWeight.Medium,
             fontFamily = MokeMono,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            maxLines = 1,
+            // 去掉字体自带上下额外行距，让背景高度≈字形本身（约原 3/5）；水平内边距收窄（约原 4/5）。
+            style = LocalTextStyle.current.copy(
+                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                ),
+            ),
+            modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp),
         )
     }
 }
@@ -413,6 +440,7 @@ private fun SessionsContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionCard(
     ts: TermSession,
@@ -421,48 +449,98 @@ private fun SessionCard(
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
 ) {
-    val title by ts.title.collectAsState()
+    val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
-        colors = CardDefaults.cardColors(
-            containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
-        ),
-        elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    val latencyMs by ts.latency.collectAsState()
+    var menuOpen by remember { mutableStateOf(false) }
+    // 长按普通区域弹出的标题菜单打开哪个弹窗（长按拖动手柄则由手柄自身处理，是拖动而非此菜单）。
+    var dialog by remember { mutableStateOf<SessionTitleKind?>(null) }
+    Box {
+        Card(
+            // 单击进入会话；长按普通区域弹出「修改标题 / 标题前缀」菜单。
+            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true }),
+            colors = CardDefaults.cardColors(
+                containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+            ),
+            elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
         ) {
-            if (dragHandle != null) {
-                Box(modifier = dragHandle) {
-                    Icon(
-                        Icons.Filled.DragHandle,
-                        contentDescription = stringResource(R.string.drag_to_reorder),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (dragHandle != null) {
+                    Box(modifier = dragHandle) {
+                        Icon(
+                            Icons.Filled.DragHandle,
+                            contentDescription = stringResource(R.string.drag_to_reorder),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+                // 与终端详情页顶栏同款双行布局：标题在上，user@host · 协议徽标 · 延迟 在下。
+                Column(modifier = Modifier.weight(1f).padding(start = if (dragHandle != null) 4.dp else 0.dp)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(
+                            "${ts.host.username}@${ts.host.host}",
+                            fontFamily = MokeMono,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        ProtocolBadge(ts.host.useMosh)
+                        when {
+                            !alive -> Text("· " + stringResource(R.string.session_ended_short), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            latencyMs != null -> Text("· $latencyMs ms", fontFamily = MokeMono, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = latencyColor(latencyMs!!), maxLines = 1)
+                            !ts.host.useMosh -> Text("· …", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            else -> {}
+                        }
+                    }
+                }
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Box(
-                modifier = Modifier
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(if (alive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
-            )
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(
-                    "${ts.host.username}@${ts.host.host}:${ts.host.port}" + if (!alive) "  · " + stringResource(R.string.session_ended_short) else "",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = MokeMono,
-                )
-            }
-            IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.session_set_title)) },
+                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                onClick = { menuOpen = false; dialog = SessionTitleKind.TITLE },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.session_set_prefix)) },
+                leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+                onClick = { menuOpen = false; dialog = SessionTitleKind.PREFIX },
+            )
+        }
+    }
+    when (dialog) {
+        SessionTitleKind.TITLE -> SessionTitleDialog(
+            dialogTitle = stringResource(R.string.session_set_title),
+            hint = stringResource(R.string.session_title_hint),
+            initial = ts.customTitle.value ?: "",
+            onConfirm = { ts.setCustomTitle(it); dialog = null },
+            onDismiss = { dialog = null },
+        )
+        SessionTitleKind.PREFIX -> SessionTitleDialog(
+            dialogTitle = stringResource(R.string.session_set_prefix),
+            hint = stringResource(R.string.session_prefix_hint),
+            initial = ts.titlePrefix.value ?: "",
+            onConfirm = { ts.setTitlePrefix(it); dialog = null },
+            onDismiss = { dialog = null },
+        )
+        null -> {}
     }
 }
 
@@ -512,16 +590,17 @@ private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.menu_language)) },
+        // 标题收小（默认 headlineSmall 偏大、留白多），选项占满宽度、字号提到 bodyLarge，减少空旷感。
+        title = { Text(stringResource(R.string.menu_language), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 options.forEach { (tag, label) ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(tag) }.padding(vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onPick(tag) }.padding(vertical = 8.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = current == tag, onClick = { onPick(tag) })
-                        Text(label, modifier = Modifier.padding(start = 8.dp))
+                        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
                     }
                 }
             }

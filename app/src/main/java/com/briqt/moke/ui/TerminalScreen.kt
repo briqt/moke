@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -17,8 +18,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
 import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
@@ -41,6 +46,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +62,7 @@ import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.ui.theme.MokeMono
 import com.termux.view.TerminalView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,19 +85,22 @@ fun TerminalScreen(
     onToggleExtraKeys: () -> Unit,
 ) {
     val context = LocalContext.current
-    val title by ts.title.collectAsState()
+    val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
     var ctrlOn by remember(ts.id) { mutableStateOf(false) }
     var altOn by remember(ts.id) { mutableStateOf(false) }
 
     var showComposer by remember(ts.id) { mutableStateOf(false) }
+    // 顶栏 ⋮ 里的标题弹窗：null 无 / TITLE 自定义标题 / PREFIX 标题前缀。
+    var titleDialog by remember(ts.id) { mutableStateOf<SessionTitleKind?>(null) }
     // 文本段草稿：提升到此，关闭 sheet 保留、发送后清空。
     var composerText by remember(ts.id) { mutableStateOf("") }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
     var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
 
     val controller = ts.controller
+    val scope = rememberCoroutineScope()
     // View 按会话 id 记忆：切换会话得到全新 View，attach 到既有 session 后滚屏/连接保留。
     val view = remember(ts.id) { TerminalView(context, null) }
 
@@ -105,6 +115,8 @@ fun TerminalScreen(
         controller.cursorBlink = cursorBlink
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
+        // one-shot 粘滞修饰被消费后，熄灭 Ctrl/Alt 高亮（用一次即取消）。
+        controller.onModifiersConsumed = { ctrlOn = false; altOn = false }
         // 注意顺序：先 setTextSize 创建 renderer，再 setTypeface（其读取 mRenderer 不判空）。
         val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
         view.setTextSize(px)
@@ -116,6 +128,7 @@ fun TerminalScreen(
             if (controller.view === view) {
                 controller.view = null
                 controller.onFontSizeSp = null
+                controller.onModifiersConsumed = null
             }
         }
     }
@@ -164,7 +177,7 @@ fun TerminalScreen(
             TerminalTopBar(
                 title = title,
                 host = "${ts.host.username}@${ts.host.host}",
-                protocol = ts.host.protocol,
+                useMosh = ts.host.useMosh,
                 alive = alive,
                 latencyMs = latency,
                 showLatency = !ts.host.useMosh,
@@ -172,6 +185,10 @@ fun TerminalScreen(
                 extraKeysVisible = extraKeysVisible,
                 onFontSize = onFontSize,
                 onToggleExtraKeys = onToggleExtraKeys,
+                onSetTitle = { titleDialog = SessionTitleKind.TITLE },
+                onSetPrefix = { titleDialog = SessionTitleKind.PREFIX },
+                onShowKeyboard = { controller.showKeyboard() },
+                onClose = onClose,
                 onBack = onBack,
             )
         },
@@ -246,14 +263,38 @@ fun TerminalScreen(
             onValueChange = { composerText = it },
             onDismiss = { showComposer = false },
             onSend = { text, appendEnter ->
-                if (text.isNotEmpty() || appendEnter) {
-                    ts.session.write(if (appendEnter) text + "\r" else text)
-                }
                 composerText = ""      // 发送后清空草稿
                 showComposer = false
                 controller.showKeyboard()
+                scope.launch {
+                    if (text.isNotEmpty()) ts.session.write(text)
+                    // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
+                    // 否则「正文+尾部 CR」会被 raw 模式 TUI(如 claude / vim 插入态)判为粘贴，只插入换行而不提交。
+                    if (appendEnter) {
+                        if (text.isNotEmpty()) delay(40)
+                        ts.session.write("\r")
+                    }
+                }
             },
         )
+    }
+
+    when (titleDialog) {
+        SessionTitleKind.TITLE -> SessionTitleDialog(
+            dialogTitle = stringResource(R.string.session_set_title),
+            hint = stringResource(R.string.session_title_hint),
+            initial = ts.customTitle.value ?: "",
+            onConfirm = { ts.setCustomTitle(it); titleDialog = null },
+            onDismiss = { titleDialog = null },
+        )
+        SessionTitleKind.PREFIX -> SessionTitleDialog(
+            dialogTitle = stringResource(R.string.session_set_prefix),
+            hint = stringResource(R.string.session_prefix_hint),
+            initial = ts.titlePrefix.value ?: "",
+            onConfirm = { ts.setTitlePrefix(it); titleDialog = null },
+            onDismiss = { titleDialog = null },
+        )
+        null -> {}
     }
 }
 
@@ -272,7 +313,7 @@ fun fmtFontSize(sp: Float): String =
 private fun TerminalTopBar(
     title: String,
     host: String,
-    protocol: String,
+    useMosh: Boolean,
     alive: Boolean,
     latencyMs: Int?,
     showLatency: Boolean,
@@ -280,6 +321,10 @@ private fun TerminalTopBar(
     extraKeysVisible: Boolean,
     onFontSize: (Float) -> Unit,
     onToggleExtraKeys: () -> Unit,
+    onSetTitle: () -> Unit,
+    onSetPrefix: () -> Unit,
+    onShowKeyboard: () -> Unit,
+    onClose: () -> Unit,
     onBack: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
@@ -313,7 +358,8 @@ private fun TerminalTopBar(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    Text("· $protocol", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    // 协议徽标：与连接列表一致，mosh 用强调色高亮标识。
+                    ProtocolBadge(useMosh)
                     when {
                         !alive -> Text("· " + stringResource(R.string.offline), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         latencyMs != null -> Text(
@@ -341,35 +387,63 @@ private fun TerminalTopBar(
                     onDismissRequest = { menuOpen = false },
                     offset = androidx.compose.ui.unit.DpOffset(x = 8.dp, y = 0.dp),
                 ) {
+                    // 菜单文字统一 bodyMedium、图标 20dp，避免偏大。
+                    // 会话标题：自定义标题（最高优先级）/ 标题前缀（叠加在动态标题前）。
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.session_set_title), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onSetTitle() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.session_set_prefix), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onSetPrefix() },
+                    )
+                    HorizontalDivider()
                     // 字号步进（点 ± 不关闭菜单，便于连续调整）。
                     Row(
                         modifier = Modifier.padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(stringResource(R.string.font_size), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-                        IconButton(onClick = { onFontSize(fontSizeSp - 0.5f) }) {
-                            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.font_size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                        IconButton(onClick = { onFontSize(fontSizeSp - 0.5f) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
-                        Text(fmtFontSize(fontSizeSp), fontFamily = MokeMono, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width(52.dp))
-                        IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }) {
-                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary)
+                        Text(fmtFontSize(fontSizeSp), fontFamily = MokeMono, style = MaterialTheme.typography.bodyMedium, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width(44.dp))
+                        IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
                     }
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.reset_font_size)) },
-                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
+                        text = { Text(stringResource(R.string.reset_font_size), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
                     )
                     HorizontalDivider()
+                    // 弹出软键盘。
                     DropdownMenuItem(
-                        text = { Text(if (extraKeysVisible) stringResource(R.string.hide_extra_keys) else stringResource(R.string.show_extra_keys)) },
+                        text = { Text(stringResource(R.string.show_keyboard), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.Keyboard, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onShowKeyboard() },
+                    )
+                    // 显示 / 隐藏底部快捷键条（双箭头表意“底部工具条上/下”）。
+                    DropdownMenuItem(
+                        text = { Text(if (extraKeysVisible) stringResource(R.string.hide_extra_keys) else stringResource(R.string.show_extra_keys), style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = {
                             Icon(
-                                if (extraKeysVisible) Icons.Filled.KeyboardHide else Icons.Filled.Keyboard,
+                                if (extraKeysVisible) Icons.Filled.KeyboardDoubleArrowDown else Icons.Filled.KeyboardDoubleArrowUp,
                                 contentDescription = null,
+                                modifier = Modifier.size(20.dp),
                             )
                         },
                         onClick = { menuOpen = false; onToggleExtraKeys() },
+                    )
+                    HorizontalDivider()
+                    // 关闭连接：结束会话并返回。
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.close_connection), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onClose() },
                     )
                 }
             }
@@ -378,7 +452,7 @@ private fun TerminalTopBar(
 }
 
 @Composable
-private fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
+fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     ms < 120 -> MaterialTheme.colorScheme.primary
     ms < 300 -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.error

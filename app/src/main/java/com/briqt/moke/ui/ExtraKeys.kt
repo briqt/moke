@@ -118,16 +118,18 @@ fun ExtraKeys(
 
 @Composable
 private fun KeyCap(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    // 近乎平直的键帽（3dp 微圆角），更贴合终端页面；高度 36dp（较原 40 压平约 1/10）。
+    // 近乎平直的键帽（3dp 微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
     Surface(
         onClick = onClick,
-        modifier = modifier.height(36.dp),
+        modifier = modifier.height(34.dp),
         shape = RoundedCornerShape(3.dp),
         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(label, fontFamily = MokeMono, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            // 方向/回车等单字符符号（↵ ↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签保持 13sp。
+            val glyph = label.length == 1 && label[0] in "↵↑↓←→"
+            Text(label, fontFamily = MokeMono, fontSize = if (glyph) 17.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }
 }

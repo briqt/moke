@@ -29,6 +29,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarDuration
@@ -42,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -191,7 +193,7 @@ fun AppearanceScreen(
                         }
                     }
                 },
-                expandedHeight = 56.dp,
+                expandedHeight = 49.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -225,12 +227,14 @@ fun AppearanceScreen(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             // 控制区分组：字体 → 排版 → 配色 → 光标。恢复默认收进顶栏 ⋮。
+            // 用 bodyMedium 收敛正文/输入框字号，与外层列表页一致（进设置页不再明显变大）；间距/内边距也向列表页看齐。
+            CompositionLocalProvider(LocalTextStyle provides MaterialTheme.typography.bodyMedium) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 SectionHeader(stringResource(R.string.section_font))
                 RichDropdown(
@@ -308,6 +312,7 @@ fun AppearanceScreen(
                     Switch(checked = cursorBlink, onCheckedChange = onCursorBlink)
                 }
             }
+            }
         }
     }
 }
@@ -348,19 +353,20 @@ private fun SliderRow(
             Text(label, color = MaterialTheme.colorScheme.onSurface)
             Text(valueText, fontFamily = MokeMono, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        // 压扁滑块行：± 按钮 34dp、图标 18dp，滑块限高 36dp——不再"超级大"，与页面其它控件协调。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onMinus) {
-                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary)
+            IconButton(onClick = onMinus, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             }
             Slider(
                 value = value.coerceIn(valueRange.start, valueRange.endInclusive),
                 onValueChange = onValue,
                 valueRange = valueRange,
                 steps = steps,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(36.dp),
             )
-            IconButton(onClick = onPlus) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary)
+            IconButton(onClick = onPlus, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             }
         }
     }

@@ -29,6 +29,8 @@ class TerminalController(
 
     @Volatile var ctrlActive = false
     @Volatile var altActive = false
+    /** 粘滞修饰键被一次输入消费后回调（让 UI 熄灭 Ctrl/Alt 高亮）——实现 one-shot「用一次即取消」。 */
+    var onModifiersConsumed: (() -> Unit)? = null
 
     /** 当前字号（sp），由 UI 初始化；捏合缩放时按 sp 步进，回调 [onFontSizeSp] 让上层持久化。 */
     var fontSizeSp: Float = DEFAULT_FONT_SIZE_SP
@@ -102,7 +104,16 @@ class TerminalController(
     override fun readAltKey(): Boolean = altActive
     override fun readShiftKey(): Boolean = false
     override fun readFnKey(): Boolean = false
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean {
+        // one-shot 粘滞修饰：本次按键的 ctrl/alt 已在 TerminalView 内读入本地变量并会照常应用，
+        // 这里把吸附状态复位（下次按键不再带修饰）并通知 UI 熄灭高亮。返回 false 不拦截本次输入。
+        if (ctrlActive || altActive) {
+            ctrlActive = false
+            altActive = false
+            onModifiersConsumed?.invoke()
+        }
+        return false
+    }
     override fun onEmulatorSet() { view?.setTerminalCursorBlinkerState(cursorBlink, true) }
 
     // ---------- 日志（两个接口共用同签名，单实现即可）----------
@@ -117,7 +128,7 @@ class TerminalController(
     companion object {
         private const val TAG = "moke"
         // 与 SettingsStore 的字号范围/默认保持一致（避免耦合，此处复述常量）。
-        const val DEFAULT_FONT_SIZE_SP = 11f
+        const val DEFAULT_FONT_SIZE_SP = 11.5f
         const val FONT_SIZE_STEP = 0.5f
         const val MIN_FONT_SIZE_SP = 8f
         const val MAX_FONT_SIZE_SP = 24f

@@ -39,7 +39,7 @@ class SettingsStore(private val context: Context) {
 
     companion object {
         // 字号（sp）：默认 11，0.5 步进；范围 8–24（上限收窄，24sp 在手机上已很大，避免滑轨大半落在不可用大字号）。
-        const val DEFAULT_FONT_SIZE_SP = 11f
+        const val DEFAULT_FONT_SIZE_SP = 11.5f
         const val MIN_FONT_SIZE_SP = 8f
         const val MAX_FONT_SIZE_SP = 24f
         const val FONT_SIZE_STEP = 0.5f

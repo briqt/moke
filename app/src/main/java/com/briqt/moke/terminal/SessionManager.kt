@@ -3,9 +3,15 @@ package com.briqt.moke.terminal
 import android.content.Context
 import com.briqt.moke.data.Host
 import com.termux.terminal.TerminalSession
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 
@@ -19,14 +25,39 @@ class TermSession(
     val host: Host,
     val controller: TerminalController,
     val session: TerminalSession,
-    /** 终端标题（转义序列设置，缺省用连接名）。 */
+    /** 原生动态标题（转义序列设置，缺省用连接名）。展示请用 [displayTitle]。 */
     val title: StateFlow<String>,
+    /** 用户自定义标题：非空则优先级最高，完全覆盖动态标题与前缀。 */
+    val customTitle: MutableStateFlow<String?>,
+    /** 标题前缀：叠加在动态标题之前（customTitle 存在时忽略）。 */
+    val titlePrefix: MutableStateFlow<String?>,
+    /** 最终展示标题：customTitle 优先，否则「前缀 + 去掉 mosh 原生前缀后的动态标题」。 */
+    val displayTitle: StateFlow<String>,
     /** 传输是否仍存活（false = 会话已结束）。 */
     val alive: StateFlow<Boolean>,
     /** 实时网络往返延迟（ms，null=未知/不适用）。 */
     val latency: StateFlow<Int?>,
     val startedAt: Long,
-)
+) {
+    /** 设自定义标题（空白视为清除，回落到动态标题）。 */
+    fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
+    /** 设标题前缀（空白视为清除）。 */
+    fun setTitlePrefix(p: String?) { titlePrefix.value = p?.trim()?.ifBlank { null } }
+
+    companion object {
+        // mosh-client 原生给窗口标题加固定前缀 "[mosh] "（mosh 1.4.0 stmclient.cc: L"[mosh] "，仅一个空格、无点）；
+        // 协议已由徽标标识，展示时去掉它。防御性地允许重复与多余空白/点。
+        private val MOSH_PREFIX = Regex("^(?:\\[mosh][\\s.·]*)+", RegexOption.IGNORE_CASE)
+
+        /** 组合最终展示标题（见 [displayTitle] 语义）。 */
+        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, prefix: String?): String {
+            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+            val base = if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
+            val p = prefix?.trim()?.takeIf { it.isNotEmpty() }
+            return if (p != null) "$p $base" else base
+        }
+    }
+}
 
 /**
  * 多会话管理器（总纲 §5.6「ViewModel 持有会话列表」）。会话对象常驻 ViewModel，不随导航销毁，
@@ -35,6 +66,8 @@ class TermSession(
 class SessionManager(context: Context) {
 
     private val appContext = context.applicationContext
+    // 常驻作用域：派生 displayTitle 的 stateIn 用（与 SessionManager 同生命周期，即整个 app）。
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _sessions = MutableStateFlow<List<TermSession>>(emptyList())
     val sessions: StateFlow<List<TermSession>> = _sessions.asStateFlow()
@@ -42,6 +75,8 @@ class SessionManager(context: Context) {
     /** 为主机新建一个会话（传输在首次 attach 到已测量的 View 时才真正 start）。[jumpHost] 为已解析的跳板机。 */
     fun open(host: Host, jumpHost: Host? = null): TermSession {
         val title = MutableStateFlow(host.displayName)
+        val customTitle = MutableStateFlow<String?>(null)
+        val titlePrefix = MutableStateFlow<String?>(null)
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
         val controller = TerminalController(
@@ -54,12 +89,18 @@ class SessionManager(context: Context) {
         val transport = if (host.useMosh) MoshTransport(host, appContext, jumpHost)
         else SshTransport(host, appContext, jumpHost, onLatency = { latency.value = it })
         val session = TerminalSession(transport, 2000, controller)
+        val displayTitle = combine(title, customTitle, titlePrefix) { raw, custom, prefix ->
+            TermSession.composeTitle(host.useMosh, raw, custom, prefix)
+        }.stateIn(scope, SharingStarted.Eagerly, host.displayName)
         val ts = TermSession(
             id = UUID.randomUUID().toString(),
             host = host,
             controller = controller,
             session = session,
             title = title.asStateFlow(),
+            customTitle = customTitle,
+            titlePrefix = titlePrefix,
+            displayTitle = displayTitle,
             alive = alive.asStateFlow(),
             latency = latency.asStateFlow(),
             startedAt = System.currentTimeMillis(),

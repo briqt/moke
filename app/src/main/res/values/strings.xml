@@ -35,6 +35,10 @@
     <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
+    <string name="session_set_title">Set title</string>
+    <string name="session_set_prefix">Title prefix</string>
+    <string name="session_title_hint">Custom title (empty restores the dynamic title)</string>
+    <string name="session_prefix_hint">Prefix (added before the dynamic title)</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">Group</string>
@@ -46,7 +50,7 @@
     <string name="menu_appearance">Appearance</string>
     <string name="menu_appearance_sub">Font · Colors · Size · Cursor</string>
     <string name="menu_about">About</string>
-    <string name="menu_about_sub">Version · Licenses</string>
+    <string name="menu_about_sub">Version</string>
     <string name="menu_language">Language</string>
 
     <!-- 语言选择 -->
@@ -81,6 +85,8 @@
     <string name="reset_font_size">Reset font size</string>
     <string name="hide_extra_keys">Hide shortcut keys</string>
     <string name="show_extra_keys">Show shortcut keys</string>
+    <string name="show_keyboard">Show keyboard</string>
+    <string name="close_connection">Close connection</string>
     <string name="reset_default">Reset</string>
     <string name="zoom_hint">Size %1$s sp · %2$d%%</string>
 

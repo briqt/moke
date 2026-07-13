@@ -35,6 +35,10 @@
     <string name="empty_sessions_hint">在「连接」里选择一台主机开始</string>
     <string name="session_ended_short">已结束</string>
     <string name="close_session">关闭会话</string>
+    <string name="session_set_title">修改标题</string>
+    <string name="session_set_prefix">标题前缀</string>
+    <string name="session_title_hint">自定义标题（留空则恢复动态标题）</string>
+    <string name="session_prefix_hint">前缀（叠加在动态标题之前）</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">分组</string>
@@ -46,7 +50,7 @@
     <string name="menu_appearance">外观</string>
     <string name="menu_appearance_sub">字体 · 配色 · 字号 · 光标</string>
     <string name="menu_about">关于</string>
-    <string name="menu_about_sub">版本 · 开源许可</string>
+    <string name="menu_about_sub">版本</string>
     <string name="menu_language">语言</string>
 
     <!-- 语言选择 -->
@@ -81,6 +85,8 @@
     <string name="reset_font_size">恢复默认字号</string>
     <string name="hide_extra_keys">隐藏底部快捷键</string>
     <string name="show_extra_keys">显示底部快捷键</string>
+    <string name="show_keyboard">弹出键盘</string>
+    <string name="close_connection">关闭连接</string>
     <string name="reset_default">恢复默认</string>
     <string name="zoom_hint">字号 %1$ssp · %2$d%%</string>
 
