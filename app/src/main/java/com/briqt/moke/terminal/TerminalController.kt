@@ -120,6 +120,6 @@ class TerminalController(
         const val DEFAULT_FONT_SIZE_SP = 11f
         const val FONT_SIZE_STEP = 0.5f
         const val MIN_FONT_SIZE_SP = 8f
-        const val MAX_FONT_SIZE_SP = 32f
+        const val MAX_FONT_SIZE_SP = 24f
     }
 }

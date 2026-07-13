@@ -38,15 +38,15 @@ class SettingsStore(private val context: Context) {
     private val extraKeysVisibleKey = booleanPreferencesKey("extra_keys_visible")
 
     companion object {
-        // 字号（sp）：默认 11，0.5 步进；范围 8–32。
+        // 字号（sp）：默认 11，0.5 步进；范围 8–24（上限收窄，24sp 在手机上已很大，避免滑轨大半落在不可用大字号）。
         const val DEFAULT_FONT_SIZE_SP = 11f
         const val MIN_FONT_SIZE_SP = 8f
-        const val MAX_FONT_SIZE_SP = 32f
+        const val MAX_FONT_SIZE_SP = 24f
         const val FONT_SIZE_STEP = 0.5f
-        // 行距/字间距：1.0=默认；以 0.1 步进微调。
+        // 行距/字间距：1.0=默认；范围绕 1.0 对称（0.7–1.3），默认落在滑轨正中；以 0.1 步进微调。
         const val DEFAULT_SPACING = 1.0f
-        const val MIN_SPACING = 0.8f
-        const val MAX_SPACING = 1.6f
+        const val MIN_SPACING = 0.7f
+        const val MAX_SPACING = 1.3f
         // 默认字体（"恢复默认"目标；与 FontCatalog 保持一致）。
         const val DEFAULT_FALLBACK_FONT_ID = "noto_sans_sc"
 
