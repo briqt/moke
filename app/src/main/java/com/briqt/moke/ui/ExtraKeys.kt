@@ -12,9 +12,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -30,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -96,10 +101,12 @@ fun ExtraKeys(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { key ->
                         val active = key is ExtraKey.Mod && ((key.ctrl && ctrlOn) || (!key.ctrl && altOn))
-                        // 「文本」段入口键按语言本地化；其余键位（ESC/TAB/箭头等）为通用符号，保持原样。
-                        val label = if (key is ExtraKey.Action && key.id == "composer") stringResource(R.string.key_text) else key.label
+                        // 「文本段」入口用图标（与符号键风格一致、无需 i18n）；本地化文案作无障碍描述。
+                        val isComposer = key is ExtraKey.Action && key.id == "composer"
+                        val label = if (isComposer) stringResource(R.string.key_text) else key.label
                         KeyCap(
                             label = label,
+                            icon = if (isComposer) Icons.Filled.EditNote else null,
                             active = active,
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -118,7 +125,7 @@ fun ExtraKeys(
 }
 
 @Composable
-private fun KeyCap(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun KeyCap(label: String, active: Boolean, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
     // 近乎平直的键帽（3dp 微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
     Surface(
         onClick = onClick,
@@ -128,9 +135,14 @@ private fun KeyCap(label: String, active: Boolean, modifier: Modifier = Modifier
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // 方向键单字符符号（↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签（含 Enter）保持 13sp。
-            val glyph = label.length == 1 && label[0] in "↑↓←→"
-            Text(label, fontFamily = MokeMono, fontSize = if (glyph) 17.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            if (icon != null) {
+                // 图标键（如文本段入口）：label 作无障碍描述，视觉用图标。
+                Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
+            } else {
+                // 方向键单字符符号（↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签（含 Enter）保持 13sp。
+                val glyph = label.length == 1 && label[0] in "↑↓←→"
+                Text(label, fontFamily = MokeMono, fontSize = if (glyph) 17.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
         }
     }
 }

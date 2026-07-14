@@ -272,7 +272,8 @@ private fun ConnectionsContent(
                     groups.forEach { (g, list) ->
                         item(key = "hdr_$g") { GroupHeader(g) }
                         items(list.sortedWith(cmp), key = { it.id }) { host ->
-                            HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
+                            // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
+                            HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false)
                         }
                     }
                 } else {
@@ -387,6 +388,8 @@ private fun HostCard(
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
+    // 是否在副标题尾部展示分组名：按项目分组时分组头已展示、置 false 免重复；平铺/不分组时置 true。
+    showGroup: Boolean = true,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
 ) {
@@ -420,7 +423,7 @@ private fun HostCard(
                 }
                 Text(
                     "${host.username}@${host.host}:${host.port}" +
-                        (if (host.group.isNotBlank()) "  · ${host.group}" else ""),
+                        (if (host.group.isNotBlank() && showGroup) "  · ${host.group}" else ""),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = MokeMono,
