@@ -183,6 +183,23 @@ class SshTransport(
         }
     }
 
+    /**
+     * 带外执行命令并返回 stdout（tmux 侧通道管理用）：在已建立的 [ssh] 连接上开新 exec 通道，静默、不占前台 PTY。
+     * 未连上/已关闭返回 null（调用方据此判定"尚未就绪、可重试"）；跑通但无输出返回空串；异常返回 null。
+     */
+    override fun exec(command: String): String? {
+        val client = ssh ?: return null
+        if (closed) return null
+        return runCatching {
+            client.startSession().use { s ->
+                val cmd = s.exec(command)
+                val out = cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
+                runCatching { cmd.join(10, java.util.concurrent.TimeUnit.SECONDS) }
+                out
+            }
+        }.getOrNull()
+    }
+
     override fun close() {
         closed = true
         writeExec.execute {

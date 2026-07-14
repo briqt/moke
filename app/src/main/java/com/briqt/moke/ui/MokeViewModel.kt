@@ -9,6 +9,8 @@ import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.MokeSessionService
+import com.briqt.moke.terminal.TermSession
+import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
@@ -20,6 +22,8 @@ import com.briqt.moke.terminal.FontRepository
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.terminal.TerminalThemes
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -169,6 +173,31 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 拖动重排会话（仅内存，无持久化）。 */
     fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
+
+    // ---------- tmux 侧通道管理（仅 SSH；mosh 无侧通道直接跳过）----------
+    /** 探测/刷新远端 tmux 会话列表；连接可能尚未就绪（exec 返回 null）→ 重试若干次。 */
+    fun refreshTmux(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
+        if (ts.host.useMosh) return@launch
+        var tries = 0
+        while (tries < 6 && isActive) {
+            val out = runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()
+            if (out != null) { ts.tmux.value = Tmux.parse(out); return@launch }
+            tries++
+            delay(1500)
+        }
+    }
+
+    /** 执行一条 tmux 管理命令后回刷列表。 */
+    private fun tmuxAction(ts: TermSession, cmd: String) = viewModelScope.launch(Dispatchers.IO) {
+        runCatching { ts.transport.exec(cmd) }
+        delay(150)
+        runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()?.let { ts.tmux.value = Tmux.parse(it) }
+    }
+    fun tmuxNew(ts: TermSession, name: String) = tmuxAction(ts, Tmux.newCmd(name))
+    fun tmuxRename(ts: TermSession, id: String, name: String) = tmuxAction(ts, Tmux.renameCmd(id, name))
+    fun tmuxKill(ts: TermSession, id: String) = tmuxAction(ts, Tmux.killCmd(id))
+    /** 附加：注入当前前台 PTY（会显示在用户画面，符合预期）。 */
+    fun tmuxAttach(ts: TermSession, name: String) { ts.session.write(Tmux.attachInput(name)) }
 
     /** 记录最近连接时间（用于"最近连接"排序）。 */
     fun touchHost(host: Host) = viewModelScope.launch {

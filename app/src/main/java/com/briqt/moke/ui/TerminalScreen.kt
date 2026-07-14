@@ -23,10 +23,13 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
 import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,12 +86,21 @@ fun TerminalScreen(
     onClose: () -> Unit,
     onFontSize: (Float) -> Unit,
     onToggleExtraKeys: () -> Unit,
+    onTmuxRefresh: () -> Unit,
+    onTmuxNew: (String) -> Unit,
+    onTmuxRename: (String, String) -> Unit,
+    onTmuxKill: (String) -> Unit,
+    onTmuxAttach: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
+    val tmux by ts.tmux.collectAsState()
+    var showTmux by remember(ts.id) { mutableStateOf(false) }
+    // 进入会话后探测远端 tmux（连接就绪前会重试；mosh 直接跳过）。
+    LaunchedEffect(ts.id) { onTmuxRefresh() }
     var ctrlOn by remember(ts.id) { mutableStateOf(false) }
     var altOn by remember(ts.id) { mutableStateOf(false) }
 
@@ -185,6 +197,8 @@ fun TerminalScreen(
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
+                tmuxCount = tmux.size,
+                onOpenTmux = { onTmuxRefresh(); showTmux = true },
                 onFontSize = onFontSize,
                 onToggleExtraKeys = onToggleExtraKeys,
                 onSetTitle = { showTitleDialog = true },
@@ -290,6 +304,17 @@ fun TerminalScreen(
             onDismiss = { showTitleDialog = false },
         )
     }
+
+    if (showTmux) {
+        TmuxPanel(
+            sessions = tmux,
+            onDismiss = { showTmux = false },
+            onAttach = { onTmuxAttach(it.name); controller.showKeyboard() },
+            onRename = { s, name -> onTmuxRename(s.id, name) },
+            onKill = { onTmuxKill(it.id) },
+            onNew = { onTmuxNew(it) },
+        )
+    }
 }
 
 /** 字间距倍数（1.0=正常）→ Android Paint 的 letterSpacing（em）。±0.1 倍 ≈ ±0.05em，微调而不过火。 */
@@ -313,6 +338,8 @@ private fun TerminalTopBar(
     showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
+    tmuxCount: Int,
+    onOpenTmux: () -> Unit,
     onFontSize: (Float) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onSetTitle: () -> Unit,
@@ -367,6 +394,14 @@ private fun TerminalTopBar(
                         )
                         showLatency -> Text("· …", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         else -> {}
+                    }
+                }
+            }
+            // tmux 入口（⋮ 左侧）：仅侧通道检测到 tmux 会话时显示，带会话数角标；点开管理面板。零打扰。
+            if (tmuxCount > 0) {
+                IconButton(onClick = onOpenTmux) {
+                    BadgedBox(badge = { Badge { Text(tmuxCount.toString()) } }) {
+                        Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

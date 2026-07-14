@@ -144,6 +144,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         },
                         onFontSize = { vm.setFontSize(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
+                        onTmuxRefresh = { vm.refreshTmux(ts) },
+                        onTmuxNew = { vm.tmuxNew(ts, it) },
+                        onTmuxRename = { id, name -> vm.tmuxRename(ts, id, name) },
+                        onTmuxKill = { vm.tmuxKill(ts, it) },
+                        onTmuxAttach = { vm.tmuxAttach(ts, it) },
                     )
                 }
             }

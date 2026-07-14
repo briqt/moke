@@ -27,6 +27,16 @@
     <string name="drag_to_reorder">拖动排序</string>
     <string name="group_collapse">折叠分组</string>
     <string name="group_expand">展开分组</string>
+    <string name="tmux_title">tmux 会话</string>
+    <string name="tmux_open">tmux 会话</string>
+    <string name="tmux_new">新建会话</string>
+    <string name="tmux_attach">附加</string>
+    <string name="tmux_rename">重命名</string>
+    <string name="tmux_kill">关闭</string>
+    <string name="tmux_windows">%1$d 个窗口</string>
+    <string name="tmux_attached">已附加</string>
+    <string name="tmux_empty">没有 tmux 会话</string>
+    <string name="tmux_name_hint">会话名</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>

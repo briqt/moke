@@ -3,6 +3,7 @@ package com.briqt.moke.terminal
 import android.content.Context
 import com.briqt.moke.data.Host
 import com.termux.terminal.TerminalSession
+import com.termux.terminal.TerminalTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +26,8 @@ class TermSession(
     val host: Host,
     val controller: TerminalController,
     val session: TerminalSession,
+    /** 底层传输（用于 tmux 侧通道 exec 等带外能力）。 */
+    val transport: TerminalTransport,
     /** 原生动态标题（转义序列设置，缺省用连接名）。展示请用 [displayTitle]。 */
     val title: StateFlow<String>,
     /** 用户自定义标题：非空则优先级最高，完全覆盖动态标题。 */
@@ -41,6 +44,9 @@ class TermSession(
 ) {
     /** 最后活动时间（有终端输出即刷新）：用于「更新时间」排序。非响应式（普通 volatile），列表重组时读当前值即可，避免高频重排抖动。 */
     @Volatile var lastActivityAt: Long = startedAt
+
+    /** 远端 tmux 会话列表（侧通道探测所得；空=无/未探测/mosh 不支持）。终端页据此决定是否显示 tmux 入口。 */
+    val tmux: MutableStateFlow<List<TmuxSession>> = MutableStateFlow(emptyList())
 
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
@@ -111,6 +117,7 @@ class SessionManager(context: Context) {
             host = host,
             controller = controller,
             session = session,
+            transport = transport,
             title = title.asStateFlow(),
             customTitle = customTitle,
             displayTitle = displayTitle,

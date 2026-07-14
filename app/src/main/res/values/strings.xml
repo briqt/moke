@@ -27,6 +27,16 @@
     <string name="drag_to_reorder">Drag to reorder</string>
     <string name="group_collapse">Collapse group</string>
     <string name="group_expand">Expand group</string>
+    <string name="tmux_title">tmux sessions</string>
+    <string name="tmux_open">tmux sessions</string>
+    <string name="tmux_new">New session</string>
+    <string name="tmux_attach">Attach</string>
+    <string name="tmux_rename">Rename</string>
+    <string name="tmux_kill">Kill</string>
+    <string name="tmux_windows">%1$d windows</string>
+    <string name="tmux_attached">attached</string>
+    <string name="tmux_empty">No tmux sessions</string>
+    <string name="tmux_name_hint">Session name</string>
     <string name="host_edit">Edit</string>
     <string name="host_duplicate">Duplicate</string>
     <string name="host_copy_command">Copy connect command</string>
