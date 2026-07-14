@@ -176,6 +176,7 @@ fun TerminalScreen(
             // 连接信息收进顶栏，不再单独占用终端区域。
             TerminalTopBar(
                 title = title,
+                deviceName = ts.host.label.trim(),
                 host = "${ts.host.username}@${ts.host.host}",
                 useMosh = ts.host.useMosh,
                 alive = alive,
@@ -306,12 +307,13 @@ fun fmtFontSize(sp: Float): String =
     if (sp % 1f == 0f) sp.toInt().toString() else String.format("%.1f", sp)
 
 /**
- * 终端双行顶栏：返回 · 主标题（会话名）+ 副标题（user@host · 协议 · 延迟）· 文本段入口。
+ * 终端双行顶栏：返回 · 主标题（会话名）+ 副标题（设备名（固定）· user@host · 协议 · 延迟）· 文本段入口。
  * 连接信息收进副标题，弱化色、等宽、单行省略，不占用终端渲染区域。延迟仅 SSH 实时探测。
  */
 @Composable
 private fun TerminalTopBar(
     title: String,
+    deviceName: String,
     host: String,
     useMosh: Boolean,
     alive: Boolean,
@@ -349,6 +351,17 @@ private fun TerminalTopBar(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    // 设备名（连接名）固定在副标题最左，独立于前缀；仅在用户命名了连接时显示。
+                    if (deviceName.isNotEmpty()) {
+                        Text(
+                            deviceName,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                     Text(
                         host,
                         fontFamily = MokeMono,

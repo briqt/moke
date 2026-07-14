@@ -79,16 +79,16 @@ class SessionManager(context: Context) {
     /**
      * 为主机新建一个会话（传输在首次 attach 到已测量的 View 时才真正 start）。[jumpHost] 为已解析的跳板机。
      *
-     * 标题默认：前缀=连接名（[Host.label]，空则无前缀），动态标题基座=`user@host`（不用 displayName，
-     * 否则有 label 时前缀与基座重复成 "prod prod"）；shell 上报 OSC 标题后基座被替换。
+     * 标题默认：无前缀（连接名改由副标题固定展示，与前缀无关）；动态标题基座=`user@host`，
+     * shell 上报 OSC 标题后被替换。前缀改为纯手动可选项。
      *
      * 复制（[carryFrom] 非空）：沿用来源会话当前的自定义标题与前缀，并生成一个同主机内不重复的标记
      * （如 "(2)"）附加在标题末尾，避免两个同源会话看起来一模一样。
      */
     fun open(host: Host, jumpHost: Host? = null, carryFrom: TermSession? = null): TermSession {
         val baseTitle = baseTitleOf(host)
-        val initialPrefix = if (carryFrom != null) carryFrom.titlePrefix.value
-            else host.label.trim().ifBlank { null }
+        // 不设默认前缀；复制时沿用来源前缀，新建会话无前缀（连接名由副标题固定展示）。
+        val initialPrefix = carryFrom?.titlePrefix?.value
         val initialCustom = carryFrom?.customTitle?.value
         val mark = if (carryFrom != null) nextCopyMark(host.id) else null
 

@@ -481,7 +481,7 @@ private fun SessionCard(
                         )
                     }
                 }
-                // 与终端详情页顶栏同款双行布局：标题在上，user@host · 协议徽标 · 延迟 在下。
+                // 与终端详情页顶栏同款双行布局：标题在上，设备名（固定）· user@host · 协议徽标 · 延迟 在下。
                 Column(modifier = Modifier.weight(1f).padding(start = if (dragHandle != null) 4.dp else 0.dp)) {
                     Text(
                         title,
@@ -492,6 +492,18 @@ private fun SessionCard(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        // 设备名（连接名）固定在副标题最左，独立于前缀；仅在用户命名了连接时显示。
+                        val deviceName = ts.host.label.trim()
+                        if (deviceName.isNotEmpty()) {
+                            Text(
+                                deviceName,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
                         Text(
                             "${ts.host.username}@${ts.host.host}",
                             fontFamily = MokeMono,
