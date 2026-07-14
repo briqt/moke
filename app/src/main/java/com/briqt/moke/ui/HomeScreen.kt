@@ -26,8 +26,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -139,6 +141,28 @@ fun HomeScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
+                // 分组/排序收进标题栏右侧（两个紧凑胶囊），省下列表上方那一行；仅连接/会话页、多于 1 项时显示。
+                actions = {
+                    when (tab) {
+                        HomeTab.Connections -> if (hosts.size > 1) GroupSortActions(
+                            groupBy = hostGroupBy,
+                            groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT),
+                            onGroupBy = onHostGroupBy,
+                            sortBy = hostSortBy,
+                            sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
+                            onSortBy = onHostSortBy,
+                        )
+                        HomeTab.Sessions -> if (sessions.size > 1) GroupSortActions(
+                            groupBy = sessionGroupBy,
+                            groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT, GroupBy.HOST, GroupBy.DATE),
+                            onGroupBy = onSessionGroupBy,
+                            sortBy = sessionSortBy,
+                            sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
+                            onSortBy = onSessionSortBy,
+                        )
+                        HomeTab.Settings -> {}
+                    }
+                },
                 // 略压高度（默认 64 → 49，较原 56 再收约 1/8）扩大可见区；标题在栏内垂直居中，收窄自然把上/下间距平分。
                 expandedHeight = 49.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -234,19 +258,8 @@ private fun ConnectionsContent(
         )
         return
     }
+    // 分组/排序控制已收进标题栏右侧（见 HomeScreen 的 TopAppBar actions）。
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-        // 分组 + 排序（两个正交维度，两个紧凑下拉）——仅多于 1 台时显示。连接页分组仅 无/项目。
-        if (hosts.size > 1) {
-            GroupSortBar(
-                groupBy = groupBy,
-                groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT),
-                onGroupBy = onGroupBy,
-                sortBy = sortBy,
-                sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
-                onSortBy = onSortBy,
-            )
-        }
-
         if (sortBy == SortBy.MANUAL) {
             // 手动排序：忽略分组，平铺按存储顺序、长按拖动重排并持久化。
             ReorderableColumn(
@@ -296,10 +309,11 @@ private fun hostComparator(sortBy: SortBy): Comparator<Host> = when (sortBy) {
 private const val UNGROUPED_KEY = " __ungrouped__"
 
 /**
- * 分组 / 排序控制条：两个紧凑下拉（[分组 ▾] [排序 ▾]），连接页与会话页共用。两者正交；每页只传入适用维度子集。
+ * 分组 / 排序控制（标题栏右侧两个紧凑胶囊：[▤ 值 ▾] [↕ 值 ▾]），连接页与会话页共用。
+ * 两者正交；每页只传入适用维度子集。图标区分分组/排序，胶囊上显示当前值。
  */
 @Composable
-private fun GroupSortBar(
+private fun GroupSortActions(
     groupBy: GroupBy,
     groupOptions: List<GroupBy>,
     onGroupBy: (GroupBy) -> Unit,
@@ -308,12 +322,13 @@ private fun GroupSortBar(
     onSortBy: (SortBy) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(end = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PickerChip(
             label = stringResource(R.string.sort_group),
+            leadingIcon = Icons.Filled.Category,
             valueText = stringResource(groupBy.labelRes),
             options = groupOptions.map { it to stringResource(it.labelRes) },
             selected = groupBy,
@@ -321,6 +336,7 @@ private fun GroupSortBar(
         )
         PickerChip(
             label = stringResource(R.string.sort_label),
+            leadingIcon = Icons.AutoMirrored.Filled.Sort,
             valueText = stringResource(sortBy.labelRes),
             options = sortOptions.map { it to stringResource(it.labelRes) },
             selected = sortBy,
@@ -329,7 +345,7 @@ private fun GroupSortBar(
     }
 }
 
-/** 通用下拉胶囊：显示「标签 值 ▾」，点开列出候选，当前项打勾。 */
+/** 通用下拉胶囊：显示「图标/标签 + 当前值 + ▾」，点开列出候选、当前项打勾。[leadingIcon] 非空则用图标取代文字标签（标签作无障碍描述）。 */
 @Composable
 private fun <T> PickerChip(
     label: String,
@@ -337,6 +353,7 @@ private fun <T> PickerChip(
     options: List<Pair<T, String>>,
     selected: T,
     onSelect: (T) -> Unit,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -346,11 +363,15 @@ private fun <T> PickerChip(
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
         ) {
             Row(
-                modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (leadingIcon != null) {
+                    Icon(leadingIcon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                } else {
+                    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Text(valueText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
                 Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }
@@ -516,19 +537,8 @@ private fun SessionsContent(
         )
         return
     }
+    // 分组/排序控制已收进标题栏右侧（见 HomeScreen 的 TopAppBar actions）。
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-        // 分组 + 排序（两个正交维度）——仅多于 1 个会话时显示。会话分组含 无/项目/主机/日期。
-        if (sessions.size > 1) {
-            GroupSortBar(
-                groupBy = groupBy,
-                groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT, GroupBy.HOST, GroupBy.DATE),
-                onGroupBy = onGroupBy,
-                sortBy = sortBy,
-                sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
-                onSortBy = onSortBy,
-            )
-        }
-
         if (sortBy == SortBy.MANUAL) {
             // 手动排序：忽略分组，平铺长按拖动重排（仅内存顺序）。
             ReorderableColumn(
