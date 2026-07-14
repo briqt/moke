@@ -35,8 +35,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
     val hosts by vm.hosts.collectAsState()
     val sessions by vm.sessions.sessions.collectAsState()
-    val hostGroupBy by vm.hostGroupBy.collectAsState()
-    val hostSortBy by vm.hostSortBy.collectAsState()
+    val hostGroupOrder by vm.hostGroupOrder.collectAsState()
+    val hostCollapsedGroups by vm.hostCollapsedGroups.collectAsState()
     val sessionGroupBy by vm.sessionGroupBy.collectAsState()
     val sessionSortBy by vm.sessionSortBy.collectAsState()
     val schemeId by vm.colorSchemeId.collectAsState()
@@ -73,10 +73,10 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onTab = { homeTab = it },
             hosts = hosts,
             sessions = sessions,
-            hostGroupBy = hostGroupBy,
-            hostSortBy = hostSortBy,
-            onHostGroupBy = { vm.setHostGroupBy(it) },
-            onHostSortBy = { vm.setHostSortBy(it) },
+            hostGroupOrder = hostGroupOrder,
+            hostCollapsedGroups = hostCollapsedGroups,
+            onReorderHostGroups = { vm.setHostGroupOrder(it) },
+            onToggleHostGroupCollapse = { vm.toggleHostGroupCollapsed(it) },
             sessionGroupBy = sessionGroupBy,
             sessionSortBy = sessionSortBy,
             onSessionGroupBy = { vm.setSessionGroupBy(it) },

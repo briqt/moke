@@ -31,9 +31,10 @@ class SettingsStore(private val context: Context) {
     private val fontSizeKey = floatPreferencesKey("font_size_sp_f")    // 新键（Float，支持 0.5 步进）
     private val cursorStyleKey = intPreferencesKey("cursor_style")
     private val cursorBlinkKey = booleanPreferencesKey("cursor_blink")
-    // 分组 / 排序：连接页与会话页各自持久化两个正交维度。
-    private val hostGroupByKey = stringPreferencesKey("host_group_by")
-    private val hostSortByKey = stringPreferencesKey("host_sort_by")
+    // 连接页：固定按项目分组（不再有维度选择），仅持久化「分组顺序」与「已折叠的分组」。
+    private val hostGroupOrderKey = stringPreferencesKey("host_group_order")
+    private val hostCollapsedGroupsKey = stringPreferencesKey("host_collapsed_groups")
+    // 会话页：仍是分组 / 排序两个正交维度。
     private val sessionGroupByKey = stringPreferencesKey("session_group_by")
     private val sessionSortByKey = stringPreferencesKey("session_sort_by")
     private val lineSpacingKey = floatPreferencesKey("line_spacing_mul")
@@ -94,13 +95,13 @@ class SettingsStore(private val context: Context) {
         prefs[extraKeysVisibleKey] ?: true
     }
 
-    /** 连接页分组维度（默认按项目）。 */
-    val hostGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
-        GroupBy.fromName(prefs[hostGroupByKey], GroupBy.PROJECT)
+    /** 连接页分组显示顺序（组名列表；空=按主机首次出现序）。 */
+    val hostGroupOrder: Flow<List<String>> = context.settingsDataStore.data.map { prefs ->
+        decodeStringList(prefs[hostGroupOrderKey])
     }
-    /** 连接页排序维度（默认按名称）。 */
-    val hostSortBy: Flow<SortBy> = context.settingsDataStore.data.map { prefs ->
-        SortBy.fromName(prefs[hostSortByKey], SortBy.NAME)
+    /** 连接页已折叠的分组（组名集合）。 */
+    val hostCollapsedGroups: Flow<Set<String>> = context.settingsDataStore.data.map { prefs ->
+        decodeStringList(prefs[hostCollapsedGroupsKey]).toSet()
     }
     /** 会话页分组维度（默认按项目）。 */
     val sessionGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
@@ -145,11 +146,11 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit { it[cursorBlinkKey] = blink }
     }
 
-    suspend fun setHostGroupBy(g: GroupBy) {
-        context.settingsDataStore.edit { it[hostGroupByKey] = g.name }
+    suspend fun setHostGroupOrder(order: List<String>) {
+        context.settingsDataStore.edit { it[hostGroupOrderKey] = encodeStringList(order) }
     }
-    suspend fun setHostSortBy(s: SortBy) {
-        context.settingsDataStore.edit { it[hostSortByKey] = s.name }
+    suspend fun setHostCollapsedGroups(collapsed: Set<String>) {
+        context.settingsDataStore.edit { it[hostCollapsedGroupsKey] = encodeStringList(collapsed.toList()) }
     }
     suspend fun setSessionGroupBy(g: GroupBy) {
         context.settingsDataStore.edit { it[sessionGroupByKey] = g.name }
@@ -218,5 +219,20 @@ class SettingsStore(private val context: Context) {
         val arr = JSONArray()
         list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name)) }
         return arr.toString()
+    }
+
+    /** 字符串列表 JSON 编解码（分组顺序 / 折叠集合用）。 */
+    private fun encodeStringList(list: List<String>): String {
+        val arr = JSONArray()
+        list.forEach { arr.put(it) }
+        return arr.toString()
+    }
+
+    private fun decodeStringList(s: String?): List<String> {
+        if (s.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { arr.getString(it) }
+        }.getOrDefault(emptyList())
     }
 }

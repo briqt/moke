@@ -25,6 +25,8 @@
     <string name="sort_label">排序</string>
     <string name="ungrouped">未分组</string>
     <string name="drag_to_reorder">拖动排序</string>
+    <string name="group_collapse">折叠分组</string>
+    <string name="group_expand">展开分组</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>

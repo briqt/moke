@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
@@ -106,10 +108,10 @@ fun HomeScreen(
     onTab: (HomeTab) -> Unit,
     hosts: List<Host>,
     sessions: List<TermSession>,
-    hostGroupBy: GroupBy,
-    hostSortBy: SortBy,
-    onHostGroupBy: (GroupBy) -> Unit,
-    onHostSortBy: (SortBy) -> Unit,
+    hostGroupOrder: List<String>,
+    hostCollapsedGroups: Set<String>,
+    onReorderHostGroups: (List<String>) -> Unit,
+    onToggleHostGroupCollapse: (String) -> Unit,
     sessionGroupBy: GroupBy,
     sessionSortBy: SortBy,
     onSessionGroupBy: (GroupBy) -> Unit,
@@ -141,17 +143,10 @@ fun HomeScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                // 分组/排序收进标题栏右侧（两个紧凑胶囊），省下列表上方那一行；仅连接/会话页、多于 1 项时显示。
+                // 会话页把分组/排序收进标题栏右侧（两个紧凑胶囊）；连接页固定按项目分组、无排序，故不放按钮。
                 actions = {
                     when (tab) {
-                        HomeTab.Connections -> if (hosts.size > 1) GroupSortActions(
-                            groupBy = hostGroupBy,
-                            groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT),
-                            onGroupBy = onHostGroupBy,
-                            sortBy = hostSortBy,
-                            sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
-                            onSortBy = onHostSortBy,
-                        )
+                        HomeTab.Connections -> {}
                         HomeTab.Sessions -> if (sessions.size > 1) GroupSortActions(
                             groupBy = sessionGroupBy,
                             groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT, GroupBy.HOST, GroupBy.DATE),
@@ -193,7 +188,7 @@ fun HomeScreen(
         },
     ) { padding ->
         when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupBy, hostSortBy, onHostGroupBy, onHostSortBy, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost, onReorderHosts)
+            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost)
             HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
         }
@@ -239,15 +234,15 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
 private fun ConnectionsContent(
     padding: PaddingValues,
     hosts: List<Host>,
-    groupBy: GroupBy,
-    sortBy: SortBy,
-    onGroupBy: (GroupBy) -> Unit,
-    onSortBy: (SortBy) -> Unit,
+    groupOrder: List<String>,
+    collapsed: Set<String>,
+    onToggleCollapse: (String) -> Unit,
+    onReorderGroups: (List<String>) -> Unit,
+    onReorderHosts: (List<Host>) -> Unit,
     onEdit: (Host) -> Unit,
     onDuplicate: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     onConnect: (Host) -> Unit,
-    onReorder: (List<Host>) -> Unit,
 ) {
     if (hosts.isEmpty()) {
         EmptyState(
@@ -258,51 +253,54 @@ private fun ConnectionsContent(
         )
         return
     }
-    // 分组/排序控制已收进标题栏右侧（见 HomeScreen 的 TopAppBar actions）。
+    fun keyOf(h: Host) = h.group.ifBlank { UNGROUPED_KEY }
+    // 固定按项目分组。分组显示顺序=持久化顺序（过滤到当前存在的组）+ 首次出现的新组补末尾。
+    val present = hosts.map { keyOf(it) }.distinct()
+    val orderedKeys = groupOrder.filter { it in present } + present.filter { it !in groupOrder }
+    val hasNamedGroup = present.any { it != UNGROUPED_KEY }
+
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-        if (sortBy == SortBy.MANUAL) {
-            // 手动排序：忽略分组，平铺按存储顺序、长按拖动重排并持久化。
+        if (!hasNamedGroup) {
+            // 一台主机都没设分组 → 退化成无分组头的平铺列表，仍可长按拖动重排。
             ReorderableColumn(
                 items = hosts,
                 key = { it.id },
-                onReorder = onReorder,
+                onReorder = onReorderHosts,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) { host, dragging, handle ->
                 HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
             }
         } else {
-            val cmp = hostComparator(sortBy)
-            LazyColumn(
+            val groups = orderedKeys.map { k -> ReorderGroup(k, hosts.filter { keyOf(it) == k }) }
+            GroupedReorderableList(
+                groups = groups,
+                itemKey = { it.id },
+                collapsed = collapsed,
+                onReorderGroups = onReorderGroups,
+                onReorderItems = { groupKey, newItems ->
+                    // 组内新序映射回扁平主机列表：其余主机位置不动，本组位置按新序回填。
+                    val iter = newItems.iterator()
+                    onReorderHosts(hosts.map { if (keyOf(it) == groupKey) iter.next() else it })
+                },
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(vertical = 12.dp),
-            ) {
-                if (groupBy == GroupBy.PROJECT) {
-                    // 未分组置底，其余按组名序；组内按当前排序维度。
-                    val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED_KEY } }
-                        .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
-                    groups.forEach { (g, list) ->
-                        item(key = "hdr_$g") { GroupHeader(g) }
-                        items(list.sortedWith(cmp), key = { it.id }) { host ->
-                            // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
-                            HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false)
-                        }
-                    }
-                } else {
-                    items(hosts.sortedWith(cmp), key = { it.id }) { host ->
-                        HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
-                    }
-                }
+                header = { key, dragging, handle ->
+                    GroupHeaderRow(
+                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else key,
+                        count = groups.firstOrNull { it.key == key }?.items?.size ?: 0,
+                        collapsed = key in collapsed,
+                        onToggle = { onToggleCollapse(key) },
+                        dragHandle = handle,
+                        dragging = dragging,
+                    )
+                },
+            ) { host, dragging, handle ->
+                // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging)
             }
         }
     }
-}
-
-/** 连接排序比较器（NAME=名称、RECENT=最近连接倒序；MANUAL 不走此处）。 */
-private fun hostComparator(sortBy: SortBy): Comparator<Host> = when (sortBy) {
-    SortBy.RECENT -> compareByDescending { it.lastConnectedAt }
-    else -> compareBy { it.displayName.lowercase() }
 }
 
 // 未分组分桶的哨兵键（不直接展示，展示时本地化为 R.string.ungrouped）。
@@ -413,6 +411,56 @@ private fun GroupHeader(name: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 2.dp),
     )
+}
+
+/** 连接页可折叠 + 可拖动的分组头：[chevron] 组名 计数 …… [拖动手柄]。点行体折叠/展开，长按手柄调分组顺序。 */
+@Composable
+private fun GroupHeaderRow(
+    name: String,
+    count: Int,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+    dragHandle: Modifier,
+    dragging: Boolean,
+) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(8.dp),
+        color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
+                contentDescription = stringResource(if (collapsed) R.string.group_expand else R.string.group_collapse),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                count.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Box(modifier = dragHandle) {
+                Icon(
+                    Icons.Filled.DragHandle,
+                    contentDescription = stringResource(R.string.drag_to_reorder),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
 }
 
 @Composable

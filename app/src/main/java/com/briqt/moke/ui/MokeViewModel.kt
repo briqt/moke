@@ -70,11 +70,12 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    // 分组 / 排序（两个正交维度）：连接页 + 会话页各一对，均持久化。
-    val hostGroupBy: StateFlow<GroupBy> = settings.hostGroupBy
-        .stateIn(viewModelScope, SharingStarted.Eagerly, GroupBy.PROJECT)
-    val hostSortBy: StateFlow<SortBy> = settings.hostSortBy
-        .stateIn(viewModelScope, SharingStarted.Eagerly, SortBy.NAME)
+    // 连接页：固定按项目分组，仅持久化「分组顺序」与「已折叠分组」。
+    val hostGroupOrder: StateFlow<List<String>> = settings.hostGroupOrder
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val hostCollapsedGroups: StateFlow<Set<String>> = settings.hostCollapsedGroups
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    // 会话页：分组 / 排序两个正交维度，均持久化。
     val sessionGroupBy: StateFlow<GroupBy> = settings.sessionGroupBy
         .stateIn(viewModelScope, SharingStarted.Eagerly, GroupBy.PROJECT)
     val sessionSortBy: StateFlow<SortBy> = settings.sessionSortBy
@@ -138,12 +139,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         store.upsert(copy, hosts.value)
     }
 
-    fun setHostGroupBy(g: GroupBy) = viewModelScope.launch { settings.setHostGroupBy(g) }
-    fun setHostSortBy(s: SortBy) = viewModelScope.launch { settings.setHostSortBy(s) }
     fun setSessionGroupBy(g: GroupBy) = viewModelScope.launch { settings.setSessionGroupBy(g) }
     fun setSessionSortBy(s: SortBy) = viewModelScope.launch { settings.setSessionSortBy(s) }
 
-    /** 手动拖动重排：持久化新的连接顺序（切到「手动」排序时生效）。 */
+    /** 连接页分组之间的顺序（长按分组头拖动后持久化）。 */
+    fun setHostGroupOrder(order: List<String>) = viewModelScope.launch { settings.setHostGroupOrder(order) }
+
+    /** 折叠/展开某个连接分组（跨重启记忆）。 */
+    fun toggleHostGroupCollapsed(group: String) = viewModelScope.launch {
+        val cur = hostCollapsedGroups.value
+        settings.setHostCollapsedGroups(if (group in cur) cur - group else cur + group)
+    }
+
+    /** 手动拖动重排：持久化新的连接顺序（组内拖动 / 无分组平铺拖动均走此处）。 */
     fun reorderHosts(newOrder: List<Host>) = viewModelScope.launch { store.save(newOrder) }
 
     /** 拖动重排会话（仅内存，无持久化）。 */
