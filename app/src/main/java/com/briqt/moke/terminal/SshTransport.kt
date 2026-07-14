@@ -86,20 +86,24 @@ class SshTransport(
                 out = sh.outputStream
                 startLatencyProbe(client)
 
-                // 连接成功后自动执行命令（追加换行触发）。
-                if (host.loginCommand.isNotBlank()) {
-                    runCatching {
-                        out?.write((host.loginCommand + "\n").toByteArray(StandardCharsets.UTF_8))
-                        out?.flush()
-                    }
-                }
-
                 val input = sh.inputStream
                 val buf = ByteArray(8192)
+                // 登录后自动执行命令：**等 shell 首个输出（提示符）到达、PTY 就绪后再发**，否则抢跑
+                // 会丢首字符（残行触发 `>` 续行提示符）、命令错乱。仅发一次。
+                var loginPending = host.loginCommand.isNotBlank()
                 while (!closed) {
                     val n = input.read(buf)
                     if (n == -1) break
-                    if (n > 0) session.processToEmulator(buf, n)
+                    if (n > 0) {
+                        session.processToEmulator(buf, n)
+                        if (loginPending) {
+                            loginPending = false
+                            runCatching {
+                                out?.write((host.loginCommand + "\n").toByteArray(StandardCharsets.UTF_8))
+                                out?.flush()
+                            }
+                        }
+                    }
                 }
                 session.onTransportFinished(0)
             } catch (e: Exception) {
