@@ -37,15 +37,22 @@
     <string name="close_session">关闭会话</string>
     <string name="duplicate_session">复制会话</string>
     <string name="session_set_title">修改标题</string>
-    <string name="session_set_prefix">标题前缀</string>
     <string name="session_title_hint">自定义标题（留空则恢复动态标题）</string>
-    <string name="session_prefix_hint">前缀（叠加在动态标题之前）</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">分组</string>
     <string name="sort_name">名称</string>
-    <string name="sort_recent">最近连接</string>
+    <string name="sort_recent">最近</string>
     <string name="sort_manual">手动</string>
+    <!-- 分组维度选项 -->
+    <string name="group_none">无</string>
+    <string name="group_project">项目</string>
+    <string name="group_host">主机</string>
+    <string name="group_date">日期</string>
+    <!-- 按日期分组的时间桶 -->
+    <string name="date_today">今天</string>
+    <string name="date_yesterday">昨天</string>
+    <string name="date_earlier">更早</string>
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">外观</string>

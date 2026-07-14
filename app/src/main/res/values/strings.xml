@@ -37,15 +37,22 @@
     <string name="close_session">Close session</string>
     <string name="duplicate_session">Duplicate session</string>
     <string name="session_set_title">Set title</string>
-    <string name="session_set_prefix">Title prefix</string>
     <string name="session_title_hint">Custom title (empty restores the dynamic title)</string>
-    <string name="session_prefix_hint">Prefix (added before the dynamic title)</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">Group</string>
     <string name="sort_name">Name</string>
     <string name="sort_recent">Recent</string>
     <string name="sort_manual">Manual</string>
+    <!-- 分组维度选项 -->
+    <string name="group_none">None</string>
+    <string name="group_project">Project</string>
+    <string name="group_host">Host</string>
+    <string name="group_date">Date</string>
+    <!-- 按日期分组的时间桶 -->
+    <string name="date_today">Today</string>
+    <string name="date_yesterday">Yesterday</string>
+    <string name="date_earlier">Earlier</string>
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">Appearance</string>

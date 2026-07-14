@@ -9,7 +9,8 @@ import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.MokeSessionService
-import com.briqt.moke.data.HostSort
+import com.briqt.moke.data.GroupBy
+import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
 import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.UserFont
@@ -69,8 +70,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    val hostSort: StateFlow<HostSort> = settings.hostSort
-        .stateIn(viewModelScope, SharingStarted.Eagerly, HostSort.DEFAULT)
+    // 分组 / 排序（两个正交维度）：连接页 + 会话页各一对，均持久化。
+    val hostGroupBy: StateFlow<GroupBy> = settings.hostGroupBy
+        .stateIn(viewModelScope, SharingStarted.Eagerly, GroupBy.PROJECT)
+    val hostSortBy: StateFlow<SortBy> = settings.hostSortBy
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SortBy.NAME)
+    val sessionGroupBy: StateFlow<GroupBy> = settings.sessionGroupBy
+        .stateIn(viewModelScope, SharingStarted.Eagerly, GroupBy.PROJECT)
+    val sessionSortBy: StateFlow<SortBy> = settings.sessionSortBy
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SortBy.RECENT)
 
     val lineSpacing: StateFlow<Float> = settings.lineSpacing
         .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_SPACING)
@@ -130,7 +138,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         store.upsert(copy, hosts.value)
     }
 
-    fun setHostSort(sort: HostSort) = viewModelScope.launch { settings.setHostSort(sort) }
+    fun setHostGroupBy(g: GroupBy) = viewModelScope.launch { settings.setHostGroupBy(g) }
+    fun setHostSortBy(s: SortBy) = viewModelScope.launch { settings.setHostSortBy(s) }
+    fun setSessionGroupBy(g: GroupBy) = viewModelScope.launch { settings.setSessionGroupBy(g) }
+    fun setSessionSortBy(s: SortBy) = viewModelScope.launch { settings.setSessionSortBy(s) }
 
     /** 手动拖动重排：持久化新的连接顺序（切到「手动」排序时生效）。 */
     fun reorderHosts(newOrder: List<Host>) = viewModelScope.launch { store.save(newOrder) }

@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -34,7 +36,6 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
@@ -85,9 +86,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
 import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
+import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
-import com.briqt.moke.data.HostSort
+import com.briqt.moke.data.SortBy
 import com.briqt.moke.terminal.TermSession
+import java.util.Calendar
 import com.briqt.moke.ui.theme.MokeMono
 
 /**
@@ -101,8 +104,14 @@ fun HomeScreen(
     onTab: (HomeTab) -> Unit,
     hosts: List<Host>,
     sessions: List<TermSession>,
-    sort: HostSort,
-    onSort: (HostSort) -> Unit,
+    hostGroupBy: GroupBy,
+    hostSortBy: SortBy,
+    onHostGroupBy: (GroupBy) -> Unit,
+    onHostSortBy: (SortBy) -> Unit,
+    sessionGroupBy: GroupBy,
+    sessionSortBy: SortBy,
+    onSessionGroupBy: (GroupBy) -> Unit,
+    onSessionSortBy: (SortBy) -> Unit,
     onAddHost: () -> Unit,
     onEditHost: (Host) -> Unit,
     onDuplicateHost: (Host) -> Unit,
@@ -160,8 +169,8 @@ fun HomeScreen(
         },
     ) { padding ->
         when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, sort, onSort, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost, onReorderHosts)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
+            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupBy, hostSortBy, onHostGroupBy, onHostSortBy, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost, onReorderHosts)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
         }
     }
@@ -206,8 +215,10 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
 private fun ConnectionsContent(
     padding: PaddingValues,
     hosts: List<Host>,
-    sort: HostSort,
-    onSort: (HostSort) -> Unit,
+    groupBy: GroupBy,
+    sortBy: SortBy,
+    onGroupBy: (GroupBy) -> Unit,
+    onSortBy: (SortBy) -> Unit,
     onEdit: (Host) -> Unit,
     onDuplicate: (Host) -> Unit,
     onDelete: (Host) -> Unit,
@@ -224,25 +235,20 @@ private fun ConnectionsContent(
         return
     }
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-        // 排序选择（分组 / 名称 / 最近连接 / 手动）——仅多于 1 台时显示；横向可滚免挤。
+        // 分组 + 排序（两个正交维度，两个紧凑下拉）——仅多于 1 台时显示。连接页分组仅 无/项目。
         if (hosts.size > 1) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(top = 12.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(R.string.sort_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HostSort.entries.forEach { s ->
-                    FilterChip(selected = sort == s, onClick = { onSort(s) }, label = { Text(stringResource(s.labelRes)) })
-                }
-            }
+            GroupSortBar(
+                groupBy = groupBy,
+                groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT),
+                onGroupBy = onGroupBy,
+                sortBy = sortBy,
+                sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
+                onSortBy = onSortBy,
+            )
         }
 
-        if (sort == HostSort.MANUAL) {
-            // 手动：按存储顺序展示，长按拖动重排并持久化。
+        if (sortBy == SortBy.MANUAL) {
+            // 手动排序：忽略分组，平铺按存储顺序、长按拖动重排并持久化。
             ReorderableColumn(
                 items = hosts,
                 key = { it.id },
@@ -253,32 +259,25 @@ private fun ConnectionsContent(
                 HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
             }
         } else {
+            val cmp = hostComparator(sortBy)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
-                when (sort) {
-                    HostSort.GROUP -> {
-                        // 未分组排在最后，其余按组名字母序；组内按名称
-                        val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED_KEY } }
-                            .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
-                        groups.forEach { (g, list) ->
-                            item(key = "hdr_$g") { GroupHeader(g) }
-                            items(list.sortedBy { it.displayName.lowercase() }, key = { it.id }) { host ->
-                                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
-                            }
-                        }
-                    }
-                    else -> {
-                        val sorted = if (sort == HostSort.NAME) {
-                            hosts.sortedBy { it.displayName.lowercase() }
-                        } else {
-                            hosts.sortedByDescending { it.lastConnectedAt }
-                        }
-                        items(sorted, key = { it.id }) { host ->
+                if (groupBy == GroupBy.PROJECT) {
+                    // 未分组置底，其余按组名序；组内按当前排序维度。
+                    val groups = hosts.groupBy { it.group.ifBlank { UNGROUPED_KEY } }
+                        .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
+                    groups.forEach { (g, list) ->
+                        item(key = "hdr_$g") { GroupHeader(g) }
+                        items(list.sortedWith(cmp), key = { it.id }) { host ->
                             HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
                         }
+                    }
+                } else {
+                    items(hosts.sortedWith(cmp), key = { it.id }) { host ->
+                        HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) })
                     }
                 }
             }
@@ -286,8 +285,88 @@ private fun ConnectionsContent(
     }
 }
 
+/** 连接排序比较器（NAME=名称、RECENT=最近连接倒序；MANUAL 不走此处）。 */
+private fun hostComparator(sortBy: SortBy): Comparator<Host> = when (sortBy) {
+    SortBy.RECENT -> compareByDescending { it.lastConnectedAt }
+    else -> compareBy { it.displayName.lowercase() }
+}
+
 // 未分组分桶的哨兵键（不直接展示，展示时本地化为 R.string.ungrouped）。
 private const val UNGROUPED_KEY = " __ungrouped__"
+
+/**
+ * 分组 / 排序控制条：两个紧凑下拉（[分组 ▾] [排序 ▾]），连接页与会话页共用。两者正交；每页只传入适用维度子集。
+ */
+@Composable
+private fun GroupSortBar(
+    groupBy: GroupBy,
+    groupOptions: List<GroupBy>,
+    onGroupBy: (GroupBy) -> Unit,
+    sortBy: SortBy,
+    sortOptions: List<SortBy>,
+    onSortBy: (SortBy) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PickerChip(
+            label = stringResource(R.string.sort_group),
+            valueText = stringResource(groupBy.labelRes),
+            options = groupOptions.map { it to stringResource(it.labelRes) },
+            selected = groupBy,
+            onSelect = onGroupBy,
+        )
+        PickerChip(
+            label = stringResource(R.string.sort_label),
+            valueText = stringResource(sortBy.labelRes),
+            options = sortOptions.map { it to stringResource(it.labelRes) },
+            selected = sortBy,
+            onSelect = onSortBy,
+        )
+    }
+}
+
+/** 通用下拉胶囊：显示「标签 值 ▾」，点开列出候选，当前项打勾。 */
+@Composable
+private fun <T> PickerChip(
+    label: String,
+    valueText: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            onClick = { open = true },
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(valueText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { (value, text) ->
+                DropdownMenuItem(
+                    text = { Text(text) },
+                    onClick = { onSelect(value); open = false },
+                    trailingIcon = if (value == selected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else null,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun GroupHeader(name: String) {
@@ -416,6 +495,10 @@ fun ProtocolBadge(mosh: Boolean) {
 private fun SessionsContent(
     padding: PaddingValues,
     sessions: List<TermSession>,
+    groupBy: GroupBy,
+    sortBy: SortBy,
+    onGroupBy: (GroupBy) -> Unit,
+    onSortBy: (SortBy) -> Unit,
     onOpen: (String) -> Unit,
     onClose: (String) -> Unit,
     onDuplicate: (String) -> Unit,
@@ -430,15 +513,86 @@ private fun SessionsContent(
         )
         return
     }
-    // 会话长按拖动重排（仅内存顺序）。
-    ReorderableColumn(
-        items = sessions,
-        key = { it.id },
-        onReorder = { list -> onReorder(list.map { it.id }) },
-        modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
-    ) { ts, dragging, handle ->
-        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
+    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+        // 分组 + 排序（两个正交维度）——仅多于 1 个会话时显示。会话分组含 无/项目/主机/日期。
+        if (sessions.size > 1) {
+            GroupSortBar(
+                groupBy = groupBy,
+                groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT, GroupBy.HOST, GroupBy.DATE),
+                onGroupBy = onGroupBy,
+                sortBy = sortBy,
+                sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
+                onSortBy = onSortBy,
+            )
+        }
+
+        if (sortBy == SortBy.MANUAL) {
+            // 手动排序：忽略分组，平铺长按拖动重排（仅内存顺序）。
+            ReorderableColumn(
+                items = sessions,
+                key = { it.id },
+                onReorder = { list -> onReorder(list.map { it.id }) },
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) { ts, dragging, handle ->
+                SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
+            }
+        } else {
+            val cmp = sessionComparator(sortBy)
+            val today = stringResource(R.string.date_today)
+            val yesterday = stringResource(R.string.date_yesterday)
+            val earlier = stringResource(R.string.date_earlier)
+            val now = System.currentTimeMillis()
+            // (分组标题?, 会话列表)：NONE 无标题平铺；其余按维度分桶、组内按排序维度。
+            val groups: List<Pair<String?, List<TermSession>>> = when (groupBy) {
+                GroupBy.NONE -> listOf(null to sessions.sortedWith(cmp))
+                GroupBy.PROJECT -> sessions.groupBy { it.host.group.ifBlank { UNGROUPED_KEY } }
+                    .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
+                    .map { (g, list) -> g to list.sortedWith(cmp) }
+                GroupBy.HOST -> sessions.groupBy { it.host.displayName }
+                    .toSortedMap(String.CASE_INSENSITIVE_ORDER)
+                    .map { (h, list) -> h to list.sortedWith(cmp) }
+                GroupBy.DATE -> {
+                    val order = listOf(today, yesterday, earlier)
+                    sessions.groupBy { dateBucket(it.startedAt, now, today, yesterday, earlier) }
+                        .toList()
+                        .sortedBy { order.indexOf(it.first) }
+                        .map { (d, list) -> d to list.sortedWith(cmp) }
+                }
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) {
+                groups.forEach { (header, list) ->
+                    if (header != null) item(key = "hdr_$header") { GroupHeader(header) }
+                    items(list, key = { it.id }) { ts ->
+                        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 会话排序比较器（NAME=当前标题、RECENT=开始时间倒序；MANUAL 不走此处）。 */
+private fun sessionComparator(sortBy: SortBy): Comparator<TermSession> = when (sortBy) {
+    SortBy.RECENT -> compareByDescending { it.startedAt }
+    else -> compareBy { it.displayTitle.value.lowercase() }
+}
+
+/** 会话开始时间归入 今天/昨天/更早（会话为内存态通常都是今天；后台持久化后更有意义）。 */
+private fun dateBucket(startedAt: Long, now: Long, today: String, yesterday: String, earlier: String): String {
+    val cal = Calendar.getInstance()
+    cal.timeInMillis = now
+    cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+    val todayStart = cal.timeInMillis
+    val yesterdayStart = todayStart - 24L * 60 * 60 * 1000
+    return when {
+        startedAt >= todayStart -> today
+        startedAt >= yesterdayStart -> yesterday
+        else -> earlier
     }
 }
 
@@ -455,13 +609,12 @@ private fun SessionCard(
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latencyMs by ts.latency.collectAsState()
-    var menuOpen by remember { mutableStateOf(false) }
-    // 长按普通区域弹出的标题菜单打开哪个弹窗（长按拖动手柄则由手柄自身处理，是拖动而非此菜单）。
-    var dialog by remember { mutableStateOf<SessionTitleKind?>(null) }
+    // 长按普通区域直接打开「修改标题」（长按拖动手柄由手柄自身处理，是拖动而非改名）。
+    var showTitleDialog by remember { mutableStateOf(false) }
     Box {
         Card(
-            // 单击进入会话；长按普通区域弹出「修改标题 / 标题前缀」菜单。
-            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true }),
+            // 单击进入会话；长按普通区域打开「修改标题」。
+            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { showTitleDialog = true }),
             colors = CardDefaults.cardColors(
                 containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
             ),
@@ -481,7 +634,7 @@ private fun SessionCard(
                         )
                     }
                 }
-                // 与终端详情页顶栏同款双行布局：标题在上，设备名（固定）· user@host · 协议徽标 · 延迟 在下。
+                // 双行布局：第1行动态标题，第2行 设备名 · 协议徽标 · 延迟/状态（不再单列 user@host）。
                 Column(modifier = Modifier.weight(1f).padding(start = if (dragHandle != null) 4.dp else 0.dp)) {
                     Text(
                         title,
@@ -492,22 +645,11 @@ private fun SessionCard(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        // 设备名（连接名）固定在副标题最左，独立于前缀；仅在用户命名了连接时显示。
-                        val deviceName = ts.host.label.trim()
-                        if (deviceName.isNotEmpty()) {
-                            Text(
-                                deviceName,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                        }
+                        // 第 2 行身份：设备名（连接名，未命名回落 user@host）。
                         Text(
-                            "${ts.host.username}@${ts.host.host}",
-                            fontFamily = MokeMono,
+                            ts.host.displayName,
                             fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -522,7 +664,7 @@ private fun SessionCard(
                         }
                     }
                 }
-                // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题/前缀并加不重复标记。
+                // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题并加不重复标记。
                 IconButton(onClick = onDuplicate) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = stringResource(R.string.duplicate_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -531,35 +673,15 @@ private fun SessionCard(
                 }
             }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.session_set_title)) },
-                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                onClick = { menuOpen = false; dialog = SessionTitleKind.TITLE },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.session_set_prefix)) },
-                leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
-                onClick = { menuOpen = false; dialog = SessionTitleKind.PREFIX },
-            )
-        }
     }
-    when (dialog) {
-        SessionTitleKind.TITLE -> SessionTitleDialog(
+    if (showTitleDialog) {
+        SessionTitleDialog(
             dialogTitle = stringResource(R.string.session_set_title),
             hint = stringResource(R.string.session_title_hint),
             initial = ts.customTitle.value ?: "",
-            onConfirm = { ts.setCustomTitle(it); dialog = null },
-            onDismiss = { dialog = null },
+            onConfirm = { ts.setCustomTitle(it); showTitleDialog = false },
+            onDismiss = { showTitleDialog = false },
         )
-        SessionTitleKind.PREFIX -> SessionTitleDialog(
-            dialogTitle = stringResource(R.string.session_set_prefix),
-            hint = stringResource(R.string.session_prefix_hint),
-            initial = ts.titlePrefix.value ?: "",
-            onConfirm = { ts.setTitlePrefix(it); dialog = null },
-            onDismiss = { dialog = null },
-        )
-        null -> {}
     }
 }
 

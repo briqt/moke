@@ -88,6 +88,59 @@ fun RichDropdown(
     }
 }
 
+/**
+ * 可编辑下拉（combo）：文本框可自由输入（即新建），下拉列出现有候选（点击填入）。
+ * 用于"分组"这类**动态枚举**——候选全部来自现有数据，输入即可新建，无独立管理；
+ * 某候选无人使用时自然不在 [options] 中出现（调用方从现有数据去重得到 options）。
+ * [options] 为空时退化为普通单行文本框（不显示下拉箭头/菜单）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditableDropdownField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    options: List<String>,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // 建议项：输入为空列出全部候选；否则按输入模糊过滤（不区分大小写）。
+    val q = value.trim()
+    val suggestions = if (q.isEmpty()) options else options.filter { it.contains(q, ignoreCase = true) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && suggestions.isNotEmpty(),
+        onExpandedChange = { expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onValueChange(it); expanded = true },
+            singleLine = true,
+            label = { Text(label) },
+            placeholder = placeholder?.let { { Text(it) } },
+            // 有候选才给下拉箭头；无候选（首台主机/无分组）时就是普通文本框。
+            trailingIcon = if (options.isNotEmpty()) {
+                { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+            } else null,
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryEditable)
+                .fillMaxWidth(),
+        )
+        if (suggestions.isNotEmpty()) {
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                suggestions.forEach { opt ->
+                    DropdownMenuItem(
+                        text = { Text(opt) },
+                        onClick = { onValueChange(opt); expanded = false },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun OptionRow(opt: DropdownOption) {
     Row(

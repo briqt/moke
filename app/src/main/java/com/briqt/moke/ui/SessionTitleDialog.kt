@@ -15,11 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.briqt.moke.R
 
-/** 标题弹窗类型：自定义标题 / 标题前缀。会话列表与终端详情页共用。 */
-enum class SessionTitleKind { TITLE, PREFIX }
-
 /**
- * 会话标题编辑弹窗（「修改标题」/「标题前缀」共用）。
+ * 会话「修改标题」弹窗（会话列表与终端详情页共用）。
  * [initial] 预填当前值；确认时把文本交回 [onConfirm]（可为空白 → 上层按「清除」处理）。
  */
 @Composable

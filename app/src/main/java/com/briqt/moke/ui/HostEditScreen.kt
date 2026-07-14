@@ -71,6 +71,8 @@ fun HostEditScreen(
         allHosts.filter { it.id != base.id }.map { h ->
             DropdownOption(id = h.id, title = h.displayName, subtitle = "${h.username}@${h.host}:${h.port}")
         }
+    // 已有分组（动态枚举：来自各主机的 group 字段，无独立管理；无主机使用的分组自然不出现）。
+    val existingGroups = allHosts.mapNotNull { it.group.trim().ifBlank { null } }.distinct().sorted()
 
     Scaffold(
         topBar = {
@@ -114,9 +116,12 @@ fun HostEditScreen(
                 label = { Text(stringResource(R.string.field_name)) }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
-                value = group, onValueChange = { group = it },
-                label = { Text(stringResource(R.string.field_group)) }, singleLine = true,
+            // 分组：可编辑下拉——点箭头列出已有分组、输入即可新建（动态枚举，无独立管理）。
+            EditableDropdownField(
+                label = stringResource(R.string.field_group),
+                value = group,
+                onValueChange = { group = it },
+                options = existingGroups,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -198,11 +203,12 @@ fun HostEditScreen(
                 )
             }
 
+            // 登录后自动执行：支持多行（每行一条命令，按序执行）；传输层按 "命令+\n" 原样下发。
             OutlinedTextField(
                 value = loginCommand, onValueChange = { loginCommand = it },
                 label = { Text(stringResource(R.string.field_login_command)) },
                 placeholder = { Text(stringResource(R.string.login_command_hint)) },
-                singleLine = true,
+                minLines = 1, maxLines = 6,
                 modifier = Modifier.fillMaxWidth(),
             )
 

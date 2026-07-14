@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
 import androidx.compose.material.icons.filled.KeyboardHide
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
@@ -51,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -85,6 +85,7 @@ fun TerminalScreen(
     onToggleExtraKeys: () -> Unit,
 ) {
     val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
@@ -92,8 +93,8 @@ fun TerminalScreen(
     var altOn by remember(ts.id) { mutableStateOf(false) }
 
     var showComposer by remember(ts.id) { mutableStateOf(false) }
-    // 顶栏 ⋮ 里的标题弹窗：null 无 / TITLE 自定义标题 / PREFIX 标题前缀。
-    var titleDialog by remember(ts.id) { mutableStateOf<SessionTitleKind?>(null) }
+    // 顶栏 ⋮ 里的「修改标题」弹窗开关。
+    var showTitleDialog by remember(ts.id) { mutableStateOf(false) }
     // 文本段草稿：提升到此，关闭 sheet 保留、发送后清空。
     var composerText by remember(ts.id) { mutableStateOf("") }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
@@ -176,8 +177,8 @@ fun TerminalScreen(
             // 连接信息收进顶栏，不再单独占用终端区域。
             TerminalTopBar(
                 title = title,
-                deviceName = ts.host.label.trim(),
-                host = "${ts.host.username}@${ts.host.host}",
+                // 副标题第 2 行的身份：连接名（设备名），未命名则回落 user@host。
+                deviceName = ts.host.displayName,
                 useMosh = ts.host.useMosh,
                 alive = alive,
                 latencyMs = latency,
@@ -186,11 +187,11 @@ fun TerminalScreen(
                 extraKeysVisible = extraKeysVisible,
                 onFontSize = onFontSize,
                 onToggleExtraKeys = onToggleExtraKeys,
-                onSetTitle = { titleDialog = SessionTitleKind.TITLE },
-                onSetPrefix = { titleDialog = SessionTitleKind.PREFIX },
+                onSetTitle = { showTitleDialog = true },
                 onShowKeyboard = { controller.showKeyboard() },
-                onClose = onClose,
-                onBack = onBack,
+                // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
+                onClose = { keyboard?.hide(); onClose() },
+                onBack = { keyboard?.hide(); onBack() },
             )
         },
     ) { padding ->
@@ -280,22 +281,14 @@ fun TerminalScreen(
         )
     }
 
-    when (titleDialog) {
-        SessionTitleKind.TITLE -> SessionTitleDialog(
+    if (showTitleDialog) {
+        SessionTitleDialog(
             dialogTitle = stringResource(R.string.session_set_title),
             hint = stringResource(R.string.session_title_hint),
             initial = ts.customTitle.value ?: "",
-            onConfirm = { ts.setCustomTitle(it); titleDialog = null },
-            onDismiss = { titleDialog = null },
+            onConfirm = { ts.setCustomTitle(it); showTitleDialog = false },
+            onDismiss = { showTitleDialog = false },
         )
-        SessionTitleKind.PREFIX -> SessionTitleDialog(
-            dialogTitle = stringResource(R.string.session_set_prefix),
-            hint = stringResource(R.string.session_prefix_hint),
-            initial = ts.titlePrefix.value ?: "",
-            onConfirm = { ts.setTitlePrefix(it); titleDialog = null },
-            onDismiss = { titleDialog = null },
-        )
-        null -> {}
     }
 }
 
@@ -307,14 +300,13 @@ fun fmtFontSize(sp: Float): String =
     if (sp % 1f == 0f) sp.toInt().toString() else String.format("%.1f", sp)
 
 /**
- * 终端双行顶栏：返回 · 主标题（会话名）+ 副标题（设备名（固定）· user@host · 协议 · 延迟）· 文本段入口。
- * 连接信息收进副标题，弱化色、等宽、单行省略，不占用终端渲染区域。延迟仅 SSH 实时探测。
+ * 终端双行顶栏：返回 · 第1行动态标题 + 第2行（设备名 · 协议 · 延迟/状态）· ⋮ 菜单。
+ * 设备名即连接名（未命名回落 user@host）；不再单列 user@host。延迟仅 SSH 实时探测。
  */
 @Composable
 private fun TerminalTopBar(
     title: String,
     deviceName: String,
-    host: String,
     useMosh: Boolean,
     alive: Boolean,
     latencyMs: Int?,
@@ -324,7 +316,6 @@ private fun TerminalTopBar(
     onFontSize: (Float) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onSetTitle: () -> Unit,
-    onSetPrefix: () -> Unit,
     onShowKeyboard: () -> Unit,
     onClose: () -> Unit,
     onBack: () -> Unit,
@@ -334,7 +325,8 @@ private fun TerminalTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(54.dp)
+                // 与其它页顶栏（TopAppBar expandedHeight=49dp）一致，避免详情页顶栏偏高。
+                .height(49.dp)
                 .padding(start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -351,21 +343,11 @@ private fun TerminalTopBar(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    // 设备名（连接名）固定在副标题最左，独立于前缀；仅在用户命名了连接时显示。
-                    if (deviceName.isNotEmpty()) {
-                        Text(
-                            deviceName,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        )
-                    }
+                    // 第 2 行身份：设备名（连接名，未命名回落 user@host）；不再单列 user@host。
                     Text(
-                        host,
-                        fontFamily = MokeMono,
+                        deviceName,
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -401,16 +383,11 @@ private fun TerminalTopBar(
                     offset = androidx.compose.ui.unit.DpOffset(x = 8.dp, y = 0.dp),
                 ) {
                     // 菜单文字统一 bodyMedium、图标 20dp，避免偏大。
-                    // 会话标题：自定义标题（最高优先级）/ 标题前缀（叠加在动态标题前）。
+                    // 会话标题：自定义标题（覆盖动态标题）。
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.session_set_title), style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; onSetTitle() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.session_set_prefix), style = MaterialTheme.typography.bodyMedium) },
-                        leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                        onClick = { menuOpen = false; onSetPrefix() },
                     )
                     HorizontalDivider()
                     // 字号步进（点 ± 不关闭菜单，便于连续调整）。

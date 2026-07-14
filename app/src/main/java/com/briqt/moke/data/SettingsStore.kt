@@ -31,7 +31,11 @@ class SettingsStore(private val context: Context) {
     private val fontSizeKey = floatPreferencesKey("font_size_sp_f")    // 新键（Float，支持 0.5 步进）
     private val cursorStyleKey = intPreferencesKey("cursor_style")
     private val cursorBlinkKey = booleanPreferencesKey("cursor_blink")
-    private val hostSortKey = stringPreferencesKey("host_sort")
+    // 分组 / 排序：连接页与会话页各自持久化两个正交维度。
+    private val hostGroupByKey = stringPreferencesKey("host_group_by")
+    private val hostSortByKey = stringPreferencesKey("host_sort_by")
+    private val sessionGroupByKey = stringPreferencesKey("session_group_by")
+    private val sessionSortByKey = stringPreferencesKey("session_sort_by")
     private val lineSpacingKey = floatPreferencesKey("line_spacing_mul")
     private val letterSpacingKey = floatPreferencesKey("letter_spacing_mul")
     private val userFontsKey = stringPreferencesKey("user_fonts")
@@ -90,9 +94,21 @@ class SettingsStore(private val context: Context) {
         prefs[extraKeysVisibleKey] ?: true
     }
 
-    /** 连接列表排序方式。 */
-    val hostSort: Flow<HostSort> = context.settingsDataStore.data.map { prefs ->
-        HostSort.fromName(prefs[hostSortKey])
+    /** 连接页分组维度（默认按项目）。 */
+    val hostGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
+        GroupBy.fromName(prefs[hostGroupByKey], GroupBy.PROJECT)
+    }
+    /** 连接页排序维度（默认按名称）。 */
+    val hostSortBy: Flow<SortBy> = context.settingsDataStore.data.map { prefs ->
+        SortBy.fromName(prefs[hostSortByKey], SortBy.NAME)
+    }
+    /** 会话页分组维度（默认按项目）。 */
+    val sessionGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
+        GroupBy.fromName(prefs[sessionGroupByKey], GroupBy.PROJECT)
+    }
+    /** 会话页排序维度（默认最近优先）。 */
+    val sessionSortBy: Flow<SortBy> = context.settingsDataStore.data.map { prefs ->
+        SortBy.fromName(prefs[sessionSortByKey], SortBy.RECENT)
     }
 
     /** 行距倍数（1.0=字体自然行距）。 */
@@ -129,8 +145,17 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit { it[cursorBlinkKey] = blink }
     }
 
-    suspend fun setHostSort(sort: HostSort) {
-        context.settingsDataStore.edit { it[hostSortKey] = sort.name }
+    suspend fun setHostGroupBy(g: GroupBy) {
+        context.settingsDataStore.edit { it[hostGroupByKey] = g.name }
+    }
+    suspend fun setHostSortBy(s: SortBy) {
+        context.settingsDataStore.edit { it[hostSortByKey] = s.name }
+    }
+    suspend fun setSessionGroupBy(g: GroupBy) {
+        context.settingsDataStore.edit { it[sessionGroupByKey] = g.name }
+    }
+    suspend fun setSessionSortBy(s: SortBy) {
+        context.settingsDataStore.edit { it[sessionSortByKey] = s.name }
     }
 
     suspend fun setLineSpacing(v: Float) {
