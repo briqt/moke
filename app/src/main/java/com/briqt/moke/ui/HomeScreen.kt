@@ -360,18 +360,19 @@ private fun <T> PickerChip(
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
+        // 标题栏里的轻量下拉：透明底、紧凑，读作「图标 值 ▾」的内联控件，不做成突兀的实心块。
         Surface(
             onClick = { open = true },
             shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            color = androidx.compose.ui.graphics.Color.Transparent,
         ) {
             Row(
-                modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (leadingIcon != null) {
-                    Icon(leadingIcon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                    Icon(leadingIcon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                 } else {
                     Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -380,15 +381,14 @@ private fun <T> PickerChip(
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            // 顶部小字提示当前维度（如「选择分组」/「选择排序」），点明这个下拉是干嘛的。
+            // 顶部小字提示当前维度（如「选择分组」/「选择排序」），点明这个下拉是干嘛的（无分隔线，避免小菜单里太重）。
             if (menuHeader != null) {
                 Text(
                     menuHeader,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 4.dp),
                 )
-                HorizontalDivider()
             }
             options.forEach { (value, text) ->
                 DropdownMenuItem(
