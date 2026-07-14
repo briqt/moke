@@ -72,7 +72,8 @@ val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
         ExtraKey.Seq("↓", "[B"),
         ExtraKey.Seq("→", "[C"),
         ExtraKey.Seq("PgDn", "[6~"),
-        ExtraKey.Seq("↵", "\r"),
+        // 回车用文字 "Enter"：↵ 字形在等宽字体里偏小且视觉不居中，文字标签与 TAB/HOME 等一致、清晰居中。
+        ExtraKey.Seq("Enter", "\r"),
     ),
 )
 
@@ -127,8 +128,8 @@ private fun KeyCap(label: String, active: Boolean, modifier: Modifier = Modifier
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // 方向/回车等单字符符号（↵ ↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签保持 13sp。
-            val glyph = label.length == 1 && label[0] in "↵↑↓←→"
+            // 方向键单字符符号（↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签（含 Enter）保持 13sp。
+            val glyph = label.length == 1 && label[0] in "↑↓←→"
             Text(label, fontFamily = MokeMono, fontSize = if (glyph) 17.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }

@@ -175,4 +175,9 @@
     <string name="mosh_connect_failed">[mosh 连接失败: %1$s]</string>
     <string name="hostkey_first_seen">首次连接 %1$s，已记录主机指纹 %2$s</string>
     <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确为服务器变更，请删除该主机后重建。</string>
+
+    <!-- 覆盖 vendored terminal-view 的选中菜单文案 -->
+    <string name="copy_text">复制</string>
+    <string name="paste_text">粘贴</string>
+    <string name="text_selection_more">更多…</string>
 </resources>
