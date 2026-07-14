@@ -39,6 +39,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val hostCollapsedGroups by vm.hostCollapsedGroups.collectAsState()
     val sessionGroupBy by vm.sessionGroupBy.collectAsState()
     val sessionSortBy by vm.sessionSortBy.collectAsState()
+    val sessionGroupOrder by vm.sessionGroupOrder.collectAsState()
+    val sessionCollapsedGroups by vm.sessionCollapsedGroups.collectAsState()
     val schemeId by vm.colorSchemeId.collectAsState()
     val primaryFontId by vm.primaryFontId.collectAsState()
     val fallbackFontId by vm.fallbackFontId.collectAsState()
@@ -81,6 +83,10 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             sessionSortBy = sessionSortBy,
             onSessionGroupBy = { vm.setSessionGroupBy(it) },
             onSessionSortBy = { vm.setSessionSortBy(it) },
+            sessionGroupOrder = sessionGroupOrder,
+            sessionCollapsedGroups = sessionCollapsedGroups,
+            onReorderSessionGroups = { vm.setSessionGroupOrder(it) },
+            onToggleSessionGroupCollapse = { vm.toggleSessionGroupCollapsed(it) },
             onAddHost = { screen = Screen.Edit(null) },
             onEditHost = { screen = Screen.Edit(it) },
             onDuplicateHost = { vm.duplicate(it) },

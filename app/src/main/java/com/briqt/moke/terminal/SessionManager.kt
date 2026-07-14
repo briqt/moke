@@ -39,6 +39,9 @@ class TermSession(
     val copyMark: String? = null,
     val startedAt: Long,
 ) {
+    /** 最后活动时间（有终端输出即刷新）：用于「更新时间」排序。非响应式（普通 volatile），列表重组时读当前值即可，避免高频重排抖动。 */
+    @Volatile var lastActivityAt: Long = startedAt
+
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
 
@@ -116,6 +119,8 @@ class SessionManager(context: Context) {
             copyMark = mark,
             startedAt = System.currentTimeMillis(),
         )
+        // 有输出即刷新会话最后活动时间（供"更新时间"排序）。
+        controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }
         return ts
     }

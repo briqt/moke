@@ -45,6 +45,8 @@
     <string name="sort_group">分组</string>
     <string name="sort_name">名称</string>
     <string name="sort_recent">最近</string>
+    <string name="sort_created">创建时间</string>
+    <string name="sort_updated">更新时间</string>
     <string name="sort_manual">手动</string>
     <!-- 分组/排序下拉顶部提示 -->
     <string name="group_menu_hint">选择分组</string>
@@ -52,7 +54,7 @@
     <!-- 分组维度选项 -->
     <string name="group_none">无</string>
     <string name="group_project">项目</string>
-    <string name="group_host">主机</string>
+    <string name="group_host">连接</string>
     <string name="group_date">日期</string>
     <!-- 按日期分组的时间桶 -->
     <string name="date_today">今天</string>

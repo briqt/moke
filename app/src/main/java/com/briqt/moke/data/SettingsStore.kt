@@ -107,9 +107,9 @@ class SettingsStore(private val context: Context) {
     val sessionGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
         GroupBy.fromName(prefs[sessionGroupByKey], GroupBy.PROJECT)
     }
-    /** 会话页排序维度（默认最近优先）。 */
+    /** 会话页排序维度（默认按创建时间）。 */
     val sessionSortBy: Flow<SortBy> = context.settingsDataStore.data.map { prefs ->
-        SortBy.fromName(prefs[sessionSortByKey], SortBy.RECENT)
+        SortBy.fromName(prefs[sessionSortByKey], SortBy.CREATED)
     }
 
     /** 行距倍数（1.0=字体自然行距）。 */

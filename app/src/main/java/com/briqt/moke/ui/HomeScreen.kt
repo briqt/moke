@@ -94,7 +94,6 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.terminal.TermSession
-import java.util.Calendar
 import com.briqt.moke.ui.theme.MokeMono
 
 /**
@@ -116,6 +115,10 @@ fun HomeScreen(
     sessionSortBy: SortBy,
     onSessionGroupBy: (GroupBy) -> Unit,
     onSessionSortBy: (SortBy) -> Unit,
+    sessionGroupOrder: List<String>,
+    sessionCollapsedGroups: Set<String>,
+    onReorderSessionGroups: (List<String>) -> Unit,
+    onToggleSessionGroupCollapse: (String) -> Unit,
     onAddHost: () -> Unit,
     onEditHost: (Host) -> Unit,
     onDuplicateHost: (Host) -> Unit,
@@ -149,10 +152,10 @@ fun HomeScreen(
                         HomeTab.Connections -> {}
                         HomeTab.Sessions -> if (sessions.size > 1) GroupSortActions(
                             groupBy = sessionGroupBy,
-                            groupOptions = listOf(GroupBy.NONE, GroupBy.PROJECT, GroupBy.HOST, GroupBy.DATE),
+                            groupOptions = listOf(GroupBy.NONE, GroupBy.HOST, GroupBy.PROJECT),
                             onGroupBy = onSessionGroupBy,
                             sortBy = sessionSortBy,
-                            sortOptions = listOf(SortBy.NAME, SortBy.RECENT, SortBy.MANUAL),
+                            sortOptions = listOf(SortBy.CREATED, SortBy.UPDATED, SortBy.MANUAL),
                             onSortBy = onSessionSortBy,
                         )
                         HomeTab.Settings -> {}
@@ -189,7 +192,7 @@ fun HomeScreen(
     ) { padding ->
         when (tab) {
             HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
         }
     }
@@ -401,19 +404,7 @@ private fun <T> PickerChip(
     }
 }
 
-@Composable
-private fun GroupHeader(name: String) {
-    val display = if (name == UNGROUPED_KEY) stringResource(R.string.ungrouped) else name
-    Text(
-        display,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 2.dp),
-    )
-}
-
-/** 连接页可折叠 + 可拖动的分组头：[chevron] 组名 计数 …… [拖动手柄]。点行体折叠/展开，长按手柄调分组顺序。 */
+/** 连接页 / 会话页共用的可折叠 + 可拖动的分组头：[chevron] 组名 计数 …… [拖动手柄]。点行体折叠/展开，长按手柄调分组顺序。 */
 @Composable
 private fun GroupHeaderRow(
     name: String,
@@ -584,6 +575,10 @@ private fun SessionsContent(
     sortBy: SortBy,
     onGroupBy: (GroupBy) -> Unit,
     onSortBy: (SortBy) -> Unit,
+    groupOrder: List<String>,
+    collapsed: Set<String>,
+    onToggleCollapse: (String) -> Unit,
+    onReorderGroups: (List<String>) -> Unit,
     onOpen: (String) -> Unit,
     onClose: (String) -> Unit,
     onDuplicate: (String) -> Unit,
@@ -598,76 +593,84 @@ private fun SessionsContent(
         )
         return
     }
-    // 分组/排序控制已收进标题栏右侧（见 HomeScreen 的 TopAppBar actions）。
+    // 会话所属分组的键（按当前分组维度）。
+    fun keyOf(ts: TermSession): String = when (groupBy) {
+        GroupBy.PROJECT -> ts.host.group.ifBlank { UNGROUPED_KEY }
+        GroupBy.HOST -> ts.host.displayName
+        GroupBy.NONE -> ""
+    }
+    val manual = sortBy == SortBy.MANUAL
+    val cmp = sessionComparator(sortBy)
+
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-        if (sortBy == SortBy.MANUAL) {
-            // 手动排序：忽略分组，平铺长按拖动重排（仅内存顺序）。
-            ReorderableColumn(
-                items = sessions,
-                key = { it.id },
-                onReorder = { list -> onReorder(list.map { it.id }) },
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 12.dp),
-            ) { ts, dragging, handle ->
-                SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
-            }
-        } else {
-            val cmp = sessionComparator(sortBy)
-            val today = stringResource(R.string.date_today)
-            val yesterday = stringResource(R.string.date_yesterday)
-            val earlier = stringResource(R.string.date_earlier)
-            val now = System.currentTimeMillis()
-            // (分组标题?, 会话列表)：NONE 无标题平铺；其余按维度分桶、组内按排序维度。
-            val groups: List<Pair<String?, List<TermSession>>> = when (groupBy) {
-                GroupBy.NONE -> listOf(null to sessions.sortedWith(cmp))
-                GroupBy.PROJECT -> sessions.groupBy { it.host.group.ifBlank { UNGROUPED_KEY } }
-                    .toSortedMap(compareBy({ it == UNGROUPED_KEY }, { it }))
-                    .map { (g, list) -> g to list.sortedWith(cmp) }
-                GroupBy.HOST -> sessions.groupBy { it.host.displayName }
-                    .toSortedMap(String.CASE_INSENSITIVE_ORDER)
-                    .map { (h, list) -> h to list.sortedWith(cmp) }
-                GroupBy.DATE -> {
-                    val order = listOf(today, yesterday, earlier)
-                    sessions.groupBy { dateBucket(it.startedAt, now, today, yesterday, earlier) }
-                        .toList()
-                        .sortedBy { order.indexOf(it.first) }
-                        .map { (d, list) -> d to list.sortedWith(cmp) }
+        if (groupBy == GroupBy.NONE) {
+            if (manual) {
+                // 无分组 + 手动：整列长按拖动重排（仅内存顺序）。
+                ReorderableColumn(
+                    items = sessions,
+                    key = { it.id },
+                    onReorder = { list -> onReorder(list.map { it.id }) },
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                ) { ts, dragging, handle ->
+                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
                 }
-            }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(vertical = 12.dp),
-            ) {
-                groups.forEach { (header, list) ->
-                    if (header != null) item(key = "hdr_$header") { GroupHeader(header) }
-                    items(list, key = { it.id }) { ts ->
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                ) {
+                    items(sessions.sortedWith(cmp), key = { it.id }) { ts ->
                         SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) })
                     }
                 }
+            }
+        } else {
+            // 分组显示顺序：内存顺序（过滤到当前存在的组）+ 首次出现的新组补末尾。
+            val present = sessions.map { keyOf(it) }.distinct()
+            val orderedKeys = groupOrder.filter { it in present } + present.filter { it !in groupOrder }
+            val groups = orderedKeys.map { k ->
+                val items = sessions.filter { keyOf(it) == k }
+                ReorderGroup(k, if (manual) items else items.sortedWith(cmp))
+            }
+            GroupedReorderableList(
+                groups = groups,
+                itemKey = { it.id },
+                collapsed = collapsed,
+                onReorderGroups = onReorderGroups,
+                onReorderItems = { groupKey, newItems ->
+                    // 组内新序映射回完整会话顺序（其他组位置不动），仅内存。
+                    val iter = newItems.iterator()
+                    onReorder(sessions.map { if (keyOf(it) == groupKey) iter.next() else it }.map { it.id })
+                },
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 12.dp),
+                header = { key, dragging, handle ->
+                    GroupHeaderRow(
+                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else key,
+                        count = groups.firstOrNull { it.key == key }?.items?.size ?: 0,
+                        collapsed = key in collapsed,
+                        onToggle = { onToggleCollapse(key) },
+                        dragHandle = handle,
+                        dragging = dragging,
+                    )
+                },
+            ) { ts, dragging, handle ->
+                // 手动排序时组内卡片可拖（接 handle）；创建/更新时间排序时按比较器排、卡片不可拖。
+                SessionCard(
+                    ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) },
+                    dragHandle = if (manual) handle else null, dragging = dragging,
+                )
             }
         }
     }
 }
 
-/** 会话排序比较器（NAME=当前标题、RECENT=开始时间倒序；MANUAL 不走此处）。 */
+/** 会话组内排序比较器（CREATED=创建时间倒序、UPDATED=最后活动时间倒序；MANUAL 不走此处）。 */
 private fun sessionComparator(sortBy: SortBy): Comparator<TermSession> = when (sortBy) {
-    SortBy.RECENT -> compareByDescending { it.startedAt }
-    else -> compareBy { it.displayTitle.value.lowercase() }
-}
-
-/** 会话开始时间归入 今天/昨天/更早（会话为内存态通常都是今天；后台持久化后更有意义）。 */
-private fun dateBucket(startedAt: Long, now: Long, today: String, yesterday: String, earlier: String): String {
-    val cal = Calendar.getInstance()
-    cal.timeInMillis = now
-    cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-    val todayStart = cal.timeInMillis
-    val yesterdayStart = todayStart - 24L * 60 * 60 * 1000
-    return when {
-        startedAt >= todayStart -> today
-        startedAt >= yesterdayStart -> yesterday
-        else -> earlier
-    }
+    SortBy.UPDATED -> compareByDescending { it.lastActivityAt }
+    else -> compareByDescending { it.startedAt }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

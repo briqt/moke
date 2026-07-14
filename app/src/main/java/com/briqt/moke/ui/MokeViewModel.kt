@@ -79,7 +79,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val sessionGroupBy: StateFlow<GroupBy> = settings.sessionGroupBy
         .stateIn(viewModelScope, SharingStarted.Eagerly, GroupBy.PROJECT)
     val sessionSortBy: StateFlow<SortBy> = settings.sessionSortBy
-        .stateIn(viewModelScope, SharingStarted.Eagerly, SortBy.RECENT)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SortBy.CREATED)
+
+    // 会话分组的顺序/折叠：会话本身是内存态（重启即清空），故这两项也只放内存、不持久化。
+    private val _sessionGroupOrder = MutableStateFlow<List<String>>(emptyList())
+    val sessionGroupOrder: StateFlow<List<String>> = _sessionGroupOrder.asStateFlow()
+    private val _sessionCollapsedGroups = MutableStateFlow<Set<String>>(emptySet())
+    val sessionCollapsedGroups: StateFlow<Set<String>> = _sessionCollapsedGroups.asStateFlow()
 
     val lineSpacing: StateFlow<Float> = settings.lineSpacing
         .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_SPACING)
@@ -141,6 +147,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSessionGroupBy(g: GroupBy) = viewModelScope.launch { settings.setSessionGroupBy(g) }
     fun setSessionSortBy(s: SortBy) = viewModelScope.launch { settings.setSessionSortBy(s) }
+
+    /** 会话分组之间顺序（长按分组头拖动，内存态）。 */
+    fun setSessionGroupOrder(order: List<String>) { _sessionGroupOrder.value = order }
+
+    /** 折叠/展开某个会话分组（内存态）。 */
+    fun toggleSessionGroupCollapsed(group: String) =
+        _sessionCollapsedGroups.update { if (group in it) it - group else it + group }
 
     /** 连接页分组之间的顺序（长按分组头拖动后持久化）。 */
     fun setHostGroupOrder(order: List<String>) = viewModelScope.launch { settings.setHostGroupOrder(order) }

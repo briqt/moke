@@ -22,6 +22,9 @@ class TerminalController(
     private val onTitle: (String?) -> Unit = {},
 ) : TerminalViewClient, TerminalSessionClient {
 
+    /** 有终端输出/屏幕更新时回调（供上层刷新会话"最后活动时间"）。 */
+    var onActivity: (() -> Unit)? = null
+
     private val appContext = context.applicationContext
     private val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -42,7 +45,7 @@ class TerminalController(
     @Volatile var cursorBlink: Boolean = true
 
     // ---------- TerminalSessionClient ----------
-    override fun onTextChanged(changedSession: TerminalSession) { view?.onScreenUpdated() }
+    override fun onTextChanged(changedSession: TerminalSession) { onActivity?.invoke(); view?.onScreenUpdated() }
     override fun onTitleChanged(changedSession: TerminalSession) { onTitle(changedSession.title) }
     override fun onSessionFinished(finishedSession: TerminalSession) { onFinished() }
 
