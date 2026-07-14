@@ -259,8 +259,28 @@ fun TerminalScreen(
                 }
             }
 
-            if (extraKeysVisible) {
-                ExtraKeys(
+            // 底部：文本段展开时就地替换附加键行（同窗口，软键盘不收起再弹起）；否则显示附加键。
+            when {
+                showComposer -> TextBlockComposer(
+                    value = composerText,
+                    onValueChange = { composerText = it },
+                    onDismiss = { showComposer = false; controller.showKeyboard() },
+                    onSend = { text, appendEnter ->
+                        composerText = ""      // 发送后清空草稿
+                        showComposer = false
+                        controller.showKeyboard()
+                        scope.launch {
+                            if (text.isNotEmpty()) ts.session.write(text)
+                            // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
+                            // 否则「正文+尾部 CR」会被 raw 模式 TUI(如 claude / vim 插入态)判为粘贴，只插入换行而不提交。
+                            if (appendEnter) {
+                                if (text.isNotEmpty()) delay(40)
+                                ts.session.write("\r")
+                            }
+                        }
+                    },
+                )
+                extraKeysVisible -> ExtraKeys(
                     rows = DEFAULT_EXTRA_KEYS,
                     ctrlOn = ctrlOn,
                     altOn = altOn,
@@ -271,28 +291,6 @@ fun TerminalScreen(
                 )
             }
         }
-    }
-
-    if (showComposer) {
-        TextBlockComposer(
-            value = composerText,
-            onValueChange = { composerText = it },
-            onDismiss = { showComposer = false },
-            onSend = { text, appendEnter ->
-                composerText = ""      // 发送后清空草稿
-                showComposer = false
-                controller.showKeyboard()
-                scope.launch {
-                    if (text.isNotEmpty()) ts.session.write(text)
-                    // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
-                    // 否则「正文+尾部 CR」会被 raw 模式 TUI(如 claude / vim 插入态)判为粘贴，只插入换行而不提交。
-                    if (appendEnter) {
-                        if (text.isNotEmpty()) delay(40)
-                        ts.session.write("\r")
-                    }
-                }
-            },
-        )
     }
 
     if (showTitleDialog) {

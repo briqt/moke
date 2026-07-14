@@ -9,24 +9,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -42,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeMono
-import kotlinx.coroutines.delay
 
 /** 附加键：发送字节序列 / 粘滞修饰键(Ctrl·Alt) / 触发动作。 */
 sealed interface ExtraKey {
@@ -148,11 +144,10 @@ private fun KeyCap(label: String, active: Boolean, icon: ImageVector? = null, mo
 }
 
 /**
- * 文本段输入：底部 sheet 里编辑整段文本后一次性发送——适合长命令 / 多行粘贴，免受屏幕键盘折磨。
- * sheet 浮在键盘之上、终端仍可见。文本状态由上层持有（[value]），关闭保留草稿、发送后由上层清空。
- * 打开即自动聚焦输入框并唤起软键盘。
+ * 文本段输入（底部**内联**输入条）：在附加键行的位置就地展开，编辑整段文本后一次性发送——适合长命令 / 多行粘贴。
+ * 与终端同处一个窗口，从终端切到本输入框只是窗口内焦点转移，软键盘**不收起再弹起**（避免弹独立 sheet 的三段跳）。
+ * 文本状态由上层持有（[value]），关闭保留草稿、发送后由上层清空。展开即自动聚焦。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TextBlockComposer(
     value: String,
@@ -160,45 +155,45 @@ fun TextBlockComposer(
     onDismiss: () -> Unit,
     onSend: (text: String, appendEnter: Boolean) -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 8.dp)
-                .navigationBarsPadding()
-                .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(stringResource(R.string.composer_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            // 限定输入框高度：默认 2 行起（不撑大空白），内容多则在框内滚动到上限，不顶出发送按钮。
+            // 头行：标题 + 清空 + 关闭（关闭回到附加键行）。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.composer_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onValueChange("") }) { Text(stringResource(R.string.composer_clear)) }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            // 高度受限：2 行起，内容多则框内滚动到上限，不顶出发送按钮。
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 200.dp).focusRequester(focusRequester),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 160.dp).focusRequester(focusRequester),
                 minLines = 2,
-                label = { Text(stringResource(R.string.composer_field)) },
+                placeholder = { Text(stringResource(R.string.composer_field)) },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onValueChange("") }) { Text(stringResource(R.string.composer_clear)) }
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = { onSend(value, false) }) { Text(stringResource(R.string.composer_send)) }
                 Button(onClick = { onSend(value, true) }) { Text(stringResource(R.string.composer_send_enter)) }
             }
         }
     }
-
-    // sheet 展开后聚焦输入框并唤起键盘（略等其入场动画，避免焦点被吞）。
+    // 内联展开：直接聚焦输入框（同窗口焦点转移，IME 顺滑续上），无需等窗口入场动画。
     LaunchedEffect(Unit) {
-        delay(180)
         focusRequester.requestFocus()
         keyboard?.show()
     }
