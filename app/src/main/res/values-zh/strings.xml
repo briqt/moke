@@ -97,6 +97,7 @@
     <string name="label_protocol">协议</string>
     <string name="field_jump_host">跳板机（可选）</string>
     <string name="jump_none">无（直连）</string>
+    <string name="mosh_jump_hint">说明：跳板机仅用于 mosh 引导（经 SSH 拉起 mosh-server）；会话数据走 UDP，需目标从本机可直达。若目标只能经跳板机到达，这台建议用 SSH。</string>
     <string name="field_login_command">登录后自动执行（可选）</string>
     <string name="login_command_hint">如 cd /var/www &amp;&amp; ls</string>
 

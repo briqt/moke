@@ -97,6 +97,7 @@
     <string name="label_protocol">Protocol</string>
     <string name="field_jump_host">Jump host (optional)</string>
     <string name="jump_none">None (direct)</string>
+    <string name="mosh_jump_hint">Note: the jump host only bootstraps mosh (SSH launches mosh-server). Session data runs over UDP and needs the target reachable directly from this device. If the target is only reachable via the jump host, use SSH for this one.</string>
     <string name="field_login_command">Run on login (optional)</string>
     <string name="login_command_hint">e.g. cd /var/www &amp;&amp; ls</string>
 
