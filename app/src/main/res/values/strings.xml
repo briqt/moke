@@ -44,6 +44,9 @@
     <string name="sort_name">Name</string>
     <string name="sort_recent">Recent</string>
     <string name="sort_manual">Manual</string>
+    <!-- 分组/排序下拉顶部提示 -->
+    <string name="group_menu_hint">Group by</string>
+    <string name="sort_menu_hint">Sort by</string>
     <!-- 分组维度选项 -->
     <string name="group_none">None</string>
     <string name="group_project">Project</string>
@@ -186,5 +189,4 @@
     <!-- 覆盖 vendored terminal-view 的选中菜单文案（app 资源优先于 library，随 App 语言本地化；不改 vendored 组件） -->
     <string name="copy_text">Copy</string>
     <string name="paste_text">Paste</string>
-    <string name="text_selection_more">More…</string>
 </resources>

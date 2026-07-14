@@ -29,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -37,6 +36,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
@@ -328,11 +328,12 @@ private fun GroupSortActions(
     ) {
         PickerChip(
             label = stringResource(R.string.sort_group),
-            leadingIcon = Icons.Filled.Category,
+            leadingIcon = Icons.Filled.Folder,
             valueText = stringResource(groupBy.labelRes),
             options = groupOptions.map { it to stringResource(it.labelRes) },
             selected = groupBy,
             onSelect = onGroupBy,
+            menuHeader = stringResource(R.string.group_menu_hint),
         )
         PickerChip(
             label = stringResource(R.string.sort_label),
@@ -341,6 +342,7 @@ private fun GroupSortActions(
             options = sortOptions.map { it to stringResource(it.labelRes) },
             selected = sortBy,
             onSelect = onSortBy,
+            menuHeader = stringResource(R.string.sort_menu_hint),
         )
     }
 }
@@ -354,6 +356,7 @@ private fun <T> PickerChip(
     selected: T,
     onSelect: (T) -> Unit,
     leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    menuHeader: String? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -377,6 +380,16 @@ private fun <T> PickerChip(
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            // 顶部小字提示当前维度（如「选择分组」/「选择排序」），点明这个下拉是干嘛的。
+            if (menuHeader != null) {
+                Text(
+                    menuHeader,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
+                )
+                HorizontalDivider()
+            }
             options.forEach { (value, text) ->
                 DropdownMenuItem(
                     text = { Text(text) },

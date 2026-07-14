@@ -116,7 +116,8 @@ public class TextSelectionCursorController implements CursorController {
                 ClipboardManager clipboard = (ClipboardManager) terminalView.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                 menu.add(Menu.NONE, ACTION_COPY, Menu.NONE, R.string.copy_text).setShowAsAction(show);
                 menu.add(Menu.NONE, ACTION_PASTE, Menu.NONE, R.string.paste_text).setEnabled(clipboard != null && clipboard.hasPrimaryClip()).setShowAsAction(show);
-                menu.add(Menu.NONE, ACTION_MORE, Menu.NONE, R.string.text_selection_more);
+                // [moke] 移除 "More…"：本项目未注册 View 上下文菜单，showContextMenu() 无内容可显示，
+                //        点击只会关闭工具条、无实际作用，故不再添加该项（ACTION_MORE 处理逻辑保留但不可达）。
                 return true;
             }
 

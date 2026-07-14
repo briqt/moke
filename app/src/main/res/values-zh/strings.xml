@@ -44,6 +44,9 @@
     <string name="sort_name">名称</string>
     <string name="sort_recent">最近</string>
     <string name="sort_manual">手动</string>
+    <!-- 分组/排序下拉顶部提示 -->
+    <string name="group_menu_hint">选择分组</string>
+    <string name="sort_menu_hint">选择排序</string>
     <!-- 分组维度选项 -->
     <string name="group_none">无</string>
     <string name="group_project">项目</string>
@@ -186,5 +189,4 @@
     <!-- 覆盖 vendored terminal-view 的选中菜单文案 -->
     <string name="copy_text">复制</string>
     <string name="paste_text">粘贴</string>
-    <string name="text_selection_more">更多…</string>
 </resources>
