@@ -178,12 +178,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 探测/刷新远端 tmux 会话列表；连接可能尚未就绪（exec 返回 null）→ 重试若干次。 */
     fun refreshTmux(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
         if (ts.host.useMosh) return@launch
-        var tries = 0
-        while (tries < 6 && isActive) {
+        // exec 返 null=连接尚未就绪 → 重试至多 ~20s（覆盖较慢的直连建连耗时），跑通即停。
+        var waited = 0
+        while (waited < 20_000 && isActive) {
             val out = runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()
             if (out != null) { ts.tmux.value = Tmux.parse(out); return@launch }
-            tries++
             delay(1500)
+            waited += 1500
         }
     }
 

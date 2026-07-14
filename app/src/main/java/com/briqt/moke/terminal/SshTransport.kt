@@ -88,21 +88,32 @@ class SshTransport(
 
                 val input = sh.inputStream
                 val buf = ByteArray(8192)
-                // 登录后自动执行命令：**等 shell 首个输出（提示符）到达、PTY 就绪后再发**，否则抢跑
-                // 会丢首字符（残行触发 `>` 续行提示符）、命令错乱。仅发一次。
-                var loginPending = host.loginCommand.isNotBlank()
+                // 登录后自动执行命令：等 shell 首个输出到达、且输出**静默 ~250ms**（提示符画完、bracketed-paste/
+                // 行编辑就绪）后再发；只等"首字节"仍会抢在半就绪的行编辑器里发，丢/错首字符（曾见 `<sh`/`>`）、回显重复。
+                // 换行用 CR（真实回车），与附加键/文本段一致；多行逐行执行。仅发一次。
+                val loginCmd = host.loginCommand
+                val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
+                if (loginCmd.isNotBlank()) {
+                    Thread({
+                        while (!closed && lastOut.get() == 0L) { try { Thread.sleep(50) } catch (_: InterruptedException) { return@Thread } }
+                        val deadline = System.currentTimeMillis() + 4000  // 静默等待上限，兜底
+                        while (!closed && System.currentTimeMillis() < deadline &&
+                            System.currentTimeMillis() - lastOut.get() < 250
+                        ) { try { Thread.sleep(60) } catch (_: InterruptedException) { return@Thread } }
+                        if (!closed) runCatching {
+                            val payload = loginCmd.replace("\r\n", "\n").replace("\n", "\r")
+                                .let { if (it.endsWith("\r")) it else it + "\r" }
+                            out?.write(payload.toByteArray(StandardCharsets.UTF_8))
+                            out?.flush()
+                        }
+                    }, "moke-ssh-login-${host.host}").start()
+                }
                 while (!closed) {
                     val n = input.read(buf)
                     if (n == -1) break
                     if (n > 0) {
                         session.processToEmulator(buf, n)
-                        if (loginPending) {
-                            loginPending = false
-                            runCatching {
-                                out?.write((host.loginCommand + "\n").toByteArray(StandardCharsets.UTF_8))
-                                out?.flush()
-                            }
-                        }
+                        lastOut.set(System.currentTimeMillis())
                     }
                 }
                 session.onTransportFinished(0)

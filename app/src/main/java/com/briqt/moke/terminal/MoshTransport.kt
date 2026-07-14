@@ -97,7 +97,10 @@ class MoshTransport(
                     Thread({
                         runCatching {
                             Thread.sleep(1500)
-                            out?.write((host.loginCommand + "\n").toByteArray(StandardCharsets.UTF_8))
+                            // 换行用 CR（真实回车），与 SSH/附加键/文本段一致；多行逐行执行。
+                            val payload = host.loginCommand.replace("\r\n", "\n").replace("\n", "\r")
+                                .let { if (it.endsWith("\r")) it else it + "\r" }
+                            out?.write(payload.toByteArray(StandardCharsets.UTF_8))
                             out?.flush()
                         }
                     }, "moke-mosh-login").start()
