@@ -30,8 +30,8 @@ Moke is a native SSH / mosh terminal for Android. It connects directly inside th
 ## Screenshots
 
 <div align="center">
-<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code" width="264"/>&nbsp;<img src="docs/screenshot-connections.png" alt="Host management" width="264"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance settings" width="264"/>
-<br/><sub>Terminal (SSH running Claude Code) · Host management · Appearance</sub>
+<img src="docs/screenshot-connections.png" alt="Host management" width="200"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code over SSH" width="200"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance settings" width="200"/>&nbsp;<img src="docs/screenshot-sessions.png" alt="Multiple sessions" width="200"/>
+<br/><sub>Host management · Terminal (SSH running Claude Code) · Appearance · Multiple sessions</sub>
 </div>
 
 ## Install
