@@ -14,18 +14,16 @@
 
 ## What is this
 
-Moke is a native SSH / mosh terminal for Android. It connects directly inside the app and reuses termux's `terminal-view` / `terminal-emulator` (Apache-2.0) for terminal rendering instead of writing its own ANSI parser.
+Moke is a native SSH / mosh terminal for Android. It connects to remote servers directly inside the app — run a shell, tmux, vim, or a full-screen TUI such as Claude Code — and reuses termux's `terminal-view` / `terminal-emulator` (Apache-2.0) for terminal rendering instead of writing its own ANSI parser.
 
 ## Features
 
 - **SSH**: password / private-key (PEM) auth; TOFU host-key verification; jump host (ProxyJump); run-on-login command; window resize; keep-alive heartbeat.
 - **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (reconnect on screen-off / network switch).
-- **Multiple sessions**: sessions stay resident and switch across screens; a foreground service keeps connections alive in the background.
-- **Host management**: grouping and sorting (including manual drag-to-reorder); protocol badges; copy connect command / duplicate.
-- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; a top status bar (protocol / host / latency).
-- **Appearance**: live preview; multiple dark color schemes; font management (primary font + CJK fallback, a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple / Hack); adjustable line spacing / letter spacing / font size.
-- **Languages**: bilingual English / 中文 (i18n); follows the system language by default and can be switched in Settings.
-- **Credentials**: connection credentials are encrypted with the Android Keystore (AES-GCM) before being stored.
+- **Sessions & hosts**: multiple sessions stay resident and switch across screens, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; protocol badges; copy connect command.
+- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; a top status bar (protocol / host / latency); a tmux panel to attach / create / rename / kill remote sessions.
+- **Appearance**: live preview; multiple dark color schemes; adjustable font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback — a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple Mono / Hack and more).
+- **Security & languages**: connection credentials are encrypted with the Android Keystore (AES-GCM) before being stored; bilingual English / 中文 (i18n), following the system language by default and switchable in Settings.
 
 ## Screenshots
 
