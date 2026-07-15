@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -62,7 +61,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.view.TerminalView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -350,8 +351,8 @@ private fun TerminalTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                // 与其它页顶栏（TopAppBar expandedHeight=49dp）一致，避免详情页顶栏偏高。
-                .height(49.dp)
+                // 与其它页顶栏（TopAppBar expandedHeight）一致，避免详情页顶栏偏高。
+                .height(MokeDimens.topBarHeight)
                 .padding(start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -488,7 +489,7 @@ private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier =
     Surface(
         color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
         contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-        shape = RoundedCornerShape(20.dp),
+        shape = MokeShapes.floating,
         modifier = modifier,
     ) {
         Row(

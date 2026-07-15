@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
@@ -25,7 +24,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -42,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
 import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.FontSpec
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 
 private fun fmtSize(bytes: Long): String = when {
@@ -111,7 +110,7 @@ fun FontsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
-                expandedHeight = 49.dp,
+                expandedHeight = MokeDimens.topBarHeight,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -206,11 +205,18 @@ private fun FontCard(
                     )
                 }
                 // 能力标签（比「中/英」二分更有信息量）：含中文可作回退；连字/内置各表其义。
+                // 走共享 fontCapabilityBadges + MokeBadge，与外观页下拉里的同批标签保持一致。
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (spec.bundled) Badge(stringResource(R.string.tag_bundled), MaterialTheme.colorScheme.tertiary)
-                    if (spec.userUploaded) Badge(stringResource(R.string.tag_local), MaterialTheme.colorScheme.tertiary)
-                    if (spec.cjk) Badge(stringResource(R.string.tag_cjk), MaterialTheme.colorScheme.primary)
-                    if (spec.ligature) Badge(stringResource(R.string.tag_ligature), MaterialTheme.colorScheme.secondary)
+                    fontCapabilityBadges(
+                        spec,
+                        stringResource(R.string.tag_bundled),
+                        stringResource(R.string.tag_local),
+                        stringResource(R.string.tag_cjk),
+                        stringResource(R.string.tag_ligature),
+                        MaterialTheme.colorScheme.tertiary,
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.secondary,
+                    ).forEach { MokeBadge(it.text, it.color) }
                 }
             }
 
@@ -273,21 +279,5 @@ private fun FontCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Badge(text: String, color: androidx.compose.ui.graphics.Color) {
-    Surface(
-        color = color.copy(alpha = 0.16f),
-        shape = RoundedCornerShape(6.dp),
-    ) {
-        Text(
-            text,
-            color = color,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-        )
     }
 }

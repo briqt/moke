@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,7 +36,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -70,7 +68,9 @@ import com.briqt.moke.terminal.PreviewTransport
 import com.briqt.moke.terminal.TermColorScheme
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 
@@ -109,14 +109,15 @@ fun AppearanceScreen(
     val tagLocal = stringResource(R.string.tag_local)
     val tagCjk = stringResource(R.string.tag_cjk)
     val tagLigature = stringResource(R.string.tag_ligature)
+    // 标签配色在 @Composable 作用域先取好（下方 capTags 等在普通 map 中构造 BadgeSpec）。
+    val cTertiary = MaterialTheme.colorScheme.tertiary
+    val cPrimary = MaterialTheme.colorScheme.primary
+    val cSecondary = MaterialTheme.colorScheme.secondary
 
     fun installed(id: String) = fontStates[id] is FontInstallState.Installed
-    fun capTags(spec: com.briqt.moke.terminal.FontSpec) = buildList {
-        if (spec.bundled) add(tagBundled)
-        if (spec.userUploaded) add(tagLocal)
-        if (spec.cjk) add(tagCjk)
-        if (spec.ligature) add(tagLigature)
-    }
+    // 走共享 fontCapabilityBadges：与字体管理卡片里的同批标签文案/配色完全一致。
+    fun capTags(spec: com.briqt.moke.terminal.FontSpec) =
+        fontCapabilityBadges(spec, tagBundled, tagLocal, tagCjk, tagLigature, cTertiary, cPrimary, cSecondary)
     fun fontName(spec: com.briqt.moke.terminal.FontSpec) = if (zh) spec.nameZh else spec.name
     // 主字体：内置 + 已安装（含用户上传）
     val primaryOptions = fonts.filter { it.bundled || installed(it.id) }.map { spec ->
@@ -130,7 +131,10 @@ fun AppearanceScreen(
     // 回退字体：无 + 已安装的含中文字体（回退用来补 Latin 缺失字形，如中文）。
     val fallbackOptions = listOf(DropdownOption(id = "", title = stringResource(R.string.fallback_none))) +
         fonts.filter { (it.bundled || installed(it.id)) && (it.cjk || it.userUploaded) }.map { spec ->
-            DropdownOption(id = spec.id, title = fontName(spec), subtitle = spec.name, tags = if (spec.userUploaded) listOf(tagLocal) else listOf(tagCjk))
+            DropdownOption(
+                id = spec.id, title = fontName(spec), subtitle = spec.name,
+                tags = if (spec.userUploaded) listOf(BadgeSpec(tagLocal, cTertiary)) else listOf(BadgeSpec(tagCjk, cPrimary)),
+            )
         }
     val schemeOptions = TerminalThemes.all.map { s ->
         DropdownOption(
@@ -193,7 +197,7 @@ fun AppearanceScreen(
                         }
                     }
                 },
-                expandedHeight = 49.dp,
+                expandedHeight = MokeDimens.topBarHeight,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -222,7 +226,7 @@ fun AppearanceScreen(
                     .fillMaxWidth()
                     .height(previewHeight)
                     .padding(12.dp)
-                    .clip(RoundedCornerShape(12.dp)),
+                    .clip(MokeShapes.card),
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -249,8 +253,13 @@ fun AppearanceScreen(
                     selectedId = fallbackFontId,
                     onSelect = onSelectFallback,
                 )
-                // 常驻入口：进入字体管理下载/上传/设角色。
-                FontManageEntry(onOpenFonts)
+                // 常驻入口：进入字体管理下载/上传/设角色（与设置菜单同款 NavRow）。
+                NavRow(
+                    icon = Icons.Filled.FontDownload,
+                    title = stringResource(R.string.font_manage_title),
+                    subtitle = stringResource(R.string.font_manage_sub),
+                    onClick = onOpenFonts,
+                )
 
                 SectionHeader(stringResource(R.string.section_typography))
                 // 字号 0.5 步进；行距/字距 0.1 步进。滑块快调 + ± 精调。
@@ -372,38 +381,11 @@ private fun SliderRow(
     }
 }
 
-/** 独立「字体管理」入口行：始终可见（不藏在下拉里），点进 FontsScreen 下载/管理。 */
-@Composable
-private fun FontManageEntry(onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.FontDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(stringResource(R.string.font_manage_title), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                Text(
-                    stringResource(R.string.font_manage_sub),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
 /** 配色前导：5 个小色块（背景 / 红 / 绿 / 蓝 / 前景）。 */
 @Composable
 private fun SchemeSwatches(s: TermColorScheme) {
     Row(
-        modifier = Modifier.clip(RoundedCornerShape(4.dp)),
+        modifier = Modifier.clip(MokeShapes.xs),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         listOf(s.bg, s.ansi[1], s.ansi[2], s.ansi[4], s.fg).forEach { c ->

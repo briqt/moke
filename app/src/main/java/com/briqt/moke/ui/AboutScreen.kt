@@ -35,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateStatus
@@ -66,7 +67,7 @@ fun AboutScreen(onBack: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
-                expandedHeight = 49.dp,
+                expandedHeight = MokeDimens.topBarHeight,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,

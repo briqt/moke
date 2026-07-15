@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
@@ -39,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.MokeShapes
 
 /** 附加键：发送字节序列 / 粘滞修饰键(Ctrl·Alt) / 触发动作。 */
 sealed interface ExtraKey {
@@ -122,11 +122,11 @@ fun ExtraKeys(
 
 @Composable
 private fun KeyCap(label: String, active: Boolean, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    // 近乎平直的键帽（3dp 微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
+    // 近乎平直的键帽（微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
     Surface(
         onClick = onClick,
         modifier = modifier.height(34.dp),
-        shape = RoundedCornerShape(3.dp),
+        shape = MokeShapes.keycap,
         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {

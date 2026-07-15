@@ -6,14 +6,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,7 +30,7 @@ data class DropdownOption(
     val id: String,
     val title: String,
     val subtitle: String? = null,
-    val tags: List<String> = emptyList(),
+    val tags: List<BadgeSpec> = emptyList(),
     val status: String? = null,
     val leading: (@Composable () -> Unit)? = null,
 )
@@ -152,7 +150,7 @@ private fun OptionRow(opt: DropdownOption) {
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(opt.title, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-                opt.tags.forEach { TagChip(it) }
+                opt.tags.forEach { MokeBadge(it.text, it.color) }
             }
             if (opt.subtitle != null) {
                 Text(
@@ -165,21 +163,5 @@ private fun OptionRow(opt: DropdownOption) {
         if (opt.status != null) {
             Text(opt.status, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
         }
-    }
-}
-
-@Composable
-private fun TagChip(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(5.dp),
-    ) {
-        Text(
-            text,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
     }
 }

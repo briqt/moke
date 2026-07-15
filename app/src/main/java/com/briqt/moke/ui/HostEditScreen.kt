@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.ui.theme.MokeDimens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +92,7 @@ fun HostEditScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
-                expandedHeight = 49.dp,
+                expandedHeight = MokeDimens.topBarHeight,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,

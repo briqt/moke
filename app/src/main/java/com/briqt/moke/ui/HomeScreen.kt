@@ -23,8 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -94,7 +92,9 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.terminal.TermSession
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.MokeShapes
 
 /**
  * 主界面：底部导航「连接 · 会话 · 设置」三分区。终端本体是独立全屏页（不带底栏），
@@ -162,7 +162,7 @@ fun HomeScreen(
                     }
                 },
                 // 略压高度（默认 64 → 49，较原 56 再收约 1/8）扩大可见区；标题在栏内垂直居中，收窄自然把上/下间距平分。
-                expandedHeight = 49.dp,
+                expandedHeight = MokeDimens.topBarHeight,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -364,7 +364,7 @@ private fun <T> PickerChip(
         // 标题栏里的轻量下拉：透明底、紧凑，读作「图标 值 ▾」的内联控件，不做成突兀的实心块。
         Surface(
             onClick = { open = true },
-            shape = RoundedCornerShape(8.dp),
+            shape = MokeShapes.control,
             color = androidx.compose.ui.graphics.Color.Transparent,
         ) {
             Row(
@@ -416,7 +416,7 @@ private fun GroupHeaderRow(
 ) {
     Surface(
         onClick = onToggle,
-        shape = RoundedCornerShape(8.dp),
+        shape = MokeShapes.control,
         color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
     ) {
         Row(
@@ -543,7 +543,7 @@ private fun HostCard(
 @Composable
 fun ProtocolBadge(mosh: Boolean) {
     val color = if (mosh) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+    Surface(color = color.copy(alpha = MokeDimens.badgeAlpha), shape = MokeShapes.pill) {
         Text(
             if (mosh) "mosh" else "SSH",
             color = color,
@@ -778,9 +778,9 @@ private fun SettingsMenuContent(padding: PaddingValues, onOpenAppearance: () -> 
         modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        MenuCard(Icons.Filled.Palette, stringResource(R.string.menu_appearance), stringResource(R.string.menu_appearance_sub), onOpenAppearance)
-        MenuCard(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel) { langDialog = true }
-        MenuCard(Icons.Filled.Info, stringResource(R.string.menu_about), stringResource(R.string.menu_about_sub), onOpenAbout)
+        NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), stringResource(R.string.menu_appearance_sub), onOpenAppearance)
+        NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
+        NavRow(Icons.Filled.Info, stringResource(R.string.menu_about), stringResource(R.string.menu_about_sub), onOpenAbout)
     }
 
     if (langDialog) {
@@ -814,7 +814,7 @@ private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
             Column {
                 options.forEach { (tag, label) ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onPick(tag) }.padding(vertical = 8.dp, horizontal = 4.dp),
+                        modifier = Modifier.fillMaxWidth().clip(MokeShapes.control).clickable { onPick(tag) }.padding(vertical = 8.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = current == tag, onClick = { onPick(tag) })
@@ -827,26 +827,6 @@ private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
-}
-
-@Composable
-private fun MenuCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(title, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-        }
-    }
 }
 
 // ---------- 通用空态 ----------
