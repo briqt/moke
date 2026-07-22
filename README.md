@@ -34,7 +34,12 @@ Moke is a native SSH / mosh terminal for Android. It connects to remote servers 
 
 ## Install
 
-Download `moke-vX.Y.Z.apk` from [Releases](https://github.com/briqt/moke/releases), allow "install from unknown sources", and install. Release builds use a stable signature, so upgrades install over the top.
+From [Releases](https://github.com/briqt/moke/releases), pick one:
+
+- `moke-vX.Y.Z.apk` — standard build; CJK fallback is a bundled Noto Sans SC subset (smaller).
+- `moke-vX.Y.Z-maple.apk` — bundles Maple Mono as the default CJK fallback, monospaced CJK out of the box (larger).
+
+Allow "install from unknown sources" and install. Release builds use a stable signature, so upgrades install over the top.
 
 ## Modules
 
@@ -49,11 +54,15 @@ Download `moke-vX.Y.Z.apk` from [Releases](https://github.com/briqt/moke/release
 Requires JDK 17 + Android SDK (compileSdk 35 / build-tools 35). Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
 
 ```bash
-./gradlew assembleDebug        # debug APK
-./gradlew testDebugUnitTest    # unit tests
+./gradlew assembleStandardDebug   # standard debug APK
+./gradlew testDebugUnitTest       # unit tests
+
+# The `maple` flavor bundles Maple Mono as the default CJK fallback.
+# Fetch the font first (OFL, ~20 MB, not checked in), then build:
+./scripts/fetch-maple-font.sh && ./gradlew assembleMapleDebug
 ```
 
-The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r29 is required, and the GPLv3 binaries are not checked in.
+The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r29 is required, and the GPLv3 binaries are not checked in. The `maple` flavor's bundled font is fetched by [`scripts/fetch-maple-font.sh`](scripts/fetch-maple-font.sh) (OFL, not checked in).
 
 ## Feedback
 
