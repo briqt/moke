@@ -21,7 +21,7 @@ Moke is a native SSH / mosh terminal for Android. It connects to remote servers 
 - **SSH**: password / private-key (PEM) auth; TOFU host-key verification; jump host (ProxyJump); run-on-login command; window resize; keep-alive heartbeat.
 - **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (reconnect on screen-off / network switch).
 - **Sessions & hosts**: multiple sessions stay resident and switch across screens, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; protocol badges; copy connect command.
-- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; **swipe-to-scroll inside full-screen TUIs** (Claude Code, vim, htop, … — consistent over both SSH and mosh); a top status bar (protocol / host / latency); a tmux panel to attach / create / rename / kill remote sessions.
+- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; swipe-to-scroll in full-screen TUIs (Claude Code, vim, … — over both SSH and mosh); a top status bar (protocol / host / latency); a tmux panel to attach / create / rename / kill remote sessions.
 - **Appearance**: live preview; multiple dark color schemes; adjustable font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback — a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple Mono / Hack and more).
 - **Security & languages**: connection credentials are encrypted with the Android Keystore (AES-GCM) before being stored; bilingual English / 中文 (i18n), following the system language by default and switchable in Settings.
 
