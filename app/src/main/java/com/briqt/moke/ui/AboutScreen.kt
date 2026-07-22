@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -90,8 +91,11 @@ fun AboutScreen(onBack: () -> Unit) {
                 )
             }
 
-            // 版本 + 检查更新
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // 版本 + 检查更新：固定最小行高（=按钮触控高度），避免"检查更新→进度→结果"三态控件高度不同导致整行重排、文字跳动。
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
                 InfoLabel(stringResource(R.string.label_version))
                 Text("v$version", fontFamily = MokeMono, modifier = Modifier.weight(1f))
                 when (val u = update) {
