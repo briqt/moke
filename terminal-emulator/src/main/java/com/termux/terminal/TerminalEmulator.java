@@ -313,6 +313,10 @@ public final class TerminalEmulator {
                 return DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE;
             case 1002:
                 return DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT;
+            case 1003:
+                // [moke] DECSET 1003（any-event 鼠标跟踪）：按 button-event 处理即可（我们只需判定“鼠标跟踪已激活”）。
+                // mosh 会把应用的 1000/1002/1003 折叠为最终态、只下发 1003h；不认它会导致 mosh 会话里滑动误判为“无鼠标”。
+                return DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT;
             case 1004:
                 return DECSET_BIT_SEND_FOCUS_EVENTS;
             case 1006:
