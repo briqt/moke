@@ -31,8 +31,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # 只构建 standard 变体：maple 变体与它同源（差异仅 BuildConfig 开关 + 内置字体），
+      # 编译等价；maple 的完整构建（含字体获取）在 Release 工作流验证。
       - name: Assemble debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleStandardDebug --stacktrace
 
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
@@ -41,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: moke-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/standard/debug/*.apk
           if-no-files-found: error
