@@ -14,6 +14,9 @@ captures/
 # mosh native 产物：由 scripts/build-mosh-native.sh 生成（GPLv3 二进制不入库）
 app/src/main/jniLibs/**/*.so
 
+# maple 发行变体内置字体：由 scripts/fetch-maple-font.sh 下载提取（OFL，20MB，不入库）
+app/src/maple/res/font/maple_mono.ttf
+
 # 密钥/签名
 *.keystore
 *.jks

@@ -43,6 +43,10 @@ jobs:
           bash scripts/build-mosh-native.sh arm64-v8a
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
+      # maple 发行变体内置字体（OFL，不入库）——构建 maple 变体前下载提取。
+      - name: Fetch Maple font (maple flavor)
+        run: bash scripts/fetch-maple-font.sh
+
       - name: Decode signing keystore
         env:
           KS_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
@@ -59,15 +63,24 @@ jobs:
       # 守卫：确保 mosh native 库已打进 APK，避免再次发出「选 mosh 即崩」的包。
       - name: Verify native libs packaged
         run: |
-          APK=app/build/outputs/apk/release/app-release.apk
-          unzip -l "$APK" | grep -q "lib/arm64-v8a/libmosh-client.so" || { echo "❌ libmosh-client.so 未打包"; exit 1; }
-          unzip -l "$APK" | grep -q "lib/arm64-v8a/libtermux.so" || { echo "❌ libtermux.so 未打包"; exit 1; }
-          echo "✅ mosh native 库已打包"
+          for APK in app/build/outputs/apk/standard/release/app-standard-release.apk \
+                     app/build/outputs/apk/maple/release/app-maple-release.apk; do
+            unzip -l "$APK" | grep -q "lib/arm64-v8a/libmosh-client.so" || { echo "❌ $APK 缺 libmosh-client.so"; exit 1; }
+            unzip -l "$APK" | grep -q "lib/arm64-v8a/libtermux.so" || { echo "❌ $APK 缺 libtermux.so"; exit 1; }
+          done
+          # release 构建会压缩资源路径（res/font/maple_mono.ttf → res/xx.ttf），故按体积判定：
+          # maple 内置字体约 20MB，是唯一 >15MB 的 ttf；standard 包无此项。
+          unzip -l app/build/outputs/apk/maple/release/app-maple-release.apk \
+            | awk '/\.ttf$/ && $1+0 > 15000000 {f=1} END{exit !f}' \
+            || { echo "❌ maple 包缺内置字体（未见 >15MB 的 ttf）"; exit 1; }
+          echo "✅ 两个变体 native 库已打包；maple 内置字体已打包"
 
-      - name: Stage APK
+      - name: Stage APKs
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/moke-${{ github.ref_name }}.apk"
+          cp app/build/outputs/apk/standard/release/app-standard-release.apk "dist/moke-${{ github.ref_name }}.apk"
+          cp app/build/outputs/apk/maple/release/app-maple-release.apk "dist/moke-${{ github.ref_name }}-maple.apk"
+          ls -lh dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -78,8 +91,11 @@ jobs:
           body: |
             **moke · 墨客 ${{ github.ref_name }}** — Android 原生 SSH / mosh 终端。
 
-            ### 安装
-            下载下方 `moke-${{ github.ref_name }}.apk`，允许"安装未知来源应用"后安装（稳定签名，可覆盖升级）。
+            ### 安装（两个包择一）
+            - `moke-${{ github.ref_name }}.apk` — 常规包，中文回退用内置思源黑体子集，体积小。
+            - `moke-${{ github.ref_name }}-maple.apk` — 自带 Maple Mono 并设为默认中文回退（开箱中英等宽），包更大。
+
+            允许"安装未知来源应用"后安装（稳定签名，可覆盖升级）。
 
             ### 特性
             - 多会话，原生终端渲染（Apache-2.0 terminal-view 内核）

@@ -61,7 +61,8 @@ object FontCatalog {
             id = "maple_mono",
             name = "Maple Mono NF CN",
             nameZh = "Maple Mono · 中英等宽",
-            license = "OFL", cjk = true, bundled = false,
+            // maple 发行变体内置(res/font/maple_mono.ttf)；standard 变体仍走下载。
+            license = "OFL", cjk = true, bundled = com.briqt.moke.BuildConfig.BUNDLE_MAPLE,
             // 高分屏用 unhinted 变体（Normal 无花体 + NL 无连字 + NF Nerd 图标 + CN 中文 2:1）
             url = "https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMonoNormalNL-NF-CN-unhinted.zip",
             archive = true, entryHint = "Regular", approxBytes = 155_000_000L,

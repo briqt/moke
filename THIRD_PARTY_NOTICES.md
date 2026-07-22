@@ -18,6 +18,7 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 - [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)（`res/font/jetbrains_mono.ttf`）——**OFL**，默认等宽主字体，未修改。
 - [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（`res/font/noto_sans_sc.otf`）——**OFL**，默认中文回退。为控制体积，**子集化**为常用汉字（GB2312 + 常用标点，约 2.9MB），非完整字符集。
 - [Noto Sans Symbols 2](https://github.com/notofonts/symbols)（`res/font/noto_sans_symbols2.ttf`）——**OFL**，作**符号回退字体**（合成链末级），补主/回退字体常缺的媒体 / 几何 / 杂项符号等终端字形，未修改。
+- [Maple Mono NF CN](https://github.com/subframe7536/maple-font)（`res/font/maple_mono.ttf`，**仅 `maple` 发行变体**）——**OFL**，maple 变体的默认中文回退（中英等宽 + Nerd 图标，取官方 v7.9 的 NormalNL-NF-CN unhinted Regular 单字重），未修改；standard 变体不打包（见下表可运行期下载）。
 
 ### 可下载字体（运行期按需下载，不打包进 APK）
 用户在"设置 · 字体"中可选择下载。均从各项目官方 GitHub Releases 获取，存于 app 私有目录：

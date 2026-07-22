@@ -12,8 +12,8 @@ android {
         applicationId = "com.briqt.moke"
         minSdk = 24
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.1.14"
+        versionCode = 25
+        versionName = "0.1.15"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
@@ -50,6 +50,21 @@ android {
                 signingConfigs.getByName("release")
             else
                 signingConfigs.getByName("debug")
+        }
+    }
+
+    // 发行变体：standard = 常规包（中文回退用内置思源黑体子集，体积小）；
+    // maple = 自带 Maple Mono NF CN 并作为默认中文回退（开箱中英等宽，代价是包更大）。
+    // 两者同 applicationId，用户择一安装；产物按文件名区分（见 Release 工作流）。
+    flavorDimensions += "dist"
+    productFlavors {
+        create("standard") {
+            dimension = "dist"
+            buildConfigField("boolean", "BUNDLE_MAPLE", "false")
+        }
+        create("maple") {
+            dimension = "dist"
+            buildConfigField("boolean", "BUNDLE_MAPLE", "true")
         }
     }
 

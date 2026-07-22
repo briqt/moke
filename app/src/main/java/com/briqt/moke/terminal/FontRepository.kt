@@ -193,6 +193,11 @@ class FontRepository(private val context: Context) {
     private fun bundledResId(id: String): Int? = when (id) {
         "jetbrains_mono" -> R.font.jetbrains_mono
         "noto_sans_sc" -> R.font.noto_sans_sc
+        // maple 发行变体内置 res/font/maple_mono.ttf；standard 变体无此资源，故用运行时
+        // getIdentifier（避免编译期引用不存在的 R.font.maple_mono），非 maple 变体返回 null。
+        "maple_mono" -> if (com.briqt.moke.BuildConfig.BUNDLE_MAPLE)
+            context.resources.getIdentifier("maple_mono", "font", context.packageName).takeIf { it != 0 }
+        else null
         else -> null
     }
 

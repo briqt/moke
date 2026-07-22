@@ -53,7 +53,9 @@ class SettingsStore(private val context: Context) {
         const val MIN_SPACING = 0.7f
         const val MAX_SPACING = 1.3f
         // 默认字体（"恢复默认"目标；与 FontCatalog 保持一致）。
-        const val DEFAULT_FALLBACK_FONT_ID = "noto_sans_sc"
+        // maple 发行变体自带 Maple Mono NF CN 并作为默认中文回退；standard 用内置思源黑体子集。
+        val DEFAULT_FALLBACK_FONT_ID: String =
+            if (com.briqt.moke.BuildConfig.BUNDLE_MAPLE) "maple_mono" else "noto_sans_sc"
 
         /** 把任意字号规整到 0.5 网格并夹到范围内（避免浮点漂移）。 */
         fun snapFontSize(v: Float): Float =

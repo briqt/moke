@@ -60,7 +60,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, FontCatalog.DEFAULT_ID)
 
     val fallbackFontId: StateFlow<String> = settings.fallbackFontId
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "noto_sans_sc")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_FALLBACK_FONT_ID)
 
     val fontSizeSp: StateFlow<Float> = settings.fontSizeSp
         .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_FONT_SIZE_SP)
