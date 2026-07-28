@@ -68,6 +68,8 @@ The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.
 
 Only [issue](https://github.com/briqt/moke/issues)-based reports are accepted; pull requests are not accepted for now (see [CONTRIBUTING](CONTRIBUTING.md)).
 
+Community discussion: [学AI，linuxdo](https://linux.do/)
+
 ## Acknowledgements & third-party
 
 The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/termux-app](https://github.com/termux/termux-app) (Apache-2.0, originally from [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)). SSH transport uses [sshj](https://github.com/hierynomus/sshj). The mosh native component is based on [mobile-shell/mosh](https://github.com/mobile-shell/mosh) (GPLv3) and [rjyo/mosh-android](https://github.com/rjyo/mosh-android). The bundled Chinese font is a subset of [Noto Sans SC](https://github.com/notofonts/noto-cjk) (OFL). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.

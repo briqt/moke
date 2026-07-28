@@ -67,6 +67,8 @@ mosh native 产物由 [`scripts/build-mosh-native.sh`](scripts/build-mosh-native
 
 仅接受 [issue](https://github.com/briqt/moke/issues) 形式的问题反馈，暂不接受 PR（详见 [CONTRIBUTING](CONTRIBUTING.zh-CN.md)）。
 
+交流社区：[学AI，linuxdo](https://linux.do/)
+
 ## 致谢与第三方
 
 终端内核复用 [termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-emulator` / `terminal-view`（Apache-2.0，源自 [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)）。SSH 传输使用 [sshj](https://github.com/hierynomus/sshj)。mosh native 基于 [mobile-shell/mosh](https://github.com/mobile-shell/mosh)（GPLv3）与 [rjyo/mosh-android](https://github.com/rjyo/mosh-android)。内置中文字体为 [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（OFL）子集。完整清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
