@@ -13,6 +13,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
@@ -64,6 +67,10 @@ fun HostEditScreen(
     var password by remember { mutableStateOf(base.password) }
     var privateKey by remember { mutableStateOf(base.privateKeyPem) }
     var passphrase by remember { mutableStateOf(base.passphrase) }
+    // 凭据默认遮蔽，由眼睛开关逐个揭示（新建时私钥为空，直接展开编辑框）。
+    var showPassword by remember { mutableStateOf(false) }
+    var showPassphrase by remember { mutableStateOf(false) }
+    var showPrivateKey by remember { mutableStateOf(base.privateKeyPem.isBlank()) }
     var useMosh by remember { mutableStateOf(base.useMosh) }
     var jumpHostId by remember { mutableStateOf(base.jumpHostId) }
     var loginCommand by remember { mutableStateOf(base.loginCommand) }
@@ -162,20 +169,38 @@ fun HostEditScreen(
                 OutlinedTextField(
                     value = password, onValueChange = { password = it },
                     label = { Text(stringResource(R.string.field_password)) }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { RevealToggle(showPassword) { showPassword = !showPassword } },
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                OutlinedTextField(
-                    value = privateKey, onValueChange = { privateKey = it },
-                    label = { Text(stringResource(R.string.field_private_key)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3, maxLines = 6,
-                )
+                // 私钥默认不明文显示（旁人一瞥即泄），只给一行摘要 + 眼睛开关；点开才显示可编辑的多行文本框。
+                if (!showPrivateKey && privateKey.isNotBlank()) {
+                    OutlinedTextField(
+                        value = keySummary(privateKey),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(stringResource(R.string.field_private_key)) },
+                        singleLine = true,
+                        trailingIcon = { RevealToggle(false) { showPrivateKey = true } },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = privateKey, onValueChange = { privateKey = it },
+                        label = { Text(stringResource(R.string.field_private_key)) },
+                        trailingIcon = if (privateKey.isNotBlank()) {
+                            { RevealToggle(true) { showPrivateKey = false } }
+                        } else null,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3, maxLines = 6,
+                    )
+                }
                 OutlinedTextField(
                     value = passphrase, onValueChange = { passphrase = it },
                     label = { Text(stringResource(R.string.field_passphrase)) }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { RevealToggle(showPassphrase) { showPassphrase = !showPassphrase } },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -266,4 +291,32 @@ fun HostEditScreen(
         }
         }
     }
+}
+
+/** 凭据字段尾部的「眼睛」开关：[revealed] 为真表示当前明文可见，点击即切换。 */
+@Composable
+private fun RevealToggle(revealed: Boolean, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+            contentDescription = stringResource(if (revealed) R.string.action_hide else R.string.action_reveal),
+        )
+    }
+}
+
+/**
+ * 遮蔽态下私钥的一行摘要：从 PEM 头识别类型 + 长度，让人确认"存的是哪把钥匙"而不暴露内容。
+ * 只做字符串匹配，不解析密钥本体（避免为一行 UI 文案引入解析开销与失败分支）。
+ */
+private fun keySummary(pem: String): String {
+    val kind = when {
+        pem.contains("OPENSSH PRIVATE KEY") -> "OpenSSH"
+        pem.contains("RSA PRIVATE KEY") -> "RSA"
+        pem.contains("EC PRIVATE KEY") -> "EC"
+        pem.contains("DSA PRIVATE KEY") -> "DSA"
+        pem.contains("ENCRYPTED PRIVATE KEY") -> "PKCS#8 (encrypted)"
+        pem.contains("PRIVATE KEY") -> "PKCS#8"
+        else -> "?"
+    }
+    return "•••••••• $kind · ${pem.trim().length} chars"
 }

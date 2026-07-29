@@ -1,6 +1,7 @@
 package com.briqt.moke.ui
 
 import android.app.Activity
+import android.os.Build
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +31,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
@@ -37,13 +40,17 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -56,10 +63,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -84,12 +90,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.add
 import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.ui.theme.MokeDimens
@@ -129,9 +135,17 @@ fun HomeScreen(
     onCloseSession: (String) -> Unit,
     onDuplicateSession: (String) -> Unit,
     onReorderSessions: (List<String>) -> Unit,
+    keyboardMode: KeyboardMode,
+    confirmClose: Boolean,
+    updateTag: String?,
     onOpenAppearance: () -> Unit,
+    onOpenTerminalSettings: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
+    // 会话列表里点「关闭」也走二次确认（与终端页 ⋮ 一致），避免误触断掉正在跑的活。
+    var pendingClose by remember { mutableStateOf<String?>(null) }
+    val closeRequest: (String) -> Unit = { id -> if (confirmClose) pendingClose = id else onCloseSession(id) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -170,16 +184,15 @@ fun HomeScreen(
             )
         },
         bottomBar = {
-            // 略压高度（默认 80 → 72）扩大可见区。在系统底部 inset 之上再叠 6dp 顶部内边距，
-            // 让图标+文字整体下移一点、不贴底栏上边界。
+            // 标准 M3 NavigationBar：默认高度 + 官方 label 槽 + 选中态药丸指示器（此前自绘的紧凑样式
+            // 被反馈"不像 Material"）。仅保留 surface 底色以贴合墨客表面阶梯。
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.height(72.dp),
-                windowInsets = NavigationBarDefaults.windowInsets.add(WindowInsets(top = 6.dp)),
             ) {
                 NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, onTab)
                 NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, onTab)
-                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab)
+                // 有新版时给「设置」tab 点一个主题色小圆点（顺着分组一路指到「关于」）。
+                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab, dot = updateTag != null)
             }
         },
         floatingActionButton = {
@@ -192,9 +205,23 @@ fun HomeScreen(
     ) { padding ->
         when (tab) {
             HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, onCloseSession, onDuplicateSession, onReorderSessions)
-            HomeTab.Settings -> SettingsMenuContent(padding, onOpenAppearance, onOpenAbout)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions)
+            HomeTab.Settings -> SettingsMenuContent(
+                padding, keyboardMode, updateTag, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
+            )
         }
+    }
+
+    pendingClose?.let { id ->
+        val name = sessions.firstOrNull { it.id == id }?.displayTitle?.value.orEmpty()
+        ConfirmDialog(
+            title = stringResource(R.string.session_close),
+            message = stringResource(R.string.close_connection_confirm, name),
+            confirmLabel = stringResource(R.string.action_close),
+            destructive = true,
+            onConfirm = { pendingClose = null; onCloseSession(id) },
+            onDismiss = { pendingClose = null },
+        )
     }
 }
 
@@ -206,28 +233,25 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
     label: String,
     count: Int?,
     onTab: (HomeTab) -> Unit,
+    dot: Boolean = false,
 ) {
     val selected = current == target
-    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    // 图标+文字整体塞进 icon 槽，用一个很小的 2dp 间隔（取代 M3 默认较大的图标-文字间距）；label 留空。
-    // indicator 透明 → 无选中背景块；颜色显式按选中态给，选中 primary、未选中中性色。
+    // 标准 M3 用法：icon 槽放图标（会话数用 Badge 表达）、label 槽放文字，选中态由默认药丸指示器体现。
     NavigationBarItem(
         selected = selected,
         onClick = { onTab(target) },
         icon = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    if (count != null) "$label · $count" else label,
-                    color = color,
-                    fontSize = 11.sp,
-                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                    maxLines = 1,
-                )
+            when {
+                count != null -> BadgedBox(badge = { Badge { Text(count.toString()) } }) {
+                    Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
+                }
+                dot -> BadgedBox(badge = { Badge() }) {   // 无数字的纯圆点
+                    Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
+                }
+                else -> Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
             }
         },
-        colors = NavigationBarItemDefaults.colors(indicatorColor = Color.Transparent),
+        label = { Text(label, maxLines = 1) },
     )
 }
 
@@ -765,7 +789,14 @@ private fun SessionCard(
 // ---------- 设置（菜单，二级页承载具体项） ----------
 
 @Composable
-private fun SettingsMenuContent(padding: PaddingValues, onOpenAppearance: () -> Unit, onOpenAbout: () -> Unit) {
+private fun SettingsMenuContent(
+    padding: PaddingValues,
+    keyboardMode: KeyboardMode,
+    updateTag: String?,
+    onOpenAppearance: () -> Unit,
+    onOpenTerminalSettings: () -> Unit,
+    onOpenAbout: () -> Unit,
+) {
     val context = LocalContext.current
     var langDialog by remember { mutableStateOf(false) }
     val langTag = LocaleManager.currentTag(context)
@@ -775,12 +806,22 @@ private fun SettingsMenuContent(padding: PaddingValues, onOpenAppearance: () -> 
         else -> stringResource(R.string.lang_system)
     }
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
+        // 而不是继续往这一屏平铺（那样很快就乱）。
         NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), stringResource(R.string.menu_appearance_sub), onOpenAppearance)
+        NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), stringResource(R.string.menu_terminal_input_sub), onOpenTerminalSettings)
         NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
-        NavRow(Icons.Filled.Info, stringResource(R.string.menu_about), stringResource(R.string.menu_about_sub), onOpenAbout)
+        // 有新版时在「关于」上点一个主题色小圆点（静默检查的唯一提示）。
+        NavRow(
+            Icons.Filled.Info,
+            stringResource(R.string.menu_about),
+            updateTag?.let { stringResource(R.string.update_found, it) } ?: stringResource(R.string.menu_about_sub),
+            onClick = onOpenAbout,
+            showDot = updateTag != null,
+        )
     }
 
     if (langDialog) {

@@ -11,6 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.data.ThemeMode
 
 /** 底部导航分区。 */
 enum class HomeTab { Connections, Sessions, Settings }
@@ -24,6 +26,7 @@ sealed interface Screen {
     data class Edit(val host: Host?) : Screen
     data class Terminal(val sessionId: String) : Screen
     data object Appearance : Screen
+    data object TerminalSettings : Screen
     data object Fonts : Screen
     data object About : Screen
 }
@@ -42,6 +45,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val sessionGroupOrder by vm.sessionGroupOrder.collectAsState()
     val sessionCollapsedGroups by vm.sessionCollapsedGroups.collectAsState()
     val schemeId by vm.colorSchemeId.collectAsState()
+    val lightSchemeId by vm.lightColorSchemeId.collectAsState()
+    val schemeFollowsTheme by vm.schemeFollowsTheme.collectAsState()
+    val effectiveSchemeId by vm.effectiveSchemeId.collectAsState()
     val primaryFontId by vm.primaryFontId.collectAsState()
     val fallbackFontId by vm.fallbackFontId.collectAsState()
     val fontCatalog by vm.fontCatalog.collectAsState()
@@ -55,6 +61,12 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val cursorStyle by vm.cursorStyle.collectAsState()
     val cursorBlink by vm.cursorBlink.collectAsState()
     val extraKeysVisible by vm.extraKeysVisible.collectAsState()
+    val themeMode by vm.themeMode.collectAsState()
+    val dynamicColor by vm.dynamicColor.collectAsState()
+    val keyboardMode by vm.keyboardMode.collectAsState()
+    val confirmClose by vm.confirmCloseSession.collectAsState()
+    val keepScreenOn by vm.keepScreenOn.collectAsState()
+    val updateTag by vm.updateTag.collectAsState()
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
     val backEnabled = screen !is Screen.Home || homeTab != HomeTab.Connections
@@ -62,6 +74,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
         when (screen) {
             is Screen.Fonts -> screen = Screen.Appearance
             is Screen.Appearance -> { screen = Screen.Home; homeTab = HomeTab.Settings }
+            is Screen.TerminalSettings -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.Edit -> screen = Screen.Home
             is Screen.Terminal -> screen = Screen.Home
@@ -97,7 +110,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onCloseSession = { id -> vm.closeSession(id) },
             onDuplicateSession = { id -> vm.duplicateSession(id) },
             onReorderSessions = { vm.reorderSessions(it) },
+            keyboardMode = keyboardMode,
+            confirmClose = confirmClose,
+            updateTag = updateTag,
             onOpenAppearance = { screen = Screen.Appearance },
+            onOpenTerminalSettings = { screen = Screen.TerminalSettings },
             onOpenAbout = { screen = Screen.About },
         )
 
@@ -129,8 +146,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         letterSpacing = letterSpacing,
                         cursorStyle = cursorStyle,
                         cursorBlink = cursorBlink,
-                        schemeId = schemeId,
+                        schemeId = effectiveSchemeId,
                         extraKeysVisible = extraKeysVisible,
+                        keyboardMode = keyboardMode,
+                        confirmClose = confirmClose,
+                        keepScreenOn = keepScreenOn,
                         resolveTypeface = vm.fonts::resolveTypeface,
                         onBack = { screen = Screen.Home },
                         onReconnect = {
@@ -143,6 +163,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                             screen = Screen.Home; homeTab = HomeTab.Sessions
                         },
                         onFontSize = { vm.setFontSize(it) },
+                        onKeyboardMode = { vm.setKeyboardMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
                         onTmuxRefresh = { vm.refreshTmux(ts) },
                         onTmuxNew = { vm.tmuxNew(ts, it) },
@@ -155,7 +176,14 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
         }
 
         is Screen.Appearance -> AppearanceScreen(
+            themeMode = themeMode,
+            dynamicColor = dynamicColor,
+            onThemeMode = { vm.setThemeMode(it) },
+            onDynamicColor = { vm.setDynamicColor(it) },
             schemeId = schemeId,
+            lightSchemeId = lightSchemeId,
+            schemeFollowsTheme = schemeFollowsTheme,
+            effectiveSchemeId = effectiveSchemeId,
             primaryFontId = primaryFontId,
             fallbackFontId = fallbackFontId,
             fonts = fontCatalog,
@@ -167,6 +195,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             cursorBlink = cursorBlink,
             resolveTypeface = vm.fonts::resolveTypeface,
             onSelectScheme = { vm.setColorScheme(it) },
+            onSelectLightScheme = { vm.setLightColorScheme(it) },
+            onSchemeFollowsTheme = { vm.setSchemeFollowsTheme(it) },
             onSelectPrimary = { vm.setPrimaryFont(it) },
             onSelectFallback = { vm.setFallbackFont(it) },
             onFontSize = { vm.setFontSize(it) },
@@ -197,6 +227,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onBack = { screen = Screen.Appearance },
         )
 
-        is Screen.About -> AboutScreen(onBack = { screen = Screen.Home; homeTab = HomeTab.Settings })
+        is Screen.TerminalSettings -> TerminalSettingsScreen(
+            keyboardMode = keyboardMode,
+            keepScreenOn = keepScreenOn,
+            confirmClose = confirmClose,
+            onKeyboardMode = { vm.setKeyboardMode(it) },
+            onKeepScreenOn = { vm.setKeepScreenOn(it) },
+            onConfirmClose = { vm.setConfirmCloseSession(it) },
+            onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+        )
+
+        is Screen.About -> AboutScreen(updateTag = updateTag, onBack = { screen = Screen.Home; homeTab = HomeTab.Settings })
     }
 }

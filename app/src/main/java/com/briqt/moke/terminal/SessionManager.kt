@@ -45,8 +45,14 @@ class TermSession(
     /** 最后活动时间（有终端输出即刷新）：用于「更新时间」排序。非响应式（普通 volatile），列表重组时读当前值即可，避免高频重排抖动。 */
     @Volatile var lastActivityAt: Long = startedAt
 
-    /** 远端 tmux 会话列表（侧通道探测所得；空=无/未探测/mosh 不支持）。终端页据此决定是否显示 tmux 入口。 */
+    /** 远端 tmux 会话列表（侧通道探测所得；空=无会话/未探测/mosh 不支持）。 */
     val tmux: MutableStateFlow<List<TmuxSession>> = MutableStateFlow(emptyList())
+
+    /**
+     * 远端是否装了 tmux（侧通道 `command -v tmux` 探得）。终端页据此**常驻**显示 tmux 入口：
+     * 装了就一直在（零会话也能从面板新建），没装则完全不出现，做到"按情况常驻、零打扰"。
+     */
+    val tmuxAvailable: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }

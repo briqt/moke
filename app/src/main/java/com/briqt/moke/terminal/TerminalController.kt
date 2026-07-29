@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
+import com.briqt.moke.data.KeyboardMode
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
@@ -43,6 +44,9 @@ class TerminalController(
     /** 光标样式（0=方块 1=下划线 2=竖线）与是否闪烁，由 UI 设置。 */
     @Volatile var cursorStyle: Int = 0
     @Volatile var cursorBlink: Boolean = true
+
+    /** 软键盘模式（见 [KeyboardMode]）；改动后须 [restartInput] 让输入法重新取 EditorInfo。 */
+    @Volatile var keyboardMode: KeyboardMode = KeyboardMode.SECURE
 
     // ---------- TerminalSessionClient ----------
     override fun onTextChanged(changedSession: TerminalSession) { onActivity?.invoke(); view?.onScreenUpdated() }
@@ -95,10 +99,26 @@ class TerminalController(
         val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
     }
+    /**
+     * 键盘模式变更后重新协商输入连接：不 restart 的话输入法仍按旧 EditorInfo 工作，
+     * 要退出会话再进来才生效。
+     */
+    fun restartInput() {
+        val v = view ?: return
+        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.restartInput(v)
+    }
+
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-    override fun shouldEnforceCharBasedInput(): Boolean = true
+    /** 仅「字符模式」上报密码变体 inputType（逐字符、不学习不纠错）。 */
+    override fun shouldEnforceCharBasedInput(): Boolean = keyboardMode == KeyboardMode.SECURE
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
-    override fun isTerminalViewSelected(): Boolean = true
+    /**
+     * 「输入法优先」模式下故意上报 false —— 上游据此把 inputType 设为普通文本框
+     * （`TYPE_CLASS_TEXT`），中文候选词/联想才可用。该回调在 vendored 层只被
+     * `onCreateInputConnection` 读取一处，无其它副作用。
+     */
+    override fun isTerminalViewSelected(): Boolean = keyboardMode != KeyboardMode.IME
     override fun copyModeChanged(copyMode: Boolean) {}
     override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean = false
     override fun onKeyUp(keyCode: Int, e: KeyEvent?): Boolean = false

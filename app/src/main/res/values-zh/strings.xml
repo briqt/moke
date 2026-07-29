@@ -204,4 +204,49 @@
     <!-- 覆盖 vendored terminal-view 的选中菜单文案 -->
     <string name="copy_text">复制</string>
     <string name="paste_text">粘贴</string>
+
+    <!-- 外观：应用明暗主题 / 动态取色 -->
+    <string name="menu_theme">主题</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="menu_dynamic_color">动态取色</string>
+    <string name="menu_dynamic_color_sub">界面配色取自壁纸（Android 12+）</string>
+    <string name="tag_light_scheme">浅色</string>
+
+    <!-- 终端软键盘模式 -->
+    <string name="keyboard_mode">键盘模式</string>
+    <string name="kbmode_secure">字符模式</string>
+    <string name="kbmode_secure_desc">逐字符提交，不学习不纠错。部分厂商键盘在此会切到自带安全键盘，可能导致中文候选不可用。</string>
+    <string name="kbmode_standard">标准</string>
+    <string name="kbmode_standard_desc">按键直通终端，兼容多数输入法。</string>
+    <string name="kbmode_ime">输入法优先</string>
+    <string name="kbmode_ime_desc">按普通文本框处理：候选词、联想、纠错齐全，中文输入最顺。</string>
+
+    <!-- 关闭会话二次确认 -->
+    <string name="menu_confirm_close">关闭前二次确认</string>
+    <string name="menu_confirm_close_sub">结束会话前再问一次</string>
+    <string name="session_close">关闭会话</string>
+    <string name="close_connection_confirm">结束「%1$s」？其中正在运行的内容会一并终止。</string>
+
+    <!-- 凭据显隐 -->
+    <string name="action_reveal">显示</string>
+    <string name="action_hide">隐藏</string>
+
+
+    <!-- 终端配色随明暗联动 -->
+    <string name="scheme_follows_theme">随主题自动切换</string>
+    <string name="scheme_follows_theme_sub">浅色与深色模式分别使用不同的终端配色</string>
+    <string name="color_scheme_dark">配色方案 · 深色模式</string>
+    <string name="color_scheme_light">配色方案 · 浅色模式</string>
+
+
+    <!-- 设置分组 -->
+    <string name="menu_terminal_input">终端与输入</string>
+    <string name="menu_terminal_input_sub">键盘模式 · 屏幕 · 会话提示</string>
+    <string name="section_ui">界面</string>
+    <string name="menu_keep_screen_on">终端内保持屏幕常亮</string>
+    <string name="menu_keep_screen_on_sub">打开终端时不自动息屏，较耗电</string>
+    <string name="update_found">发现新版本 %1$s</string>
+
 </resources>

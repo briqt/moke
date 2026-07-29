@@ -44,3 +44,41 @@ val MokeOutlineVariant = Color(0xFF333B44)
 val MokeOnDanger = Color(0xFF2A0E10)
 val MokeDangerContainer = Color(0xFF4A1B1F)
 val MokeOnDangerContainer = Color(0xFFFFD9DB)
+
+// ---------------- 浅色（同一墨玉品牌色，压暗到浅底可读；命名 *L 后缀）----------------
+// 取值原则：primary/secondary/tertiary 在白底上要够暗（对比度 ≥4.5:1），
+// container 用同色系极浅调；表面阶梯从纸白到浅灰，保持与暗色一致的层级数。
+
+val MokeBgL = Color(0xFFF7F9FA)
+val MokeSurfaceL = Color(0xFFFFFFFF)
+val MokeSurfaceVariantL = Color(0xFFE7ECEF)
+val MokeInkL = Color(0xFF11181C)          // 正文（纸上的墨）
+val MokeJadeL = Color(0xFF0E7A5F)         // primary：墨玉压暗，白底可读
+val MokeDangerL = Color(0xFFB3261E)
+
+val MokeOnJadeL = Color(0xFFFFFFFF)
+val MokeJadeContainerL = Color(0xFFB8EFDC)
+val MokeOnJadeContainerL = Color(0xFF00281D)
+val MokeJadeInverseL = Color(0xFF7FE3C4)
+
+val MokeTealL = Color(0xFF116B5C)
+val MokeTealContainerL = Color(0xFFC3EDE6)
+val MokeOnTealContainerL = Color(0xFF00251F)
+
+val MokeCyanL = Color(0xFF15607C)
+val MokeOnCyanL = Color(0xFFFFFFFF)
+val MokeCyanContainerL = Color(0xFFC6E7F4)
+val MokeOnCyanContainerL = Color(0xFF04212C)
+
+val MokeSurfaceLowestL = Color(0xFFFFFFFF)
+val MokeSurfaceLowL = Color(0xFFF3F6F8)
+val MokeSurfaceHighL = Color(0xFFEDF1F3)
+val MokeSurfaceHighestL = Color(0xFFE6EBEE)
+
+val MokeOnSurfaceVariantL = Color(0xFF44515A)
+val MokeOutlineL = Color(0xFF74818A)
+val MokeOutlineVariantL = Color(0xFFC4CDD3)
+
+val MokeOnDangerL = Color(0xFFFFFFFF)
+val MokeDangerContainerL = Color(0xFFF9DEDC)
+val MokeOnDangerContainerL = Color(0xFF410E0B)

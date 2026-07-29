@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
@@ -79,7 +81,15 @@ private fun hex(s: String): Color = Color(android.graphics.Color.parseColor(s))
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceScreen(
+    themeMode: com.briqt.moke.data.ThemeMode,
+    dynamicColor: Boolean,
+    onThemeMode: (com.briqt.moke.data.ThemeMode) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
     schemeId: String,
+    lightSchemeId: String,
+    schemeFollowsTheme: Boolean,
+    /** 当前实际生效的配色（联动开启时可能是 [lightSchemeId]）——预览与终端都用它。 */
+    effectiveSchemeId: String,
     primaryFontId: String,
     fallbackFontId: String,
     fonts: List<com.briqt.moke.terminal.FontSpec>,
@@ -91,6 +101,8 @@ fun AppearanceScreen(
     cursorBlink: Boolean,
     resolveTypeface: (String, String) -> Typeface,
     onSelectScheme: (String) -> Unit,
+    onSelectLightScheme: (String) -> Unit,
+    onSchemeFollowsTheme: (Boolean) -> Unit,
     onSelectPrimary: (String) -> Unit,
     onSelectFallback: (String) -> Unit,
     onFontSize: (Float) -> Unit,
@@ -109,6 +121,7 @@ fun AppearanceScreen(
     val tagLocal = stringResource(R.string.tag_local)
     val tagCjk = stringResource(R.string.tag_cjk)
     val tagLigature = stringResource(R.string.tag_ligature)
+    val tagLight = stringResource(R.string.tag_light_scheme)
     // 标签配色在 @Composable 作用域先取好（下方 capTags 等在普通 map 中构造 BadgeSpec）。
     val cTertiary = MaterialTheme.colorScheme.tertiary
     val cPrimary = MaterialTheme.colorScheme.primary
@@ -136,11 +149,13 @@ fun AppearanceScreen(
                 tags = if (spec.userUploaded) listOf(BadgeSpec(tagLocal, cTertiary)) else listOf(BadgeSpec(tagCjk, cPrimary)),
             )
         }
+    // 配色列表：浅色方案打「浅色」标，便于在以暗色为主的列表里一眼分辨。
     val schemeOptions = TerminalThemes.all.map { s ->
         DropdownOption(
             id = s.id,
             title = if (zh) s.nameZh else s.name,
             subtitle = if (zh) s.name else null,
+            tags = if (!s.isDark) listOf(BadgeSpec(tagLight, cSecondary)) else emptyList(),
             leading = { SchemeSwatches(s) },
         )
     }
@@ -213,7 +228,8 @@ fun AppearanceScreen(
             val previewHeight = (fontSizeSp * lineSpacing * 1.6f * 5 + 28).dp.coerceAtMost(190.dp)
             // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
             AppearancePreview(
-                schemeId = schemeId,
+                // 预览必须跟"眼下真正生效"的那套一致，否则联动开启时改一个下拉、预览却不动。
+                schemeId = effectiveSchemeId,
                 primaryFontId = primaryFontId,
                 fallbackFontId = fallbackFontId,
                 fontSizeSp = fontSizeSp,
@@ -240,6 +256,32 @@ fun AppearanceScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // 「界面」= 应用自身的明暗与取色；与下方「配色」（终端调色板）分成两个分区，避免混淆。
+                SectionHeader(stringResource(R.string.section_ui))
+                var themeDialog by remember { mutableStateOf(false) }
+                NavRow(
+                    Icons.Filled.Contrast,
+                    stringResource(R.string.menu_theme),
+                    stringResource(themeModeLabel(themeMode)),
+                    onClick = { themeDialog = true },
+                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    SwitchRow(
+                        icon = Icons.Filled.Colorize,
+                        title = stringResource(R.string.menu_dynamic_color),
+                        subtitle = stringResource(R.string.menu_dynamic_color_sub),
+                        checked = dynamicColor,
+                        onCheckedChange = onDynamicColor,
+                    )
+                }
+                if (themeDialog) {
+                    ThemeModeDialog(
+                        current = themeMode,
+                        onPick = { onThemeMode(it); themeDialog = false },
+                        onDismiss = { themeDialog = false },
+                    )
+                }
+
                 SectionHeader(stringResource(R.string.section_font))
                 RichDropdown(
                     label = stringResource(R.string.primary_font),
@@ -295,12 +337,38 @@ fun AppearanceScreen(
                 )
 
                 SectionHeader(stringResource(R.string.section_colors))
+                // 联动开启后拆成两套（深色用 / 浅色用），关闭时只有一套——避免平时多摆一个用不上的下拉。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(stringResource(R.string.scheme_follows_theme), color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            stringResource(R.string.scheme_follows_theme_sub),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = schemeFollowsTheme, onCheckedChange = onSchemeFollowsTheme)
+                }
                 RichDropdown(
-                    label = stringResource(R.string.color_scheme),
+                    label = stringResource(
+                        if (schemeFollowsTheme) R.string.color_scheme_dark else R.string.color_scheme
+                    ),
                     options = schemeOptions,
                     selectedId = schemeId,
                     onSelect = onSelectScheme,
                 )
+                if (schemeFollowsTheme) {
+                    RichDropdown(
+                        label = stringResource(R.string.color_scheme_light),
+                        options = schemeOptions,
+                        selectedId = lightSchemeId,
+                        onSelect = onSelectLightScheme,
+                    )
+                }
 
                 SectionHeader(stringResource(R.string.section_cursor))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -464,6 +532,11 @@ private fun AppearancePreview(
         // 确保全局调色板=当前所选，再刷新预览 emulator 的调色板（顺序无关）。
         TerminalThemes.byId(schemeId).applyToTerminal()
         session.emulator?.mColors?.reset()
+        // 与终端页同因：默认背景那片 renderer 不画，得由 View 自己铺，否则预览会露出应用底色。
+        view.setBackgroundColor(
+            runCatching { android.graphics.Color.parseColor(TerminalThemes.byId(schemeId).bg) }
+                .getOrDefault(android.graphics.Color.BLACK)
+        )
         view.onScreenUpdated()
     }
 

@@ -12,15 +12,19 @@ import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.data.GroupBy
+import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
 import com.briqt.moke.data.SettingsStore
+import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
 import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.FontRepository
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.terminal.TerminalThemes
+import com.briqt.moke.update.UpdateChecker
+import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -29,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -51,10 +56,35 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val hosts: StateFlow<List<Host>> = store.hosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** 当前配色方案 id；变化时即注入全局终端调色板（含启动首值）。 */
+    /** 用户选的配色：关闭联动时即最终生效者；开启联动后是「深色模式用」那一套。 */
     val colorSchemeId: StateFlow<String> = settings.colorSchemeId
-        .onEach { id -> TerminalThemes.byId(id).applyToTerminal() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, TerminalThemes.DEFAULT_ID)
+
+    /** 「浅色模式用」配色（仅联动开启时参与）。 */
+    val lightColorSchemeId: StateFlow<String> = settings.lightColorSchemeId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, TerminalThemes.DEFAULT_LIGHT_ID)
+
+    /** 配色是否随应用明暗联动。 */
+    val schemeFollowsTheme: StateFlow<Boolean> = settings.schemeFollowsTheme
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * 应用当前是否深色。由 UI 层（已把「跟随系统/浅色/深色」解析成布尔）回灌——
+     * `isSystemInDarkTheme()` 只能在 Compose 里读，故不在 VM 内自行判断。
+     */
+    private val _appIsDark = MutableStateFlow(true)
+    fun setAppIsDark(dark: Boolean) { _appIsDark.value = dark }
+
+    /**
+     * 最终生效的配色 id：联动开启且当前浅色 → 用浅色那套，否则用主选择。
+     * **全局终端调色板只在这里注入**（含启动首值），避免两处各写一遍打架。
+     */
+    val effectiveSchemeId: StateFlow<String> =
+        combine(settings.colorSchemeId, settings.lightColorSchemeId, settings.schemeFollowsTheme, _appIsDark) { dark, light, follows, isDark ->
+            if (follows && !isDark) light else dark
+        }
+            .onEach { id -> TerminalThemes.byId(id).applyToTerminal() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, TerminalThemes.DEFAULT_ID)
 
     val primaryFontId: StateFlow<String> = settings.primaryFontId
         .stateIn(viewModelScope, SharingStarted.Eagerly, FontCatalog.DEFAULT_ID)
@@ -73,6 +103,45 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** 应用明暗主题 / 动态取色 / 键盘模式 / 关闭会话二次确认。 */
+    val themeMode: StateFlow<ThemeMode> = settings.themeMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
+    val dynamicColor: StateFlow<Boolean> = settings.dynamicColor
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val keyboardMode: StateFlow<KeyboardMode> = settings.keyboardMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.SECURE)
+    val confirmCloseSession: StateFlow<Boolean> = settings.confirmCloseSession
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /**
+     * 静默检查更新的结果：非空 = 远端有更新（值为 tag，如 v0.1.16），UI 据此点一个主题色小圆点。
+     * 跨启动保留（存在 DataStore），所以离线打开也还看得见上次发现的新版。
+     */
+    val updateTag: StateFlow<String?> = settings.latestSeenTag
+        .map { it.takeIf { t -> t.isNotBlank() && UpdateChecker.isNewer(t.removePrefix("v"), appVersion) } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** 本机版本号（versionName）。 */
+    private val appVersion: String =
+        runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0" }.getOrDefault("0")
+
+    /**
+     * 启动时静默查一次更新：不打扰、失败静默丢弃；6 小时内不重复查（避免每次冷启都打网络）。
+     * 查到的 tag 落库，UI 只以小圆点提示。
+     */
+    private fun checkUpdateSilently() = viewModelScope.launch(Dispatchers.IO) {
+        val last = settings.lastUpdateCheckAt.first()
+        val now = System.currentTimeMillis()
+        if (now - last < 6 * 60 * 60 * 1000L) return@launch
+        when (val r = UpdateChecker.check(appVersion, getApplication())) {
+            is UpdateStatus.Available -> settings.recordUpdateCheck(now, r.latest)
+            is UpdateStatus.UpToDate -> settings.recordUpdateCheck(now, "")
+            else -> Unit   // 失败/超时：不记时间戳，下次启动再试；绝不打扰用户
+        }
+    }
 
     // 连接页：固定按项目分组，仅持久化「分组顺序」与「已折叠分组」。
     val hostGroupOrder: StateFlow<List<String>> = settings.hostGroupOrder
@@ -175,14 +244,24 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
 
     // ---------- tmux 侧通道管理（仅 SSH；mosh 无侧通道直接跳过）----------
-    /** 探测/刷新远端 tmux 会话列表；连接可能尚未就绪（exec 返回 null）→ 重试若干次。 */
+    /**
+     * 探测/刷新远端 tmux：先问"装没装"（决定入口图标是否常驻），再取会话列表。
+     * 连接可能尚未就绪（exec 返回 null）→ 重试至多 ~20s（覆盖较慢的直连建连耗时），跑通即停。
+     */
     fun refreshTmux(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
         if (ts.host.useMosh) return@launch
-        // exec 返 null=连接尚未就绪 → 重试至多 ~20s（覆盖较慢的直连建连耗时），跑通即停。
         var waited = 0
         while (waited < 20_000 && isActive) {
-            val out = runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()
-            if (out != null) { ts.tmux.value = Tmux.parse(out); return@launch }
+            val probe = runCatching { ts.transport.exec(Tmux.PROBE_CMD) }.getOrNull()
+            if (probe != null) {
+                val available = Tmux.parseProbe(probe)
+                ts.tmuxAvailable.value = available
+                // 没装 tmux 就不必再问会话列表（也避免残留旧列表）。
+                ts.tmux.value = if (available) {
+                    runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()?.let { Tmux.parse(it) } ?: emptyList()
+                } else emptyList()
+                return@launch
+            }
             delay(1500)
             waited += 1500
         }
@@ -237,6 +316,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setColorScheme(id: String) = viewModelScope.launch { settings.setColorScheme(id) }
 
+    fun setLightColorScheme(id: String) = viewModelScope.launch { settings.setLightColorScheme(id) }
+
+    fun setSchemeFollowsTheme(on: Boolean) = viewModelScope.launch { settings.setSchemeFollowsTheme(on) }
+
     fun setPrimaryFont(id: String) = viewModelScope.launch { settings.setPrimaryFont(id) }
 
     fun setFallbackFont(id: String) = viewModelScope.launch { settings.setFallbackFont(id) }
@@ -252,6 +335,16 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setLetterSpacing(v: Float) = viewModelScope.launch { settings.setLetterSpacing(v) }
 
     fun setExtraKeysVisible(visible: Boolean) = viewModelScope.launch { settings.setExtraKeysVisible(visible) }
+
+    fun setThemeMode(m: ThemeMode) = viewModelScope.launch { settings.setThemeMode(m) }
+
+    fun setDynamicColor(on: Boolean) = viewModelScope.launch { settings.setDynamicColor(on) }
+
+    fun setKeyboardMode(m: KeyboardMode) = viewModelScope.launch { settings.setKeyboardMode(m) }
+
+    fun setConfirmCloseSession(on: Boolean) = viewModelScope.launch { settings.setConfirmCloseSession(on) }
+
+    fun setKeepScreenOn(on: Boolean) = viewModelScope.launch { settings.setKeepScreenOn(on) }
 
     /** 恢复外观默认（配色/字体/字号/行距/字距/光标）。 */
     fun resetAppearanceDefaults() = viewModelScope.launch { settings.resetAppearanceDefaults() }
@@ -303,4 +396,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         if (primaryFontId.value == id) settings.setPrimaryFont(FontCatalog.DEFAULT_ID)
         if (fallbackFontId.value == id) settings.setFallbackFont("")
     }
+
+    // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
+    init { checkUpdateSilently() }
 }

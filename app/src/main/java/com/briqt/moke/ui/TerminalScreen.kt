@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
 import androidx.compose.material.icons.filled.KeyboardHide
@@ -59,8 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
+import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
+import com.briqt.moke.terminal.TerminalThemes
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
@@ -81,11 +84,15 @@ fun TerminalScreen(
     cursorBlink: Boolean,
     schemeId: String,
     extraKeysVisible: Boolean,
+    keyboardMode: KeyboardMode,
+    confirmClose: Boolean,
+    keepScreenOn: Boolean,
     resolveTypeface: (String, String) -> android.graphics.Typeface,
     onBack: () -> Unit,
     onReconnect: () -> Unit,
     onClose: () -> Unit,
     onFontSize: (Float) -> Unit,
+    onKeyboardMode: (KeyboardMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
@@ -99,7 +106,11 @@ fun TerminalScreen(
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmux by ts.tmux.collectAsState()
+    val tmuxAvailable by ts.tmuxAvailable.collectAsState()
     var showTmux by remember(ts.id) { mutableStateOf(false) }
+    // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
+    var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
+    var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
     // 进入会话后探测远端 tmux（连接就绪前会重试；mosh 直接跳过）。
     LaunchedEffect(ts.id) { onTmuxRefresh() }
     var ctrlOn by remember(ts.id) { mutableStateOf(false) }
@@ -124,13 +135,18 @@ fun TerminalScreen(
         // 必须可在触摸模式获焦，否则按键/IME 输入会落到其它可聚焦控件。
         view.isFocusable = true
         view.isFocusableInTouchMode = true
-        view.keepScreenOn = true
+        view.keepScreenOn = keepScreenOn
         controller.cursorStyle = cursorStyle
         controller.cursorBlink = cursorBlink
+        controller.keyboardMode = keyboardMode
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被消费后，熄灭 Ctrl/Alt 高亮（用一次即取消）。
         controller.onModifiersConsumed = { ctrlOn = false; altOn = false }
+        // 终端底色必须由 View 自己铺：vendored TerminalRenderer 只在"单元格背景 ≠ 调色板默认背景"时
+        // 才画矩形，默认背景那片区域完全不画 → 露出的是 View/窗口背景。此前应用恒深色才碰巧看着对，
+        // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
+        view.setBackgroundColor(schemeBgColor(schemeId))
         // 注意顺序：先 setTextSize 创建 renderer，再 setTypeface（其读取 mRenderer 不判空）。
         val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
         view.setTextSize(px)
@@ -171,9 +187,17 @@ fun TerminalScreen(
         controller.cursorBlink = cursorBlink
         view.setTerminalCursorBlinkerState(cursorBlink, true)
     }
+    // 常亮开关热生效（不必退出会话重进）。
+    LaunchedEffect(ts.id, keepScreenOn) { view.keepScreenOn = keepScreenOn }
+    // 键盘模式热切换：restartInput 让输入法立刻按新 EditorInfo 重建（否则要退出会话再进才生效）。
+    LaunchedEffect(ts.id, keyboardMode) {
+        controller.keyboardMode = keyboardMode
+        controller.restartInput()
+    }
     // 配色热切换：全局调色板已由 VM 应用，这里刷新本会话 emulator 的调色板并重绘（不清屏）。
     LaunchedEffect(ts.id, schemeId) {
         ts.session.emulator?.mColors?.reset()
+        view.setBackgroundColor(schemeBgColor(schemeId))
         view.onScreenUpdated()
     }
     // 缩放提示 2 秒后消失（每次新的缩放会重置计时）。
@@ -198,14 +222,17 @@ fun TerminalScreen(
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
+                keyboardMode = keyboardMode,
+                tmuxAvailable = tmuxAvailable,
                 tmuxCount = tmux.size,
                 onOpenTmux = { onTmuxRefresh(); showTmux = true },
                 onFontSize = onFontSize,
+                onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
                 onSetTitle = { showTitleDialog = true },
                 onShowKeyboard = { controller.showKeyboard() },
                 // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
-                onClose = { keyboard?.hide(); onClose() },
+                onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
                 onBack = { keyboard?.hide(); onBack() },
             )
         },
@@ -304,6 +331,25 @@ fun TerminalScreen(
         )
     }
 
+    if (showKeyboardModeDialog) {
+        KeyboardModeDialog(
+            current = keyboardMode,
+            onPick = { onKeyboardMode(it); showKeyboardModeDialog = false },
+            onDismiss = { showKeyboardModeDialog = false },
+        )
+    }
+
+    if (showCloseConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.close_connection),
+            message = stringResource(R.string.close_connection_confirm, title),
+            confirmLabel = stringResource(R.string.action_close),
+            destructive = true,
+            onConfirm = { showCloseConfirm = false; onClose() },
+            onDismiss = { showCloseConfirm = false },
+        )
+    }
+
     if (showTmux) {
         TmuxPanel(
             sessions = tmux,
@@ -315,6 +361,11 @@ fun TerminalScreen(
         )
     }
 }
+
+/** 配色方案 id → 终端底色（ARGB int）。方案里存的是 #rrggbb 字符串，解析失败兜底纯黑。 */
+private fun schemeBgColor(schemeId: String): Int =
+    runCatching { android.graphics.Color.parseColor(TerminalThemes.byId(schemeId).bg) }
+        .getOrDefault(android.graphics.Color.BLACK)
 
 /** 字间距倍数（1.0=正常）→ Android Paint 的 letterSpacing（em）。±0.1 倍 ≈ ±0.05em，微调而不过火。 */
 fun letterSpacingEm(mul: Float): Float = (mul - 1f) * 0.5f
@@ -337,9 +388,12 @@ private fun TerminalTopBar(
     showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
+    keyboardMode: KeyboardMode,
+    tmuxAvailable: Boolean,
     tmuxCount: Int,
     onOpenTmux: () -> Unit,
     onFontSize: (Float) -> Unit,
+    onPickKeyboardMode: () -> Unit,
     onToggleExtraKeys: () -> Unit,
     onSetTitle: () -> Unit,
     onShowKeyboard: () -> Unit,
@@ -396,10 +450,11 @@ private fun TerminalTopBar(
                     }
                 }
             }
-            // tmux 入口（⋮ 左侧）：仅侧通道检测到 tmux 会话时显示，带会话数角标；点开管理面板。零打扰。
-            if (tmuxCount > 0) {
+            // tmux 入口（⋮ 左侧）：远端**装了 tmux 就常驻**（零会话也能从面板新建），没装则完全不出现。
+            // 角标只在有会话时显示会话数，避免挂一个「0」在那里。
+            if (tmuxAvailable) {
                 IconButton(onClick = onOpenTmux) {
-                    BadgedBox(badge = { Badge { Text(tmuxCount.toString()) } }) {
+                    BadgedBox(badge = { if (tmuxCount > 0) Badge { Text(tmuxCount.toString()) } }) {
                         Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -449,6 +504,21 @@ private fun TerminalTopBar(
                         text = { Text(stringResource(R.string.show_keyboard), style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = { Icon(Icons.Filled.Keyboard, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; onShowKeyboard() },
+                    )
+                    // 键盘模式：厂商安全键盘挡住中文候选时，在这里就近换一档（副标题显示当前档）。
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(stringResource(R.string.keyboard_mode), style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    stringResource(keyboardModeLabel(keyboardMode)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Filled.KeyboardAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onPickKeyboardMode() },
                     )
                     // 显示 / 隐藏底部快捷键条（双箭头表意“底部工具条上/下”）。
                     DropdownMenuItem(

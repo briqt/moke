@@ -11,8 +11,15 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.ui.MokeApp
+import com.briqt.moke.ui.MokeViewModel
 import com.briqt.moke.ui.theme.MokeTheme
 
 class MainActivity : ComponentActivity() {
@@ -27,7 +34,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // 边到边：系统栏透明、内容延伸到栏下，由 Compose 统一处理 insets（消除系统栏色缝）。
-        // 应用始终深色 → 强制 dark 样式（浅色状态/导航栏图标）。
+        // 这里先按深色铺一次，真正的明暗随主题设置在下方 LaunchedEffect 里重设。
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -40,8 +47,28 @@ class MainActivity : ComponentActivity() {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         setContent {
-            MokeTheme {
-                MokeApp()
+            val vm: MokeViewModel = viewModel()
+            val themeMode by vm.themeMode.collectAsState()
+            val dynamicColor by vm.dynamicColor.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            // 把解析好的明暗回灌 VM：终端配色的「随明暗联动」据此选用哪一套。
+            LaunchedEffect(dark) { vm.setAppIsDark(dark) }
+            // 系统栏图标明暗随主题：浅色主题下必须切 light 样式，否则白底上的白图标看不见。
+            LaunchedEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
+                    else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+                    navigationBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
+                    else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+                )
+            }
+            MokeTheme(darkTheme = dark, dynamicColor = dynamicColor) {
+                MokeApp(vm)
             }
         }
     }

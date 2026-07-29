@@ -28,6 +28,7 @@ class FontRepository(private val context: Context) {
 
     fun delete(id: String) {
         fileFor(id).takeIf { it.exists() }?.delete()
+        typefaceCache.clear() // 字体文件变动，合成结果可能失效，整清一遍（重建成本低于持有脏缓存）。
     }
 
     /** 下载（archive 则解压提取 Regular ttf）。onProgress 报告 0f..1f。 */
@@ -123,8 +124,18 @@ class FontRepository(private val context: Context) {
         error("压缩包内未找到匹配 '${spec.entryHint}' 的 ttf")
     }
 
-    /** 合成主字体 + 回退字体为一个 Typeface（供 TerminalView.setTypeface）。 */
+    /**
+     * 合成主字体 + 回退字体为一个 Typeface（供 TerminalView.setTypeface）。
+     * 进程级缓存：同一 (主,回退) 组合只合成一次——合成会 createFromFile 解析字体文件
+     * （maple 回退达 20MB），进页/换字体会反复调用，不缓存则造成明显内存抖动。
+     */
     fun resolveTypeface(primaryId: String?, fallbackId: String?): Typeface {
+        val cacheKey = "${primaryId.orEmpty()}|${fallbackId.orEmpty()}"
+        typefaceCache[cacheKey]?.let { return it }
+        return resolveTypefaceUncached(primaryId, fallbackId).also { typefaceCache[cacheKey] = it }
+    }
+
+    private fun resolveTypefaceUncached(primaryId: String?, fallbackId: String?): Typeface {
         val primary = specFor(primaryId) ?: FontCatalog.byId(FontCatalog.DEFAULT_ID)
         val fallback = fallbackId?.takeIf { it.isNotBlank() }?.let { specFor(it) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -164,6 +175,12 @@ class FontRepository(private val context: Context) {
         loadSymbolsFont()?.let {
             builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
         }
+        // Nerd Font 图标回退（内置 Symbols Nerd Font Mono）：powerline 分隔符、devicons、git/文件类型
+        // 图标都在私有区（U+E000 起），常规等宽字体一概没有 → 不补就是一片豆腐块。
+        // 放在符号回退之后：普通 Unicode 仍优先走前面的字体，私有区才落到这里。
+        loadNerdSymbolsFont()?.let {
+            builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
+        }
         builder.setSystemFallback("sans-serif")
         builder.build()
     }.getOrNull()
@@ -171,6 +188,11 @@ class FontRepository(private val context: Context) {
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun loadSymbolsFont(): android.graphics.fonts.Font? = runCatching {
         android.graphics.fonts.Font.Builder(context.resources, R.font.noto_sans_symbols2).build()
+    }.getOrNull()
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun loadNerdSymbolsFont(): android.graphics.fonts.Font? = runCatching {
+        android.graphics.fonts.Font.Builder(context.resources, R.font.symbols_nerd_font).build()
     }.getOrNull()
 
     /** 导入本地字体文件（TTF/OTF）：拷进 fonts 目录并校验可加载，返回生成的字体 id。 */
@@ -214,4 +236,10 @@ class FontRepository(private val context: Context) {
 
     private fun bundledTypeface(): Typeface =
         ResourcesCompat.getFont(context, R.font.jetbrains_mono) ?: Typeface.MONOSPACE
+
+    companion object {
+        // 进程级 Typeface 缓存：key = "主id|回退id"。Typeface 与其字体文件均不可变，可安全共享；
+        // delete() 时整清防脏。避免 20MB maple 回退在进页/换字体时被反复 createFromFile 解析。
+        private val typefaceCache = java.util.concurrent.ConcurrentHashMap<String, Typeface>()
+    }
 }

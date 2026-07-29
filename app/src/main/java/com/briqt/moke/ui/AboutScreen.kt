@@ -44,14 +44,20 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(updateTag: String? = null, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "-" }
             .getOrDefault("-")
     }
-    var update by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
+    // 启动时的静默检查若已发现新版，进来就直接呈现"有新版本"，不用再点一次检查。
+    var update by remember {
+        mutableStateOf<UpdateStatus>(
+            updateTag?.let { UpdateStatus.Available(it, "https://github.com/briqt/moke/releases/latest") }
+                ?: UpdateStatus.Idle
+        )
+    }
 
     Scaffold(
         topBar = {

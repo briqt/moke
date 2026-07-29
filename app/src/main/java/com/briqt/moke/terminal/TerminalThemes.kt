@@ -30,6 +30,8 @@ data class TermColorScheme(
 
 object TerminalThemes {
     const val DEFAULT_ID = "default"
+    /** 开启「配色随明暗联动」后，浅色模式那一侧的默认方案。 */
+    const val DEFAULT_LIGHT_ID = "solarized_light"
 
     val all: List<TermColorScheme> = listOf(
         TermColorScheme("default", "Default (xterm)", "默认", true, "#000000", "#FFFFFF", "#7FE3C4",
@@ -62,6 +64,17 @@ object TerminalThemes {
         listOf("#757575", "#825D4D", "#728C62", "#ADA16D", "#4D7B82", "#8A7267", "#729494", "#E0E0E0", "#8A8A8A", "#CF937A", "#98D9AA", "#FAE79D", "#7AC3CF", "#D6B2A1", "#ADE0E0", "#E0E0E0")),
     TermColorScheme("night", "Night", "夜", true, "#363B40", "#ffffff", "#82AAFF",
         listOf("#1F2226", "#F07178", "#C3E88D", "#FFCB6B", "#82AAFF", "#C792EA", "#89DDFF", "#BFC7D5", "#676E95", "#FF8B92", "#D2EE9F", "#FFD68A", "#9CBEFF", "#D5A8F0", "#A5E5FF", "#FFFFFF")),
+    // ---------------- 浅色方案（白天/强光下使用；ANSI 亮色系压暗，保证在浅底上可读）----------------
+    TermColorScheme("solarized_light", "Solarized Light", "Solarized 亮", false, "#FDF6E3", "#657B83", "#2AA198",
+        listOf("#EEE8D5", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#073642", "#FDF6E3", "#CB4B16", "#93A1A1", "#839496", "#657B83", "#6C71C4", "#586E75", "#002B36")),
+    TermColorScheme("github_light", "GitHub Light", "GitHub 亮", false, "#FFFFFF", "#24292F", "#0969DA",
+        listOf("#24292F", "#CF222E", "#116329", "#4D2D00", "#0969DA", "#8250DF", "#1B7C83", "#6E7781", "#57606A", "#A40E26", "#1A7F37", "#633C01", "#218BFF", "#A475F9", "#3192AA", "#24292F")),
+    TermColorScheme("one_light", "One Light", "One 亮", false, "#FAFAFA", "#383A42", "#0184BC",
+        listOf("#383A42", "#E45649", "#50A14F", "#C18401", "#4078F2", "#A626A4", "#0184BC", "#A0A1A7", "#4F525E", "#DF6C75", "#4DB05A", "#B1811B", "#4A85F0", "#A342A0", "#0997B3", "#383A42")),
+    TermColorScheme("catppuccin_latte", "Catppuccin Latte", "卡布奇诺·奶白", false, "#EFF1F5", "#4C4F69", "#179299",
+        listOf("#5C5F77", "#D20F39", "#40A02B", "#DF8E1D", "#1E66F5", "#EA76CB", "#179299", "#ACB0BE", "#6C6F85", "#D20F39", "#40A02B", "#DF8E1D", "#1E66F5", "#EA76CB", "#179299", "#BCC0CC")),
+    TermColorScheme("gruvbox_light", "Gruvbox Light", "Gruvbox 亮", false, "#FBF1C7", "#3C3836", "#427B58",
+        listOf("#FBF1C7", "#9D0006", "#79740E", "#B57614", "#076678", "#8F3F71", "#427B58", "#7C6F64", "#928374", "#9D0006", "#79740E", "#B57614", "#076678", "#8F3F71", "#427B58", "#3C3836")),
     )
 
     fun byId(id: String?): TermColorScheme = all.firstOrNull { it.id == id } ?: all.first()

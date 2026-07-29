@@ -204,4 +204,49 @@
     <!-- 覆盖 vendored terminal-view 的选中菜单文案（app 资源优先于 library，随 App 语言本地化；不改 vendored 组件） -->
     <string name="copy_text">Copy</string>
     <string name="paste_text">Paste</string>
+
+    <!-- 外观：应用明暗主题 / 动态取色 -->
+    <string name="menu_theme">Theme</string>
+    <string name="theme_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="menu_dynamic_color">Dynamic color</string>
+    <string name="menu_dynamic_color_sub">Tint the UI from your wallpaper (Android 12+)</string>
+    <string name="tag_light_scheme">Light</string>
+
+    <!-- 终端软键盘模式 -->
+    <string name="keyboard_mode">Keyboard mode</string>
+    <string name="kbmode_secure">Character mode</string>
+    <string name="kbmode_secure_desc">Sends each character as typed, no learning or autocorrect. Some vendor keyboards switch to their secure keyboard here, which can block CJK candidates.</string>
+    <string name="kbmode_standard">Standard</string>
+    <string name="kbmode_standard_desc">Passes keys straight through. Works with most keyboards.</string>
+    <string name="kbmode_ime">IME first</string>
+    <string name="kbmode_ime_desc">Acts as a normal text field: full candidates, prediction and autocorrect. Best for Chinese, Japanese and Korean input.</string>
+
+    <!-- 关闭会话二次确认 -->
+    <string name="menu_confirm_close">Confirm before closing</string>
+    <string name="menu_confirm_close_sub">Ask again before ending a session</string>
+    <string name="session_close">Close session</string>
+    <string name="close_connection_confirm">End “%1$s”? Anything running in it will be terminated.</string>
+
+    <!-- 凭据显隐 -->
+    <string name="action_reveal">Show</string>
+    <string name="action_hide">Hide</string>
+
+
+    <!-- 终端配色随明暗联动 -->
+    <string name="scheme_follows_theme">Follow app theme</string>
+    <string name="scheme_follows_theme_sub">Use a separate terminal scheme in light and dark mode</string>
+    <string name="color_scheme_dark">Color scheme · dark mode</string>
+    <string name="color_scheme_light">Color scheme · light mode</string>
+
+
+    <!-- 设置分组 -->
+    <string name="menu_terminal_input">Terminal &amp; input</string>
+    <string name="menu_terminal_input_sub">Keyboard mode · screen · session prompts</string>
+    <string name="section_ui">Interface</string>
+    <string name="menu_keep_screen_on">Keep screen on in terminal</string>
+    <string name="menu_keep_screen_on_sub">Stays awake while a terminal tab is open; uses more battery</string>
+    <string name="update_found">New version %1$s available</string>
+
 </resources>
