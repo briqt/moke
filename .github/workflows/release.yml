@@ -82,6 +82,20 @@ jobs:
           cp app/build/outputs/apk/maple/release/app-maple-release.apk "dist/moke-${{ github.ref_name }}-maple.apk"
           ls -lh dist/
 
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          TAG="${{ github.ref_name }}"; VER="${TAG#v}"
+          # 抽出 CHANGELOG.md 里 "## [x.y.z]" 到下一个 "## [" 之间的内容；抽不到就留空（下游回退到静态说明）。
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            flag && /^## \[/ {exit}
+            flag {print}
+          ' CHANGELOG.md > /tmp/section.md || true
+          if [ -s /tmp/section.md ]; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "found=false" >> "$GITHUB_OUTPUT"; fi
+          { echo 'body<<CHANGELOG_EOF'; cat /tmp/section.md; echo 'CHANGELOG_EOF'; } >> "$GITHUB_OUTPUT"
+          echo "--- 提取结果 ---"; cat /tmp/section.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -90,6 +104,8 @@ jobs:
           files: dist/moke-*.apk
           body: |
             **moke · 墨客 ${{ github.ref_name }}** — Android 原生 SSH / mosh 终端。
+
+            ${{ steps.changelog.outputs.body }}
 
             ### 安装（两个包择一）
             - `moke-${{ github.ref_name }}.apk` — 常规包，中文回退用内置思源黑体子集，体积小。
