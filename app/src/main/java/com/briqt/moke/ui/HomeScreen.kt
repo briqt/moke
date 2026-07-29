@@ -250,7 +250,9 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
                 count != null -> BadgedBox(badge = { Badge { Text(count.toString()) } }) {
                     Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
                 }
-                dot -> BadgedBox(badge = { Badge() }) {   // 无数字的纯圆点
+                // 无数字的纯圆点，显式给主题色——M3 Badge 默认是 error 红，那语义是"出错/警告"，
+                // 而这里表达的是"有新东西可看"。
+                dot -> BadgedBox(badge = { Badge(containerColor = MaterialTheme.colorScheme.primary) }) {
                     Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
                 }
                 else -> Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
