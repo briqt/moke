@@ -8,12 +8,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import java.util.UUID
 
 /**
@@ -32,44 +33,50 @@ class TermSession(
     val title: StateFlow<String>,
     /** 用户自定义标题：非空则优先级最高，完全覆盖动态标题。 */
     val customTitle: MutableStateFlow<String?>,
-    /** 最终展示标题：customTitle 优先，否则「去掉 mosh 原生前缀后的动态标题」。 */
-    val displayTitle: StateFlow<String>,
+    private val displayTitleState: MutableStateFlow<String>,
     /** 传输是否仍存活（false = 会话已结束）。 */
     val alive: StateFlow<Boolean>,
     /** 实时网络往返延迟（ms，null=未知/不适用）。 */
     val latency: StateFlow<Int?>,
-    /** 复制会话的不重复标记（如 "(2)"）；null=非复制。附加在展示标题最末，区分同源会话。 */
+    /**
+     * 复制会话的消歧标记（如 "(2)"）；null=非复制。
+     * 它不是标题内容：仅在同主机实际展示标题冲突时临时出现，自定义标题时永不强加。
+     */
     val copyMark: String? = null,
+    /** 由 tmux 面板打开的远端 session ID；断开/删除/远端消失后清空。 */
+    val remoteTmuxId: MutableStateFlow<String?>,
     val startedAt: Long,
 ) {
+    /** 最终展示标题：customTitle 优先；复制标记仅作临时冲突消歧。 */
+    val displayTitle: StateFlow<String> = displayTitleState.asStateFlow()
+
     /** 最后活动时间（有终端输出即刷新）：用于「更新时间」排序。非响应式（普通 volatile），列表重组时读当前值即可，避免高频重排抖动。 */
     @Volatile var lastActivityAt: Long = startedAt
 
-    /** 远端 tmux 会话列表（侧通道探测所得；空=无会话/未探测/mosh 不支持）。 */
-    val tmux: MutableStateFlow<List<TmuxSession>> = MutableStateFlow(emptyList())
-
-    /**
-     * 远端是否装了 tmux（侧通道 `command -v tmux` 探得）。终端页据此**常驻**显示 tmux 入口：
-     * 装了就一直在（零会话也能从面板新建），没装则完全不出现，做到"按情况常驻、零打扰"。
-     */
-    val tmuxAvailable: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    /** tmux 管理完整状态；明确区分检查中、零会话、未安装与失败。 */
+    val tmuxState: MutableStateFlow<TmuxUiState> = MutableStateFlow(TmuxUiState())
+    val tmuxMutex = Mutex()
 
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
+
+    internal fun updateDisplayTitle(title: String) {
+        displayTitleState.value = title
+    }
 
     companion object {
         // mosh-client 原生给窗口标题加固定前缀 "[mosh] "（mosh 1.4.0 stmclient.cc: L"[mosh] "，仅一个空格、无点）；
         // 协议已由徽标标识，展示时去掉它。防御性地允许重复与多余空白/点。
         private val MOSH_PREFIX = Regex("^(?:\\[mosh][\\s.·]*)+", RegexOption.IGNORE_CASE)
 
-        /** 组合最终展示标题（见 [displayTitle] 语义）。[mark] 为复制会话的不重复标记，附加在最末以区分同源会话。 */
-        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, mark: String? = null): String {
-            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return appendMark(it, mark) }
-            val base = if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
-            return appendMark(base, mark)
+        /** 组合标题本体；复制标记由 SessionManager 根据实时冲突另行派生，不写进标题本体。 */
+        fun composeTitle(useMosh: Boolean, raw: String, custom: String?): String {
+            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+            return if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
         }
 
-        private fun appendMark(t: String, mark: String?) = if (mark.isNullOrBlank()) t else "$t $mark"
+        fun disambiguateTitle(base: String, custom: String?, mark: String?, hasCollision: Boolean): String =
+            if (custom.isNullOrBlank() && hasCollision && !mark.isNullOrBlank()) "$base $mark" else base
     }
 }
 
@@ -80,7 +87,7 @@ class TermSession(
 class SessionManager(context: Context) {
 
     private val appContext = context.applicationContext
-    // 常驻作用域：派生 displayTitle 的 stateIn 用（与 SessionManager 同生命周期，即整个 app）。
+    // 常驻作用域：监听动态/自定义标题并实时重新计算冲突消歧（与整个 app 同生命周期）。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _sessions = MutableStateFlow<List<TermSession>>(emptyList())
@@ -92,16 +99,24 @@ class SessionManager(context: Context) {
      * 标题：动态标题基座=`user@host`，shell 上报 OSC 标题后被替换（展示在标题行第 1 行）；
      * 连接名（设备名）由副标题第 2 行固定展示。无前缀概念。
      *
-     * 复制（[carryFrom] 非空）：沿用来源会话当前的自定义标题，并生成一个同主机内不重复的标记
-     * （如 "(2)"）附加在标题末尾，避免两个同源会话看起来一模一样。
+     * 复制（[carryFrom] 非空）：沿用来源当前标题与自定义标题，并生成同主机内不重复的标记。
+     * 标记只在两个实际标题仍冲突时显示；标题自然分化或用户手动命名后自动消失。
      */
-    fun open(host: Host, jumpHost: Host? = null, carryFrom: TermSession? = null): TermSession {
+    fun open(
+        host: Host,
+        jumpHost: Host? = null,
+        carryFrom: TermSession? = null,
+        initialTitle: String? = null,
+        remoteTmuxId: String? = null,
+    ): TermSession {
         val baseTitle = baseTitleOf(host)
         val initialCustom = carryFrom?.customTitle?.value
         val mark = if (carryFrom != null) nextCopyMark(host.id) else null
 
-        val title = MutableStateFlow(baseTitle)
+        val title = MutableStateFlow(initialTitle ?: carryFrom?.title?.value ?: baseTitle)
         val customTitle = MutableStateFlow(initialCustom)
+        val initialDisplay = TermSession.composeTitle(host.useMosh, title.value, initialCustom)
+        val displayTitle = MutableStateFlow(initialDisplay)
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
         val controller = TerminalController(
@@ -114,10 +129,6 @@ class SessionManager(context: Context) {
         val transport = if (host.useMosh) MoshTransport(host, appContext, jumpHost)
         else SshTransport(host, appContext, jumpHost, onLatency = { latency.value = it })
         val session = TerminalSession(transport, 2000, controller)
-        val displayTitle = combine(title, customTitle) { raw, custom ->
-            TermSession.composeTitle(host.useMosh, raw, custom, mark)
-        }.stateIn(scope, SharingStarted.Eagerly,
-            TermSession.composeTitle(host.useMosh, baseTitle, initialCustom, mark))
         val ts = TermSession(
             id = UUID.randomUUID().toString(),
             host = host,
@@ -126,16 +137,76 @@ class SessionManager(context: Context) {
             transport = transport,
             title = title.asStateFlow(),
             customTitle = customTitle,
-            displayTitle = displayTitle,
+            displayTitleState = displayTitle,
             alive = alive.asStateFlow(),
             latency = latency.asStateFlow(),
             copyMark = mark,
+            remoteTmuxId = MutableStateFlow(remoteTmuxId),
             startedAt = System.currentTimeMillis(),
         )
         // 有输出即刷新会话最后活动时间（供"更新时间"排序）。
         controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }
+        combine(title, customTitle) { _, _ -> Unit }
+            .onEach { refreshDisplayTitles() }
+            .launchIn(scope)
+        refreshDisplayTitles()
         return ts
+    }
+
+    /**
+     * 在新的干净终端连接中附加远端 tmux；同一主机同一 tmux ID 已有活会话时直接复用。
+     * 这避免向任意前台程序/半输入命令盲注入 `tmux attach`，也杜绝 tmux 内再嵌套 tmux。
+     */
+    fun openTmux(source: TermSession, target: TmuxSession, jumpHost: Host? = null): TermSession {
+        _sessions.value.firstOrNull {
+            it.host.id == source.host.id && it.remoteTmuxId.value == target.id && it.alive.value
+        }?.let { return it }
+
+        val runtimeHost = source.host.copy(loginCommand = Tmux.attachCommand(target.id))
+        return open(
+            host = runtimeHost,
+            jumpHost = jumpHost,
+            initialTitle = "tmux · ${target.name}",
+            remoteTmuxId = target.id,
+        )
+    }
+
+    /** 根据实时标题冲突派生复制标记；用户自定义标题具有绝对优先级。 */
+    private fun refreshDisplayTitles() {
+        val list = _sessions.value
+        val baseById = list.associate { ts ->
+            ts.id to TermSession.composeTitle(ts.host.useMosh, ts.title.value, ts.customTitle.value)
+        }
+        val collisionCount = list.groupingBy { ts ->
+            ts.host.id to baseById.getValue(ts.id)
+        }.eachCount()
+
+        list.forEach { ts ->
+            val base = baseById.getValue(ts.id)
+            val collides = collisionCount.getValue(ts.host.id to base) > 1
+            ts.updateDisplayTitle(
+                TermSession.disambiguateTitle(base, ts.customTitle.value, ts.copyMark, collides)
+            )
+        }
+    }
+
+    /** 断开/关闭远端 tmux 后，关联的 Moke 终端已回到普通 shell，不应继续标成“当前”。 */
+    fun clearTmuxAssociation(hostId: String, remoteId: String) {
+        _sessions.value
+            .filter { it.host.id == hostId && it.remoteTmuxId.value == remoteId }
+            .forEach { it.remoteTmuxId.value = null }
+    }
+
+    /** 外部删除 tmux 会话时也同步清理过期关联。 */
+    fun reconcileTmuxAssociations(hostId: String, liveRemoteIds: Set<String>) {
+        _sessions.value
+            .filter {
+                it.host.id == hostId &&
+                    it.remoteTmuxId.value != null &&
+                    it.remoteTmuxId.value !in liveRemoteIds
+            }
+            .forEach { it.remoteTmuxId.value = null }
     }
 
     /** 动态标题基座（OSC 上报前）：优先 `user@host`；缺 host 回落 displayName、缺 user 只用 host。 */
@@ -173,5 +244,6 @@ class SessionManager(context: Context) {
         val ts = get(id) ?: return
         runCatching { ts.session.finishIfRunning() }
         _sessions.update { list -> list.filterNot { it.id == id } }
+        refreshDisplayTitles()
     }
 }

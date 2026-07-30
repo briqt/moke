@@ -17,6 +17,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * mosh 传输（总纲 §5.5 的落地）：
@@ -131,29 +132,56 @@ class MoshTransport(
     }
 
     private fun sshBootstrap(): String {
-        val client = SSHClient(DefaultConfig())
-        client.connectTimeout = 15000
-        client.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
-        var jClient: SSHClient? = null
-        if (jumpHost != null) {
-            val j = SSHClient(DefaultConfig())
-            j.connectTimeout = 15000
-            j.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
-            j.connect(jumpHost.host, jumpHost.port)
-            authenticate(j, jumpHost)
-            client.connectVia(j.newDirectConnection(host.host, host.port))
-            jClient = j
-        } else {
-            client.connect(host.host, host.port)
-        }
-        try {
-            authenticate(client, host)
+        return withSshClient { client ->
             client.startSession().use { s ->
                 val cmd = s.exec(MoshBootstrap.serverCommand())
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
                 cmd.join()
-                return stdout
+                stdout
             }
+        }
+    }
+
+    /**
+     * mosh 数据面虽是 UDP，管理 tmux 仍可按需建立一条短生命周期 SSH 控制连接。
+     * 每次独立连接，不与 mosh 漫游生命周期耦合；失败返回 null，由 UI 明确显示并允许重试。
+     */
+    override fun exec(command: String): String? {
+        if (closed) return null
+        return runCatching {
+            withSshClient { client ->
+                client.startSession().use { s ->
+                    val cmd = s.exec(command)
+                    cmd.join(10, TimeUnit.SECONDS)
+                    if (cmd.isOpen) {
+                        runCatching { cmd.close() }
+                        return@withSshClient null
+                    }
+                    cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
+                }
+            }
+        }.getOrNull()
+    }
+
+    private fun <T> withSshClient(block: (SSHClient) -> T): T {
+        val client = SSHClient(DefaultConfig())
+        client.connectTimeout = 15000
+        client.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
+        var jClient: SSHClient? = null
+        try {
+            if (jumpHost != null) {
+                val j = SSHClient(DefaultConfig())
+                j.connectTimeout = 15000
+                j.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
+                j.connect(jumpHost.host, jumpHost.port)
+                authenticate(j, jumpHost)
+                client.connectVia(j.newDirectConnection(host.host, host.port))
+                jClient = j
+            } else {
+                client.connect(host.host, host.port)
+            }
+            authenticate(client, host)
+            return block(client)
         } finally {
             runCatching { client.disconnect() }
             runCatching { jClient?.disconnect() }

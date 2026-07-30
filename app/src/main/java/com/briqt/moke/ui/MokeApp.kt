@@ -168,8 +168,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onTmuxRefresh = { vm.refreshTmux(ts) },
                         onTmuxNew = { vm.tmuxNew(ts, it) },
                         onTmuxRename = { id, name -> vm.tmuxRename(ts, id, name) },
+                        onTmuxDetach = { vm.tmuxDetach(ts, it) },
                         onTmuxKill = { vm.tmuxKill(ts, it) },
-                        onTmuxAttach = { vm.tmuxAttach(ts, it) },
+                        onTmuxAttach = { target ->
+                            screen = Screen.Terminal(vm.openTmuxSession(ts, target))
+                        },
                     )
                 }
             }

@@ -11,6 +11,9 @@ import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
+import com.briqt.moke.terminal.TmuxDiscovery
+import com.briqt.moke.terminal.TmuxPhase
+import com.briqt.moke.terminal.TmuxSession
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
@@ -26,6 +29,7 @@ import com.briqt.moke.terminal.TerminalThemes
 import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +44,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -243,41 +248,115 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 拖动重排会话（仅内存，无持久化）。 */
     fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
 
-    // ---------- tmux 侧通道管理（仅 SSH；mosh 无侧通道直接跳过）----------
+    // ---------- tmux 侧通道管理（SSH 复用现有连接；mosh 按需建立独立 SSH 控制连接）----------
     /**
-     * 探测/刷新远端 tmux：先问"装没装"（决定入口图标是否常驻），再取会话列表。
-     * 连接可能尚未就绪（exec 返回 null）→ 重试至多 ~20s（覆盖较慢的直连建连耗时），跑通即停。
+     * 探测/刷新远端 tmux。状态明确区分检查中、未安装、零会话与失败；
+     * 同一终端会话的刷新/增删改用 Mutex 串行，避免慢请求用旧列表覆盖新操作结果。
      */
     fun refreshTmux(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
-        if (ts.host.useMosh) return@launch
-        var waited = 0
-        while (waited < 20_000 && isActive) {
-            val probe = runCatching { ts.transport.exec(Tmux.PROBE_CMD) }.getOrNull()
-            if (probe != null) {
-                val available = Tmux.parseProbe(probe)
-                ts.tmuxAvailable.value = available
-                // 没装 tmux 就不必再问会话列表（也避免残留旧列表）。
-                ts.tmux.value = if (available) {
-                    runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()?.let { Tmux.parse(it) } ?: emptyList()
-                } else emptyList()
-                return@launch
-            }
+        ts.tmuxMutex.withLock { refreshTmuxLocked(ts, retryUntilReady = true) }
+    }
+
+    private suspend fun refreshTmuxLocked(ts: TermSession, retryUntilReady: Boolean) {
+        val previous = ts.tmuxState.value
+        ts.tmuxState.value = previous.copy(
+            phase = if (previous.phase == TmuxPhase.READY) TmuxPhase.READY else TmuxPhase.CHECKING,
+            busy = true,
+            message = null,
+        )
+
+        val deadline = System.currentTimeMillis() + if (retryUntilReady) 20_000L else 0L
+        var out: String?
+        do {
+            out = runCatching { ts.transport.exec(Tmux.DISCOVER_CMD) }.getOrNull()
+            if (out != null || !retryUntilReady || !currentCoroutineContext().isActive) break
             delay(1500)
-            waited += 1500
+        } while (System.currentTimeMillis() < deadline)
+
+        if (out == null) {
+            ts.tmuxState.value = previous.copy(
+                phase = if (previous.phase == TmuxPhase.READY) TmuxPhase.READY else TmuxPhase.ERROR,
+                busy = false,
+                message = str(R.string.tmux_control_unavailable),
+            )
+            return
+        }
+
+        ts.tmuxState.value = when (val discovery = Tmux.parseDiscovery(out)) {
+            TmuxDiscovery.NotInstalled -> previous.copy(
+                phase = TmuxPhase.NOT_INSTALLED,
+                sessions = emptyList(),
+                busy = false,
+                message = null,
+            )
+            is TmuxDiscovery.Ready -> previous.copy(
+                phase = TmuxPhase.READY,
+                sessions = discovery.sessions,
+                busy = false,
+                message = null,
+            ).also {
+                sessions.reconcileTmuxAssociations(
+                    ts.host.id,
+                    discovery.sessions.mapTo(mutableSetOf()) { session -> session.id },
+                )
+            }
+            TmuxDiscovery.Malformed -> previous.copy(
+                phase = TmuxPhase.ERROR,
+                busy = false,
+                message = str(R.string.tmux_invalid_response),
+            )
         }
     }
 
-    /** 执行一条 tmux 管理命令后回刷列表。 */
-    private fun tmuxAction(ts: TermSession, cmd: String) = viewModelScope.launch(Dispatchers.IO) {
-        runCatching { ts.transport.exec(cmd) }
-        delay(150)
-        runCatching { ts.transport.exec(Tmux.LIST_CMD) }.getOrNull()?.let { ts.tmux.value = Tmux.parse(it) }
+    /** 执行管理命令，显示远端错误；成功后在同一个串行临界区内回刷。 */
+    private fun tmuxAction(
+        ts: TermSession,
+        cmd: String,
+        onSuccess: () -> Unit = {},
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        ts.tmuxMutex.withLock {
+            val before = ts.tmuxState.value
+            ts.tmuxState.value = before.copy(busy = true, message = null)
+            val out = runCatching { ts.transport.exec(Tmux.actionCmd(cmd)) }.getOrNull()
+            val result = out?.let(Tmux::parseAction)
+            when {
+                out == null -> ts.tmuxState.value = before.copy(
+                    busy = false,
+                    message = str(R.string.tmux_control_unavailable),
+                )
+                result == null -> ts.tmuxState.value = before.copy(
+                    busy = false,
+                    message = str(R.string.tmux_invalid_response),
+                )
+                !result.ok -> ts.tmuxState.value = before.copy(
+                    busy = false,
+                    message = result.output.ifBlank { str(R.string.tmux_action_failed) }.take(500),
+                )
+                else -> {
+                    onSuccess()
+                    refreshTmuxLocked(ts, retryUntilReady = false)
+                }
+            }
+        }
     }
     fun tmuxNew(ts: TermSession, name: String) = tmuxAction(ts, Tmux.newCmd(name))
     fun tmuxRename(ts: TermSession, id: String, name: String) = tmuxAction(ts, Tmux.renameCmd(id, name))
-    fun tmuxKill(ts: TermSession, id: String) = tmuxAction(ts, Tmux.killCmd(id))
-    /** 附加：注入当前前台 PTY（会显示在用户画面，符合预期）。 */
-    fun tmuxAttach(ts: TermSession, name: String) { ts.session.write(Tmux.attachInput(name)) }
+    fun tmuxDetach(ts: TermSession, id: String) = tmuxAction(ts, Tmux.detachCmd(id)) {
+        sessions.clearTmuxAssociation(ts.host.id, id)
+    }
+    fun tmuxKill(ts: TermSession, id: String) = tmuxAction(ts, Tmux.killCmd(id)) {
+        sessions.clearTmuxAssociation(ts.host.id, id)
+    }
+
+    /**
+     * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，再由登录命令附加稳定 session ID。
+     * 不向当前前台终端注入文本，因此当前正在运行的 shell/TUI/半输入命令均不会被破坏。
+     */
+    fun openTmuxSession(source: TermSession, target: TmuxSession): String {
+        val session = sessions.openTmux(source, target, resolveJump(source.host))
+        ensureSessionService()
+        return session.id
+    }
 
     /** 记录最近连接时间（用于"最近连接"排序）。 */
     fun touchHost(host: Host) = viewModelScope.launch {

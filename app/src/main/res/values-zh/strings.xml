@@ -30,13 +30,32 @@
     <string name="tmux_title">tmux 会话</string>
     <string name="tmux_open">tmux 会话</string>
     <string name="tmux_new">新建会话</string>
-    <string name="tmux_attach">附加</string>
+    <string name="tmux_attach">打开</string>
     <string name="tmux_rename">重命名</string>
+    <string name="tmux_detach">断开客户端</string>
     <string name="tmux_kill">关闭</string>
-    <string name="tmux_windows">%1$d 个窗口</string>
-    <string name="tmux_attached">已附加</string>
+    <plurals name="tmux_windows">
+        <item quantity="other">%1$d 个窗口</item>
+    </plurals>
+    <plurals name="tmux_clients">
+        <item quantity="other">%1$d 个客户端</item>
+    </plurals>
+    <string name="tmux_current">当前</string>
     <string name="tmux_empty">没有 tmux 会话</string>
     <string name="tmux_name_hint">会话名</string>
+    <string name="tmux_refresh">刷新 tmux 会话</string>
+    <string name="tmux_retry">重试</string>
+    <string name="tmux_checking">正在检查 tmux…</string>
+    <string name="tmux_not_installed">远端没有安装 tmux</string>
+    <string name="tmux_control_unavailable">无法连接 tmux 控制通道，请检查网络后重试</string>
+    <string name="tmux_invalid_response">无法识别远端 tmux 的返回结果</string>
+    <string name="tmux_action_failed">tmux 操作失败</string>
+    <string name="tmux_detach_confirm_title">断开 tmux 客户端？</string>
+    <plurals name="tmux_detach_confirm_message">
+        <item quantity="other">将断开当前附加到“%2$s”的 %1$d 个客户端，但不会终止其中的程序。</item>
+    </plurals>
+    <string name="tmux_kill_confirm_title">关闭 tmux 会话？</string>
+    <string name="tmux_kill_confirm_message">“%1$s”中的程序将被终止，此操作无法撤销。</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>

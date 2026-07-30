@@ -5,61 +5,124 @@ data class TmuxSession(
     val id: String,
     val name: String,
     val windows: Int,
-    val attached: Boolean,
+    /** 当前附加到该会话的 tmux client 数。 */
+    val clients: Int,
     val created: Long,   // epoch 秒
 )
 
-/** tmux 侧通道命令与输出解析（纯逻辑，无副作用）。字段以制表符分隔。 */
+enum class TmuxPhase {
+    IDLE,
+    CHECKING,
+    READY,
+    NOT_INSTALLED,
+    ERROR,
+}
+
+/**
+ * tmux 管理面板的完整状态。不能再用空列表同时表示「没探测、零会话、失败」：
+ * 那会把真实错误伪装成“没有会话”，用户也无从重试。
+ */
+data class TmuxUiState(
+    val phase: TmuxPhase = TmuxPhase.IDLE,
+    val sessions: List<TmuxSession> = emptyList(),
+    val busy: Boolean = false,
+    val message: String? = null,
+)
+
+sealed interface TmuxDiscovery {
+    data object NotInstalled : TmuxDiscovery
+    data class Ready(val sessions: List<TmuxSession>) : TmuxDiscovery
+    data object Malformed : TmuxDiscovery
+}
+
+data class TmuxActionResult(
+    val ok: Boolean,
+    val output: String,
+)
+
+/** tmux 侧通道命令与输出解析（纯逻辑，无副作用）。 */
 object Tmux {
+    private const val DISCOVERY_READY = "__MOKE_TMUX__:ready"
+    private const val DISCOVERY_MISSING = "__MOKE_TMUX__:missing"
+    private const val ACTION_PREFIX = "__MOKE_TMUX_RC__:"
+
     /**
-     * 列表：`id:name:windows:attached(1/0):created`，`2>/dev/null` 吞掉"无 server"之类 stderr。
+     * 探测 + 列表一次完成，避免 mosh 控制链为一次刷新重复建立两条 SSH 连接。
      *
-     * 两个坑（都在真机上踩过）：
-     * 1. **分隔符不能用 TAB**——tmux 会把格式串里的不可打印字符（含 TAB）统一替换成 `_`，
-     *    于是整行变成一个字段、解析出空列表（表现为"面板说没有会话"）。改用 `:`：
-     *    tmux 明令会话名不得含 `:` 与 `.`，故它天然安全。
-     * 2. **locale 不是 UTF-8 时，中文会话名同样被逐字节换成 `_`**——exec 通道拿到的是非交互
-     *    shell，往往只有 `LANG=C`。故先从 `locale -a` 里挑一个可用的 UTF-8 locale 再跑 tmux；
-     *    挑不到就退回 C（行为与从前一致，仅中文名仍显示为 `_`，不影响解析）。
+     * - `tmux -u` 是 tmux 官方的强制 UTF-8 输出开关，不再依赖远端恰好装有 `locale/grep/head`
+     *   或非交互 shell 的 LANG；中文名可稳定返回。
+     * - 分隔符不能用 TAB：tmux 会把格式串里的不可打印字符替换成 `_`。改用会话名不允许出现的
+     *   `:`，并从行尾反向解析数值字段。
+     * - `list-sessions` 在“已安装但还没有 tmux server”时退出非零，仍是合法的零会话状态。
      */
-    const val LIST_CMD =
-        "L=$(locale -a 2>/dev/null | grep -iE '^(C|en_US)\\.utf-?8$' | head -1); " +
-            "LC_ALL=\${L:-C} tmux list-sessions " +
-            "-F '#{session_id}:#{session_name}:#{session_windows}:#{?session_attached,1,0}:#{session_created}' 2>/dev/null"
+    const val DISCOVER_CMD =
+        "if ! command -v tmux >/dev/null 2>&1; then " +
+            "printf '$DISCOVERY_MISSING\\n'; " +
+            "else printf '$DISCOVERY_READY\\n'; " +
+            "tmux -u list-sessions " +
+            "-F '#{session_id}:#{session_name}:#{session_windows}:#{session_attached}:#{session_created}' " +
+            "2>/dev/null || true; fi"
 
-    /**
-     * 远端是否装了 tmux。必须与 [LIST_CMD] 分开问——`tmux ls` 在"装了但没有 server"时同样是空输出，
-     * 无法区分"没装"和"零会话"，而入口图标的常驻与否正取决于这个区分。
-     */
-    const val PROBE_CMD = "command -v tmux >/dev/null 2>&1 && echo yes || echo no"
+    fun parseDiscovery(out: String): TmuxDiscovery {
+        val lines = out.lineSequence().filter { it.isNotBlank() }.toList()
+        if (lines.isEmpty()) return TmuxDiscovery.Malformed
+        if (lines.first().trim() == DISCOVERY_MISSING) return TmuxDiscovery.NotInstalled
+        if (lines.first().trim() != DISCOVERY_READY) return TmuxDiscovery.Malformed
 
-    fun parseProbe(out: String?): Boolean = out?.trim() == "yes"
+        val sessionLines = lines.drop(1)
+        val sessions = sessionLines.mapNotNull(::parseSessionLine)
+        return if (sessions.size == sessionLines.size) {
+            TmuxDiscovery.Ready(sessions)
+        } else {
+            TmuxDiscovery.Malformed
+        }
+    }
 
-    /**
-     * 解析 [LIST_CMD] 输出。首段为 id、末三段为 windows/attached/created，**中间全部并回名字**——
-     * 这样即便名字里意外出现分隔符（tmux 理论上不允许）也不会串位，而是原样保留。
-     */
-    fun parse(out: String): List<TmuxSession> = out.lineSequence()
-        .mapNotNull { line ->
-            if (line.isBlank()) return@mapNotNull null
-            val p = line.split(':')
-            if (p.size < 5) return@mapNotNull null
-            TmuxSession(
-                id = p[0].trim(),
-                name = p.subList(1, p.size - 3).joinToString(":"),
-                windows = p[p.size - 3].trim().toIntOrNull() ?: 0,
-                attached = p[p.size - 2].trim() == "1",
-                created = p[p.size - 1].trim().toLongOrNull() ?: 0L,
-            )
-        }.toList()
+    private fun parseSessionLine(line: String): TmuxSession? {
+        val p = line.split(':')
+        if (p.size < 5) return null
+        val id = p[0].trim()
+        val windows = p[p.size - 3].trim().toIntOrNull() ?: return null
+        val clients = p[p.size - 2].trim().toIntOrNull() ?: return null
+        val created = p[p.size - 1].trim().toLongOrNull() ?: return null
+        if (!id.startsWith("$")) return null
+        return TmuxSession(
+            id = id,
+            name = p.subList(1, p.size - 3).joinToString(":"),
+            windows = windows,
+            clients = clients,
+            created = created,
+        )
+    }
 
     // 单引号安全包裹（防远端 shell 对空格/$ 等做扩展）。
     private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     fun newCmd(name: String) = "tmux new-session -d -s ${q(name)}"
     fun renameCmd(id: String, name: String) = "tmux rename-session -t ${q(id)} ${q(name)}"
+    fun detachCmd(id: String) = "tmux detach-client -s ${q(id)}"
     fun killCmd(id: String) = "tmux kill-session -t ${q(id)}"
 
-    /** 附加需 TTY → 不走侧通道，注入当前前台 PTY 执行（会显示在用户画面，符合预期）。按名附加，末尾回车。 */
-    fun attachInput(name: String) = "tmux attach -t ${q(name)}\r"
+    /**
+     * 把管理命令包装成可解析的结果。stderr 合入结果，失败原因才能在 UI 中显示；
+     * 首行固定返回退出码，后续为 tmux 原始输出。
+     */
+    fun actionCmd(command: String): String =
+        "O=\$({ $command; } 2>&1); R=\$?; " +
+            "printf '$ACTION_PREFIX%s\\n' \"\$R\"; printf '%s' \"\$O\""
+
+    fun parseAction(out: String): TmuxActionResult? {
+        val firstBreak = out.indexOf('\n')
+        val first = (if (firstBreak >= 0) out.substring(0, firstBreak) else out).trim()
+        if (!first.startsWith(ACTION_PREFIX)) return null
+        val code = first.removePrefix(ACTION_PREFIX).toIntOrNull() ?: return null
+        val body = if (firstBreak >= 0) out.substring(firstBreak + 1).trim() else ""
+        return TmuxActionResult(ok = code == 0, output = body)
+    }
+
+    /**
+     * 附加始终在一个新的、干净的 Moke 终端连接里执行，绝不注入当前前台输入。
+     * 目标使用稳定 session ID，避免重命名或同名前缀匹配造成竞态。
+     */
+    fun attachCommand(id: String) = "tmux attach-session -t ${q(id)}"
 }

@@ -64,6 +64,8 @@ import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
+import com.briqt.moke.terminal.TmuxPhase
+import com.briqt.moke.terminal.TmuxSession
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
@@ -97,21 +99,22 @@ fun TerminalScreen(
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
     onTmuxRename: (String, String) -> Unit,
+    onTmuxDetach: (String) -> Unit,
     onTmuxKill: (String) -> Unit,
-    onTmuxAttach: (String) -> Unit,
+    onTmuxAttach: (TmuxSession) -> Unit,
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
-    val tmux by ts.tmux.collectAsState()
-    val tmuxAvailable by ts.tmuxAvailable.collectAsState()
+    val tmuxState by ts.tmuxState.collectAsState()
+    val remoteTmuxId by ts.remoteTmuxId.collectAsState()
     var showTmux by remember(ts.id) { mutableStateOf(false) }
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
     var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
-    // 进入会话后探测远端 tmux（连接就绪前会重试；mosh 直接跳过）。
+    // 进入会话后探测远端 tmux；SSH 复用现有连接，mosh 按需走独立 SSH 控制连接。
     LaunchedEffect(ts.id) { onTmuxRefresh() }
     var ctrlOn by remember(ts.id) { mutableStateOf(false) }
     var altOn by remember(ts.id) { mutableStateOf(false) }
@@ -223,9 +226,13 @@ fun TerminalScreen(
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 keyboardMode = keyboardMode,
-                tmuxAvailable = tmuxAvailable,
-                tmuxCount = tmux.size,
-                onOpenTmux = { onTmuxRefresh(); showTmux = true },
+                tmuxAvailable = tmuxState.phase != TmuxPhase.IDLE &&
+                    tmuxState.phase != TmuxPhase.NOT_INSTALLED,
+                tmuxCount = tmuxState.sessions.size,
+                onOpenTmux = {
+                    if (!tmuxState.busy) onTmuxRefresh()
+                    showTmux = true
+                },
                 onFontSize = onFontSize,
                 onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
@@ -352,10 +359,13 @@ fun TerminalScreen(
 
     if (showTmux) {
         TmuxPanel(
-            sessions = tmux,
+            state = tmuxState,
+            currentTmuxId = remoteTmuxId,
             onDismiss = { showTmux = false },
-            onAttach = { onTmuxAttach(it.name); controller.showKeyboard() },
+            onRefresh = onTmuxRefresh,
+            onAttach = onTmuxAttach,
             onRename = { s, name -> onTmuxRename(s.id, name) },
+            onDetach = { onTmuxDetach(it.id) },
             onKill = { onTmuxKill(it.id) },
             onNew = { onTmuxNew(it) },
         )

@@ -204,9 +204,15 @@ class SshTransport(
         return runCatching {
             client.startSession().use { s ->
                 val cmd = s.exec(command)
-                val out = cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
-                runCatching { cmd.join(10, java.util.concurrent.TimeUnit.SECONDS) }
-                out
+                // 先等远端命令结束；超时后主动关通道并返回失败。旧实现先 readBytes 再 join，
+                // 命令若不结束会永久卡在读取处，所谓 10 秒超时实际上永远走不到。
+                cmd.join(10, java.util.concurrent.TimeUnit.SECONDS)
+                if (cmd.isOpen) {
+                    runCatching { cmd.close() }
+                    null
+                } else {
+                    cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
+                }
             }
         }.getOrNull()
     }

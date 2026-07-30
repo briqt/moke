@@ -37,7 +37,7 @@ public interface TerminalTransport {
     /**
      * 带外执行一条只读/控制命令并返回其 stdout（用于 tmux 侧通道管理等）。
      * 静默、不占前台 PTY。默认不支持返回 null；不支持或尚未连上/失败时返回 null，跑通但无输出返回空串。
-     * [moke] 加法式扩展，仅 SSH 实现。
+     * [moke] 加法式扩展：SSH 复用现有连接；mosh 可按需建立独立 SSH 控制连接。
      */
     default String exec(String command) { return null; }
 
