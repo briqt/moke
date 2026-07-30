@@ -28,6 +28,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Validate release metadata
+        run: |
+          TAG="${{ github.ref_name }}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
+            || { echo "❌ 非法版本标签：$TAG"; exit 1; }
+          EXPECTED_VERSION="${TAG#v}"
+          ACTUAL_VERSION="$(sed -n 's/^[[:space:]]*versionName = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          [ "$ACTUAL_VERSION" = "$EXPECTED_VERSION" ] \
+            || { echo "❌ tag=$EXPECTED_VERSION，但 versionName=$ACTUAL_VERSION"; exit 1; }
+          echo "✅ release metadata: versionName=$ACTUAL_VERSION"
+
       # mosh native 产物（GPLv3 二进制不入库）——发布包必须自行构建，否则 APK 缺 libmosh-client.so，
       # 选 mosh 协议会因缺 native 库而不可用。见 scripts/build-mosh-native.sh。
       - name: Install NDK r29
@@ -100,6 +111,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: moke ${{ github.ref_name }}
+          # SemVer 后缀（如 -rc.1）只发布为 GitHub Pre-release，且绝不占用 Latest。
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           generate_release_notes: true
           files: dist/moke-*.apk
           body: |

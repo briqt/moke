@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.math.BigInteger
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -55,16 +56,60 @@ object UpdateChecker {
         } ?: UpdateStatus.Failed(context.getString(R.string.update_timeout))
     }
 
-    /** 语义化版本数字段比较：a > b 返回 true。非数字段忽略。 */
+    /** SemVer 优先级比较：a > b 返回 true；正式版高于相同核心版本的预发布版。 */
     fun isNewer(a: String, b: String): Boolean {
-        val pa = a.split('.', '-').mapNotNull { it.toIntOrNull() }
-        val pb = b.split('.', '-').mapNotNull { it.toIntOrNull() }
-        val n = maxOf(pa.size, pb.size)
-        for (i in 0 until n) {
-            val x = pa.getOrElse(i) { 0 }
-            val y = pb.getOrElse(i) { 0 }
-            if (x != y) return x > y
+        val left = SemVer.parse(a) ?: return false
+        val right = SemVer.parse(b) ?: return false
+        return left.compareTo(right) > 0
+    }
+
+    private data class SemVer(
+        val major: BigInteger,
+        val minor: BigInteger,
+        val patch: BigInteger,
+        val prerelease: List<String>?,
+    ) : Comparable<SemVer> {
+        override fun compareTo(other: SemVer): Int {
+            major.compareTo(other.major).takeIf { it != 0 }?.let { return it }
+            minor.compareTo(other.minor).takeIf { it != 0 }?.let { return it }
+            patch.compareTo(other.patch).takeIf { it != 0 }?.let { return it }
+
+            if (prerelease == null && other.prerelease == null) return 0
+            if (prerelease == null) return 1
+            if (other.prerelease == null) return -1
+
+            for (i in 0 until minOf(prerelease.size, other.prerelease.size)) {
+                val left = prerelease[i]
+                val right = other.prerelease[i]
+                val leftNumber = left.toBigIntegerOrNull()
+                val rightNumber = right.toBigIntegerOrNull()
+                val result = when {
+                    leftNumber != null && rightNumber != null -> leftNumber.compareTo(rightNumber)
+                    leftNumber != null -> -1
+                    rightNumber != null -> 1
+                    else -> left.compareTo(right)
+                }
+                if (result != 0) return result
+            }
+            return prerelease.size.compareTo(other.prerelease.size)
         }
-        return false
+
+        companion object {
+            private val pattern = Regex(
+                """^[vV]?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?(?:\+[0-9A-Za-z.-]+)?$"""
+            )
+
+            fun parse(value: String): SemVer? {
+                val match = pattern.matchEntire(value.trim()) ?: return null
+                return SemVer(
+                    major = match.groupValues[1].toBigInteger(),
+                    minor = match.groupValues[2].toBigInteger(),
+                    patch = match.groupValues[3].toBigInteger(),
+                    prerelease = match.groupValues[4]
+                        .takeIf { it.isNotEmpty() }
+                        ?.split('.'),
+                )
+            }
+        }
     }
 }
