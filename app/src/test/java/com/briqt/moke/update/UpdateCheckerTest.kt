@@ -19,6 +19,7 @@ class UpdateCheckerTest {
 
     @Test
     fun `prerelease identifiers follow semver precedence`() {
+        assertTrue(UpdateChecker.isNewer("0.1.17-rc.3", "0.1.17-rc.2"))
         assertTrue(UpdateChecker.isNewer("0.1.17-rc.2", "0.1.17-rc.1"))
         assertTrue(UpdateChecker.isNewer("0.1.17-beta.11", "0.1.17-beta.2"))
         assertTrue(UpdateChecker.isNewer("0.1.17-rc.1", "0.1.17-rc"))
