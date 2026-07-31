@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -56,9 +57,11 @@ import com.briqt.moke.ui.theme.MokeMono
 fun TmuxPanel(
     state: TmuxUiState,
     currentTmuxId: String?,
+    targetLabel: String,
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
     onAttach: (TmuxSession) -> Unit,
+    onTakeOver: (TmuxSession) -> Unit,
     onRename: (TmuxSession, String) -> Unit,
     onDetach: (TmuxSession) -> Unit,
     onKill: (TmuxSession) -> Unit,
@@ -67,6 +70,7 @@ fun TmuxPanel(
     // 输入弹窗：null=不显示；(初值, 提交回调)。新建时初值空，重命名时预填当前名。
     var dialog by remember { mutableStateOf<Pair<String, (String) -> Unit>?>(null) }
     var detachTarget by remember { mutableStateOf<TmuxSession?>(null) }
+    var takeOverTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var killTarget by remember { mutableStateOf<TmuxSession?>(null) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -93,6 +97,18 @@ fun TmuxPanel(
                 }
             }
             HorizontalDivider()
+            Text(
+                stringResource(R.string.tmux_target, targetLabel),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp),
+            )
+            Text(
+                stringResource(R.string.tmux_manual_hop_notice),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, end = 8.dp),
+            )
 
             state.message?.takeIf { state.phase == TmuxPhase.READY }?.let { message ->
                 Text(
@@ -141,6 +157,7 @@ fun TmuxPanel(
                                     current = currentTmuxId == s.id,
                                     enabled = !state.busy,
                                     onAttach = { onAttach(s); onDismiss() },
+                                    onTakeOver = { takeOverTarget = s },
                                     onRename = { dialog = s.name to { name -> onRename(s, name) } },
                                     onDetach = { detachTarget = s },
                                     onKill = { killTarget = s },
@@ -196,6 +213,25 @@ fun TmuxPanel(
         )
     }
 
+    takeOverTarget?.let { target ->
+        ConfirmDialog(
+            title = stringResource(R.string.tmux_take_over_confirm_title),
+            message = pluralStringResource(
+                R.plurals.tmux_take_over_confirm_message,
+                target.clients,
+                target.clients,
+                target.name,
+            ),
+            confirmLabel = stringResource(R.string.tmux_take_over),
+            onConfirm = {
+                takeOverTarget = null
+                onTakeOver(target)
+                onDismiss()
+            },
+            onDismiss = { takeOverTarget = null },
+        )
+    }
+
     killTarget?.let { target ->
         ConfirmDialog(
             title = stringResource(R.string.tmux_kill_confirm_title),
@@ -227,6 +263,7 @@ private fun TmuxRow(
     current: Boolean,
     enabled: Boolean,
     onAttach: () -> Unit,
+    onTakeOver: () -> Unit,
     onRename: () -> Unit,
     onDetach: () -> Unit,
     onKill: () -> Unit,
@@ -259,7 +296,15 @@ private fun TmuxRow(
             enabled = enabled,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
         ) {
-            Text(stringResource(R.string.tmux_attach))
+            Text(
+                stringResource(
+                    when {
+                        current -> R.string.tmux_return
+                        session.clients > 0 -> R.string.tmux_join
+                        else -> R.string.tmux_resume
+                    }
+                )
+            )
         }
         Box {
             IconButton(onClick = { menuOpen = true }, enabled = enabled) {
@@ -276,6 +321,15 @@ private fun TmuxRow(
                     onClick = {
                         menuOpen = false
                         onRename()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.tmux_take_over)) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null) },
+                    enabled = session.clients > 0 && !current,
+                    onClick = {
+                        menuOpen = false
+                        onTakeOver()
                     },
                 )
                 DropdownMenuItem(

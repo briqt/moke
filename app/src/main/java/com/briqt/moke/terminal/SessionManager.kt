@@ -29,6 +29,10 @@ class TermSession(
     val session: TerminalSession,
     /** 底层传输（用于 tmux 侧通道 exec 等带外能力）。 */
     val transport: TerminalTransport,
+    /** 配置式 ProxyJump；null 表示直连。只描述应用知道的连接路由。 */
+    val jumpHost: Host?,
+    /** 协议级启动的交互程序；tmux 使用它避开 shell 提示符注入。 */
+    val startupCommand: String?,
     /** 原生动态标题（转义序列设置，缺省用连接名）。展示请用 [displayTitle]。 */
     val title: StateFlow<String>,
     /** 用户自定义标题：非空则优先级最高，完全覆盖动态标题。 */
@@ -108,6 +112,7 @@ class SessionManager(context: Context) {
         carryFrom: TermSession? = null,
         initialTitle: String? = null,
         remoteTmuxId: String? = null,
+        startupCommand: String? = null,
     ): TermSession {
         val baseTitle = baseTitleOf(host)
         val initialCustom = carryFrom?.customTitle?.value
@@ -126,8 +131,17 @@ class SessionManager(context: Context) {
         )
         // 传输选择：偏好 mosh 的主机走 MoshTransport（SSH 引导 + native mosh-client 子进程 PTY），
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
-        val transport = if (host.useMosh) MoshTransport(host, appContext, jumpHost)
-        else SshTransport(host, appContext, jumpHost, onLatency = { latency.value = it })
+        val transport = if (host.useMosh) {
+            MoshTransport(host, appContext, jumpHost, startupCommand)
+        } else {
+            SshTransport(
+                host = host,
+                context = appContext,
+                jumpHost = jumpHost,
+                onLatency = { latency.value = it },
+                startupCommand = startupCommand,
+            )
+        }
         val session = TerminalSession(transport, 2000, controller)
         val ts = TermSession(
             id = UUID.randomUUID().toString(),
@@ -135,6 +149,8 @@ class SessionManager(context: Context) {
             controller = controller,
             session = session,
             transport = transport,
+            jumpHost = jumpHost,
+            startupCommand = startupCommand,
             title = title.asStateFlow(),
             customTitle = customTitle,
             displayTitleState = displayTitle,
@@ -158,17 +174,24 @@ class SessionManager(context: Context) {
      * 在新的干净终端连接中附加远端 tmux；同一主机同一 tmux ID 已有活会话时直接复用。
      * 这避免向任意前台程序/半输入命令盲注入 `tmux attach`，也杜绝 tmux 内再嵌套 tmux。
      */
-    fun openTmux(source: TermSession, target: TmuxSession, jumpHost: Host? = null): TermSession {
-        _sessions.value.firstOrNull {
-            it.host.id == source.host.id && it.remoteTmuxId.value == target.id && it.alive.value
-        }?.let { return it }
+    fun openTmux(
+        source: TermSession,
+        target: TmuxSession,
+        jumpHost: Host? = null,
+        detachOthers: Boolean = false,
+    ): TermSession {
+        if (!detachOthers) {
+            _sessions.value.firstOrNull {
+                it.host.id == source.host.id && it.remoteTmuxId.value == target.id && it.alive.value
+            }?.let { return it }
+        }
 
-        val runtimeHost = source.host.copy(loginCommand = Tmux.attachCommand(target.id))
         return open(
-            host = runtimeHost,
+            host = source.host,
             jumpHost = jumpHost,
             initialTitle = "tmux · ${target.name}",
             remoteTmuxId = target.id,
+            startupCommand = Tmux.attachCommand(target.id, detachOthers),
         )
     }
 

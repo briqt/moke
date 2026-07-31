@@ -148,6 +148,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 修复 rc.1 可能把运行态 `tmux attach-session -t '$N'` 污染进保存连接的问题。 */
+    private fun repairLegacyTmuxLoginCommands() = viewModelScope.launch(Dispatchers.IO) {
+        val current = store.hosts.first()
+        val repaired = current.map { host ->
+            if (Tmux.isLegacyInjectedLoginCommand(host.loginCommand)) {
+                host.copy(loginCommand = "")
+            } else {
+                host
+            }
+        }
+        if (repaired != current) store.save(repaired)
+    }
+
     // 连接页：固定按项目分组，仅持久化「分组顺序」与「已折叠分组」。
     val hostGroupOrder: StateFlow<List<String>> = settings.hostGroupOrder
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -352,8 +365,26 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，再由登录命令附加稳定 session ID。
      * 不向当前前台终端注入文本，因此当前正在运行的 shell/TUI/半输入命令均不会被破坏。
      */
-    fun openTmuxSession(source: TermSession, target: TmuxSession): String {
-        val session = sessions.openTmux(source, target, resolveJump(source.host))
+    fun openTmuxSession(
+        source: TermSession,
+        target: TmuxSession,
+        detachOthers: Boolean = false,
+    ): String {
+        val session = sessions.openTmux(source, target, resolveJump(source.host), detachOthers)
+        ensureSessionService()
+        return session.id
+    }
+
+    /** 重连时保留协议级启动命令；tmux 专用会话不能退回成普通 shell。 */
+    fun reconnectSession(source: TermSession): String {
+        touchHost(source.host)
+        val session = sessions.open(
+            host = source.host,
+            jumpHost = resolveJump(source.host),
+            initialTitle = source.displayTitle.value,
+            remoteTmuxId = source.remoteTmuxId.value,
+            startupCommand = source.startupCommand,
+        )
         ensureSessionService()
         return session.id
     }
@@ -477,5 +508,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
-    init { checkUpdateSilently() }
+    init {
+        repairLegacyTmuxLoginCommands()
+        checkUpdateSilently()
+    }
 }

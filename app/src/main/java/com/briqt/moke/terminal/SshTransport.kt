@@ -29,6 +29,8 @@ class SshTransport(
     private val jumpHost: Host? = null,
     /** 实时延迟回调（ms，null=测不到）。用于终端状态条显示 RTT。 */
     private val onLatency: (Int?) -> Unit = {},
+    /** 非空时在已分配 PTY 的 SSH command channel 直接执行，不启动 shell/模拟键入。 */
+    private val startupCommand: String? = null,
 ) : TerminalTransport {
 
     private val appContext = context.applicationContext
@@ -36,8 +38,7 @@ class SshTransport(
 
     private var ssh: SSHClient? = null
     private var jump: SSHClient? = null
-    private var sshSession: Session? = null
-    private var shell: Session.Shell? = null
+    private var sshSession: SessionChannel? = null
     private var out: OutputStream? = null
     private val writeExec = Executors.newSingleThreadExecutor()
 
@@ -78,22 +79,23 @@ class SshTransport(
 
                 val s = client.startSession()
                 s.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap())
-                val sh = s.startShell()
+                // tmux 等专用交互程序必须走 SSH 协议级 exec + PTY。过去先 startShell 再延迟键入，
+                // 会受 shell init、提示符、行编辑器和时序影响，所谓“专用连接”仍可能完全没执行。
+                val channel = if (startupCommand.isNullOrBlank()) s.startShell() else s.exec(startupCommand)
 
                 ssh = client
-                sshSession = s
-                shell = sh
-                out = sh.outputStream
+                sshSession = s as? SessionChannel
+                out = channel.outputStream
                 startLatencyProbe(client)
 
-                val input = sh.inputStream
+                val input = channel.inputStream
                 val buf = ByteArray(8192)
                 // 登录后自动执行命令：等 shell 首个输出到达、且输出**静默 ~250ms**（提示符画完、bracketed-paste/
                 // 行编辑就绪）后再发；只等"首字节"仍会抢在半就绪的行编辑器里发，丢/错首字符（曾见 `<sh`/`>`）、回显重复。
                 // 换行用 CR（真实回车），与附加键/文本段一致；多行逐行执行。仅发一次。
                 val loginCmd = host.loginCommand
                 val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
-                if (loginCmd.isNotBlank()) {
+                if (startupCommand == null && loginCmd.isNotBlank()) {
                     Thread({
                         while (!closed && lastOut.get() == 0L) { try { Thread.sleep(50) } catch (_: InterruptedException) { return@Thread } }
                         val deadline = System.currentTimeMillis() + 4000  // 静默等待上限，兜底
@@ -188,7 +190,7 @@ class SshTransport(
         // 上报窗口尺寸变化（SSH window-change）——字号调整/旋转/键盘弹收都会触发，
         // 否则远端 PTY 尺寸不变，全屏 TUI（vim/htop/tmux）的底栏/状态行会错位。
         if (closed) return
-        val s = sshSession as? SessionChannel ?: return
+        val s = sshSession ?: return
         writeExec.execute {
             runCatching { s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels) }
         }
@@ -220,7 +222,6 @@ class SshTransport(
     override fun close() {
         closed = true
         writeExec.execute {
-            runCatching { shell?.close() }
             runCatching { sshSession?.close() }
             runCatching { ssh?.disconnect() }
             runCatching { jump?.disconnect() }

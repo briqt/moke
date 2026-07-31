@@ -33,6 +33,8 @@ class MoshTransport(
     context: Context,
     /** 跳板机（可空）：SSH 引导阶段经其转发（UDP 数据面仍需目标直连可达）。 */
     private val jumpHost: Host? = null,
+    /** 非空时让 mosh-server 直接启动该交互程序（tmux 等），不经 shell 提示符注入。 */
+    private val startupCommand: String? = null,
 ) : TerminalTransport {
 
     private val appContext = context.applicationContext
@@ -94,7 +96,7 @@ class MoshTransport(
                 out = FileOutputStream(descriptor.fileDescriptor)
 
                 // 连接成功后自动执行命令：mosh 握手需片刻，延迟发送再触发回车。
-                if (host.loginCommand.isNotBlank()) {
+                if (startupCommand == null && host.loginCommand.isNotBlank()) {
                     Thread({
                         runCatching {
                             Thread.sleep(1500)
@@ -134,7 +136,7 @@ class MoshTransport(
     private fun sshBootstrap(): String {
         return withSshClient { client ->
             client.startSession().use { s ->
-                val cmd = s.exec(MoshBootstrap.serverCommand())
+                val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = startupCommand))
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
                 cmd.join()
                 stdout

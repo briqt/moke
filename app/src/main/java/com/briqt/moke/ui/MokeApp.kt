@@ -154,7 +154,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         resolveTypeface = vm.fonts::resolveTypeface,
                         onBack = { screen = Screen.Home },
                         onReconnect = {
-                            val newId = vm.openSession(ts.host)
+                            val newId = vm.reconnectSession(ts)
                             vm.closeSession(ts.id)
                             screen = Screen.Terminal(newId)
                         },
@@ -172,6 +172,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onTmuxKill = { vm.tmuxKill(ts, it) },
                         onTmuxAttach = { target ->
                             screen = Screen.Terminal(vm.openTmuxSession(ts, target))
+                        },
+                        onTmuxTakeOver = { target ->
+                            screen = Screen.Terminal(vm.openTmuxSession(ts, target, detachOthers = true))
                         },
                     )
                 }

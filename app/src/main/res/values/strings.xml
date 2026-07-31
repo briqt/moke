@@ -31,8 +31,12 @@
     <string name="tmux_open">tmux sessions</string>
     <string name="tmux_new">New session</string>
     <string name="tmux_attach">Open</string>
+    <string name="tmux_resume">Resume</string>
+    <string name="tmux_join">Join</string>
+    <string name="tmux_return">Return</string>
+    <string name="tmux_take_over">Take over</string>
     <string name="tmux_rename">Rename</string>
-    <string name="tmux_detach">Detach clients</string>
+    <string name="tmux_detach">Detach all clients</string>
     <string name="tmux_kill">Kill</string>
     <plurals name="tmux_windows">
         <item quantity="one">%1$d window</item>
@@ -52,6 +56,15 @@
     <string name="tmux_control_unavailable">Could not reach the tmux control channel. Check the network and retry.</string>
     <string name="tmux_invalid_response">The remote tmux response could not be understood</string>
     <string name="tmux_action_failed">tmux action failed</string>
+    <string name="tmux_target">Managed target: %1$s</string>
+    <string name="tmux_via_jump">via %1$s</string>
+    <string name="tmux_manual_hop_notice">After manually running ssh or mosh to another machine, this panel still manages the configured target above. Save the inner machine as a connection to manage it.</string>
+    <string name="tmux_take_over_confirm_title">Take over tmux session?</string>
+    <plurals name="tmux_take_over_confirm_message">
+        <item quantity="one">Detach %1$d existing client from “%2$s”, then attach this device. Programs in the session will keep running.</item>
+        <item quantity="other">Detach %1$d existing clients from “%2$s”, then attach this device. Programs in the session will keep running.</item>
+    </plurals>
+    <string name="close_tmux_connection_confirm">Disconnect this client from “%1$s”? The tmux session and its programs will keep running on the server.</string>
     <string name="tmux_detach_confirm_title">Detach tmux clients?</string>
     <plurals name="tmux_detach_confirm_message">
         <item quantity="one">Detach %1$d client from “%2$s”? Programs in the session will keep running.</item>

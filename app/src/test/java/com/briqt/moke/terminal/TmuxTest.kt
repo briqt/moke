@@ -82,11 +82,21 @@ class TmuxTest {
     @Test
     fun `attaches by stable id`() {
         assertEquals("tmux attach-session -t '\$7'", Tmux.attachCommand("\$7"))
+        assertEquals("tmux attach-session -d -t '\$7'", Tmux.attachCommand("\$7", detachOthers = true))
         assertEquals("tmux detach-client -s '\$7'", Tmux.detachCmd("\$7"))
     }
 
     @Test
     fun `discovery forces tmux utf8 output`() {
         assertTrue(Tmux.DISCOVER_CMD.contains("tmux -u list-sessions"))
+    }
+
+    @Test
+    fun `recognizes only legacy injected stable id login commands`() {
+        assertTrue(Tmux.isLegacyInjectedLoginCommand("tmux attach-session -t '\$3'"))
+        assertTrue(Tmux.isLegacyInjectedLoginCommand(" tmux attach-session -t \$12 "))
+        assertEquals(false, Tmux.isLegacyInjectedLoginCommand("tmux attach-session -t work"))
+        assertEquals(false, Tmux.isLegacyInjectedLoginCommand("cd /srv && tmux attach-session -t '\$3'"))
+        assertEquals(false, Tmux.isLegacyInjectedLoginCommand("tmux new-session -A -s work"))
     }
 }

@@ -31,8 +31,12 @@
     <string name="tmux_open">tmux 会话</string>
     <string name="tmux_new">新建会话</string>
     <string name="tmux_attach">打开</string>
+    <string name="tmux_resume">恢复</string>
+    <string name="tmux_join">加入</string>
+    <string name="tmux_return">返回</string>
+    <string name="tmux_take_over">接管</string>
     <string name="tmux_rename">重命名</string>
-    <string name="tmux_detach">断开客户端</string>
+    <string name="tmux_detach">断开所有客户端</string>
     <string name="tmux_kill">关闭</string>
     <plurals name="tmux_windows">
         <item quantity="other">%1$d 个窗口</item>
@@ -50,6 +54,14 @@
     <string name="tmux_control_unavailable">无法连接 tmux 控制通道，请检查网络后重试</string>
     <string name="tmux_invalid_response">无法识别远端 tmux 的返回结果</string>
     <string name="tmux_action_failed">tmux 操作失败</string>
+    <string name="tmux_target">管理目标：%1$s</string>
+    <string name="tmux_via_jump">经 %1$s</string>
+    <string name="tmux_manual_hop_notice">在终端里手动 ssh / mosh 到其他机器后，本面板仍管理上方配置目标；请把内层机器保存为连接后再管理。</string>
+    <string name="tmux_take_over_confirm_title">接管 tmux 会话？</string>
+    <plurals name="tmux_take_over_confirm_message">
+        <item quantity="other">将断开“%2$s”现有的 %1$d 个客户端，再由当前设备附加。会话中的程序不会终止。</item>
+    </plurals>
+    <string name="close_tmux_connection_confirm">断开「%1$s」的当前客户端？tmux 会话及其中程序会继续在服务器运行。</string>
     <string name="tmux_detach_confirm_title">断开 tmux 客户端？</string>
     <plurals name="tmux_detach_confirm_message">
         <item quantity="other">将断开当前附加到“%2$s”的 %1$d 个客户端，但不会终止其中的程序。</item>

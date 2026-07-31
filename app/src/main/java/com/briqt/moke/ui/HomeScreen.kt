@@ -213,10 +213,15 @@ fun HomeScreen(
     }
 
     pendingClose?.let { id ->
-        val name = sessions.firstOrNull { it.id == id }?.displayTitle?.value.orEmpty()
+        val pendingSession = sessions.firstOrNull { it.id == id }
+        val name = pendingSession?.displayTitle?.value.orEmpty()
         ConfirmDialog(
             title = stringResource(R.string.session_close),
-            message = stringResource(R.string.close_connection_confirm, name),
+            message = if (pendingSession?.remoteTmuxId?.value != null) {
+                stringResource(R.string.close_tmux_connection_confirm, name)
+            } else {
+                stringResource(R.string.close_connection_confirm, name)
+            },
             confirmLabel = stringResource(R.string.action_close),
             destructive = true,
             onConfirm = { pendingClose = null; onCloseSession(id) },

@@ -102,6 +102,7 @@ fun TerminalScreen(
     onTmuxDetach: (String) -> Unit,
     onTmuxKill: (String) -> Unit,
     onTmuxAttach: (TmuxSession) -> Unit,
+    onTmuxTakeOver: (TmuxSession) -> Unit,
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -110,6 +111,28 @@ fun TerminalScreen(
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val remoteTmuxId by ts.remoteTmuxId.collectAsState()
+    val tmuxRoute = if (ts.jumpHost != null) {
+        stringResource(R.string.tmux_via_jump, ts.jumpHost.displayName)
+    } else {
+        ""
+    }
+    val tmuxTargetLabel = buildString {
+        append(ts.host.protocol)
+        append(" · ")
+        if (ts.host.username.isNotBlank()) {
+            append(ts.host.username)
+            append('@')
+        }
+        append(ts.host.host)
+        if (ts.host.port != 22) {
+            append(':')
+            append(ts.host.port)
+        }
+        if (tmuxRoute.isNotEmpty()) {
+            append(" · ")
+            append(tmuxRoute)
+        }
+    }
     var showTmux by remember(ts.id) { mutableStateOf(false) }
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
@@ -349,7 +372,11 @@ fun TerminalScreen(
     if (showCloseConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.close_connection),
-            message = stringResource(R.string.close_connection_confirm, title),
+            message = if (remoteTmuxId != null) {
+                stringResource(R.string.close_tmux_connection_confirm, title)
+            } else {
+                stringResource(R.string.close_connection_confirm, title)
+            },
             confirmLabel = stringResource(R.string.action_close),
             destructive = true,
             onConfirm = { showCloseConfirm = false; onClose() },
@@ -361,9 +388,11 @@ fun TerminalScreen(
         TmuxPanel(
             state = tmuxState,
             currentTmuxId = remoteTmuxId,
+            targetLabel = tmuxTargetLabel,
             onDismiss = { showTmux = false },
             onRefresh = onTmuxRefresh,
             onAttach = onTmuxAttach,
+            onTakeOver = onTmuxTakeOver,
             onRename = { s, name -> onTmuxRename(s.id, name) },
             onDetach = { onTmuxDetach(it.id) },
             onKill = { onTmuxKill(it.id) },

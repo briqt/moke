@@ -45,6 +45,9 @@ object Tmux {
     private const val DISCOVERY_READY = "__MOKE_TMUX__:ready"
     private const val DISCOVERY_MISSING = "__MOKE_TMUX__:missing"
     private const val ACTION_PREFIX = "__MOKE_TMUX_RC__:"
+    private val LEGACY_LOGIN_COMMAND = Regex(
+        """^\s*tmux\s+attach-session\s+-t\s+['"]?\$\d+['"]?\s*$"""
+    )
 
     /**
      * 探测 + 列表一次完成，避免 mosh 控制链为一次刷新重复建立两条 SSH 连接。
@@ -124,5 +127,13 @@ object Tmux {
      * 附加始终在一个新的、干净的 Moke 终端连接里执行，绝不注入当前前台输入。
      * 目标使用稳定 session ID，避免重命名或同名前缀匹配造成竞态。
      */
-    fun attachCommand(id: String) = "tmux attach-session -t ${q(id)}"
+    fun attachCommand(id: String, detachOthers: Boolean = false) =
+        "tmux attach-session${if (detachOthers) " -d" else ""} -t ${q(id)}"
+
+    /**
+     * rc.1 曾把运行时 attach 命令误写回 Host.loginCommand。稳定数字 ID 由 tmux server 临时分配，
+     * 跨 server 生命周期无效；只清理这一精确的旧版生成形态，不碰按名称或包含其它逻辑的用户命令。
+     */
+    fun isLegacyInjectedLoginCommand(command: String): Boolean =
+        LEGACY_LOGIN_COMMAND.matches(command)
 }

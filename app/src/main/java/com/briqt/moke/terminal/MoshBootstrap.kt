@@ -22,7 +22,21 @@ object MoshBootstrap {
         return Connect(port, m.groupValues[2])
     }
 
-    /** 生成 mosh-server 引导命令。locale 传递关键（否则 UTF-8 宽字符会乱）。 */
-    fun serverCommand(locale: String = "en_US.UTF-8"): String =
-        "mosh-server new -s -c 256 -l LANG=$locale"
+    /**
+     * 生成 mosh-server 引导命令。locale 传递关键（否则 UTF-8 宽字符会乱）。
+     *
+     * [startupCommand] 非空时由 mosh-server 直接启动该程序，而不是先启动默认 shell 再模拟输入。
+     * tmux 需要真实 PTY；mosh 本身已提供 PTY 语义，这条路径能避开提示符/行编辑器时序。
+     */
+    fun serverCommand(
+        locale: String = "en_US.UTF-8",
+        startupCommand: String? = null,
+    ): String = buildString {
+        append("mosh-server new -s -c 256 -l LANG=")
+        append(locale)
+        startupCommand?.takeIf { it.isNotBlank() }?.let {
+            append(" -- ")
+            append(it)
+        }
+    }
 }
