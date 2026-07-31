@@ -56,6 +56,8 @@
     <string name="tmux_action_failed">tmux 操作失败</string>
     <string name="tmux_target">管理目标：%1$s</string>
     <string name="tmux_via_jump">经 %1$s</string>
+    <string name="tmux_help">查看管理目标说明</string>
+    <string name="tmux_help_title">当前管理哪台机器？</string>
     <string name="tmux_manual_hop_notice">在终端里手动 ssh / mosh 到其他机器后，本面板仍管理上方配置目标；请把内层机器保存为连接后再管理。</string>
     <string name="tmux_take_over_confirm_title">接管 tmux 会话？</string>
     <plurals name="tmux_take_over_confirm_message">

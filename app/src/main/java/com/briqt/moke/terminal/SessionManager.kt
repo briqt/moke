@@ -49,6 +49,8 @@ class TermSession(
     val copyMark: String? = null,
     /** 由 tmux 面板打开的远端 session ID；断开/删除/远端消失后清空。 */
     val remoteTmuxId: MutableStateFlow<String?>,
+    /** tmux 跨连接恢复身份；ID 随 server 重启变化时用名称重新收敛。 */
+    val remoteTmuxName: MutableStateFlow<String?>,
     val startedAt: Long,
 ) {
     /** 最终展示标题：customTitle 优先；复制标记仅作临时冲突消歧。 */
@@ -112,6 +114,7 @@ class SessionManager(context: Context) {
         carryFrom: TermSession? = null,
         initialTitle: String? = null,
         remoteTmuxId: String? = null,
+        remoteTmuxName: String? = null,
         startupCommand: String? = null,
     ): TermSession {
         val baseTitle = baseTitleOf(host)
@@ -158,6 +161,7 @@ class SessionManager(context: Context) {
             latency = latency.asStateFlow(),
             copyMark = mark,
             remoteTmuxId = MutableStateFlow(remoteTmuxId),
+            remoteTmuxName = MutableStateFlow(remoteTmuxName),
             startedAt = System.currentTimeMillis(),
         )
         // 有输出即刷新会话最后活动时间（供"更新时间"排序）。
@@ -171,8 +175,9 @@ class SessionManager(context: Context) {
     }
 
     /**
-     * 在新的干净终端连接中附加远端 tmux；同一主机同一 tmux ID 已有活会话时直接复用。
+     * 在新的干净终端连接中恢复远端 tmux；同一主机同名 tmux 已有活会话时直接复用。
      * 这避免向任意前台程序/半输入命令盲注入 `tmux attach`，也杜绝 tmux 内再嵌套 tmux。
+     * 启动时按用户可识别的名称原子 attach-or-create，不把刷新时拿到的临时 `$N` ID 带到新连接。
      */
     fun openTmux(
         source: TermSession,
@@ -182,7 +187,9 @@ class SessionManager(context: Context) {
     ): TermSession {
         if (!detachOthers) {
             _sessions.value.firstOrNull {
-                it.host.id == source.host.id && it.remoteTmuxId.value == target.id && it.alive.value
+                it.host.id == source.host.id &&
+                    (it.remoteTmuxName.value == target.name || it.remoteTmuxId.value == target.id) &&
+                    it.alive.value
             }?.let { return it }
         }
 
@@ -191,7 +198,8 @@ class SessionManager(context: Context) {
             jumpHost = jumpHost,
             initialTitle = "tmux · ${target.name}",
             remoteTmuxId = target.id,
-            startupCommand = Tmux.attachCommand(target.id, detachOthers),
+            remoteTmuxName = target.name,
+            startupCommand = Tmux.attachOrCreateCommand(target.name, detachOthers),
         )
     }
 
@@ -218,18 +226,37 @@ class SessionManager(context: Context) {
     fun clearTmuxAssociation(hostId: String, remoteId: String) {
         _sessions.value
             .filter { it.host.id == hostId && it.remoteTmuxId.value == remoteId }
-            .forEach { it.remoteTmuxId.value = null }
+            .forEach {
+                it.remoteTmuxId.value = null
+                it.remoteTmuxName.value = null
+            }
     }
 
-    /** 外部删除 tmux 会话时也同步清理过期关联。 */
-    fun reconcileTmuxAssociations(hostId: String, liveRemoteIds: Set<String>) {
+    /** 外部重启 server / 重命名 / 删除后，以名称优先、ID 兜底更新或清理本地关联。 */
+    fun reconcileTmuxAssociations(hostId: String, remoteSessions: List<TmuxSession>) {
         _sessions.value
-            .filter {
-                it.host.id == hostId &&
-                    it.remoteTmuxId.value != null &&
-                    it.remoteTmuxId.value !in liveRemoteIds
+            .filter { it.host.id == hostId && it.remoteTmuxName.value != null }
+            .forEach { local ->
+                val match = Tmux.resolveAssociation(
+                    local.remoteTmuxId.value,
+                    local.remoteTmuxName.value,
+                    remoteSessions,
+                )
+                if (match == null) {
+                    local.remoteTmuxId.value = null
+                    local.remoteTmuxName.value = null
+                } else {
+                    local.remoteTmuxId.value = match.id
+                    local.remoteTmuxName.value = match.name
+                }
             }
-            .forEach { it.remoteTmuxId.value = null }
+    }
+
+    /** 面板重命名成功后同步所有指向该精确远端会话的本地终端。 */
+    fun renameTmuxAssociation(hostId: String, remoteId: String, newName: String) {
+        _sessions.value
+            .filter { it.host.id == hostId && it.remoteTmuxId.value == remoteId }
+            .forEach { it.remoteTmuxName.value = newName }
     }
 
     /** 动态标题基座（OSC 上报前）：优先 `user@host`；缺 host 回落 displayName、缺 user 只用 host。 */

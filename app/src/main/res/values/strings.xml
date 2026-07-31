@@ -58,6 +58,8 @@
     <string name="tmux_action_failed">tmux action failed</string>
     <string name="tmux_target">Managed target: %1$s</string>
     <string name="tmux_via_jump">via %1$s</string>
+    <string name="tmux_help">About the managed target</string>
+    <string name="tmux_help_title">Which host is managed?</string>
     <string name="tmux_manual_hop_notice">After manually running ssh or mosh to another machine, this panel still manages the configured target above. Save the inner machine as a connection to manage it.</string>
     <string name="tmux_take_over_confirm_title">Take over tmux session?</string>
     <plurals name="tmux_take_over_confirm_message">

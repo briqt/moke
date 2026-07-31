@@ -80,10 +80,31 @@ class TmuxTest {
     }
 
     @Test
-    fun `attaches by stable id`() {
-        assertEquals("tmux attach-session -t '\$7'", Tmux.attachCommand("\$7"))
-        assertEquals("tmux attach-session -d -t '\$7'", Tmux.attachCommand("\$7", detachOthers = true))
+    fun `atomically attaches or creates by stable name`() {
+        assertEquals("tmux new-session -A -s 'work'", Tmux.attachOrCreateCommand("work"))
+        assertEquals(
+            "tmux new-session -A -D -s 'it'\\''s'",
+            Tmux.attachOrCreateCommand("it's", detachOthers = true),
+        )
         assertEquals("tmux detach-client -s '\$7'", Tmux.detachCmd("\$7"))
+    }
+
+    @Test
+    fun `association prefers stable name when server reuses ids`() {
+        val sessions = listOf(
+            TmuxSession("\$0", "other", 1, 0, 1),
+            TmuxSession("\$1", "work", 1, 0, 2),
+        )
+        assertEquals("\$1", Tmux.resolveAssociation("\$0", "work", sessions)?.id)
+    }
+
+    @Test
+    fun `association falls back to id after remote rename`() {
+        val renamed = TmuxSession("\$3", "work-renamed", 1, 1, 1)
+        assertEquals(
+            "work-renamed",
+            Tmux.resolveAssociation("\$3", "work", listOf(renamed))?.name,
+        )
     }
 
     @Test

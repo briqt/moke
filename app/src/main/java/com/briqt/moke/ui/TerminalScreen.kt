@@ -110,7 +110,7 @@ fun TerminalScreen(
     val alive by ts.alive.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
-    val remoteTmuxId by ts.remoteTmuxId.collectAsState()
+    val remoteTmuxName by ts.remoteTmuxName.collectAsState()
     val tmuxRoute = if (ts.jumpHost != null) {
         stringResource(R.string.tmux_via_jump, ts.jumpHost.displayName)
     } else {
@@ -372,7 +372,7 @@ fun TerminalScreen(
     if (showCloseConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.close_connection),
-            message = if (remoteTmuxId != null) {
+            message = if (remoteTmuxName != null) {
                 stringResource(R.string.close_tmux_connection_confirm, title)
             } else {
                 stringResource(R.string.close_connection_confirm, title)
@@ -387,7 +387,7 @@ fun TerminalScreen(
     if (showTmux) {
         TmuxPanel(
             state = tmuxState,
-            currentTmuxId = remoteTmuxId,
+            currentTmuxName = remoteTmuxName,
             targetLabel = tmuxTargetLabel,
             onDismiss = { showTmux = false },
             onRefresh = onTmuxRefresh,

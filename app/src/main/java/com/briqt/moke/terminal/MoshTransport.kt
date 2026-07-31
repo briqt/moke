@@ -18,6 +18,7 @@ import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * mosh 传输（总纲 §5.5 的落地）：
@@ -47,6 +48,8 @@ class MoshTransport(
     private var out: FileOutputStream? = null
     private val writeExec = Executors.newSingleThreadExecutor()
     @Volatile private var closed = false
+    @Volatile private var childExited = false
+    private val finishReported = AtomicBoolean(false)
 
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         Thread({
@@ -57,7 +60,7 @@ class MoshTransport(
                 val termuxBin = File("$nativeLibDir/libtermux.so")
                 if (!moshBin.exists() || !termuxBin.exists()) {
                     feed(session, "\r\n" + appContext.getString(R.string.mosh_unavailable) + "\r\n")
-                    session.onTransportFinished(1)
+                    finish(session, 1)
                     return@Thread
                 }
 
@@ -95,6 +98,21 @@ class MoshTransport(
                 pfd = descriptor
                 out = FileOutputStream(descriptor.fileDescriptor)
 
+                // waitpid 是子进程退出状态的唯一真相来源，也是唯一负责结束 TerminalSession 的路径。
+                // PTY 读端在 Android/Linux 上会以 EIO 表示 slave 已关闭，不能再据此判定连接失败。
+                val childPid = pid
+                Thread({
+                    val code = try {
+                        JNI.waitFor(childPid)
+                    } catch (_: Throwable) {
+                        if (closed) 0 else 1
+                    }
+                    childExited = true
+                    finish(session, code)
+                    runCatching { pfd?.close() }
+                    ptyFd = -1
+                }, "moke-mosh-waiter").start()
+
                 // 连接成功后自动执行命令：mosh 握手需片刻，延迟发送再触发回车。
                 if (startupCommand == null && host.loginCommand.isNotBlank()) {
                     Thread({
@@ -112,23 +130,44 @@ class MoshTransport(
                 // 3) 读线程：PTY -> emulator
                 val input = FileInputStream(descriptor.fileDescriptor)
                 val buf = ByteArray(8192)
-                // 等待进程结束的线程
-                Thread({
-                    val code = try { JNI.waitFor(pid) } catch (_: Throwable) { 0 }
-                    session.onTransportFinished(code)
-                }, "moke-mosh-waiter").start()
-
-                while (!closed) {
-                    val n = input.read(buf)
-                    if (n == -1) break
-                    if (n > 0) session.processToEmulator(buf, n)
+                try {
+                    while (!closed) {
+                        val n = input.read(buf)
+                        if (n == -1) break
+                        if (n > 0) session.processToEmulator(buf, n)
+                    }
+                } catch (e: Throwable) {
+                    if (!closed && !childExited && !MoshPty.isClosed(e)) {
+                        feed(
+                            session,
+                            "\r\n" + appContext.getString(
+                                R.string.mosh_connect_failed,
+                                e.message ?: e.javaClass.simpleName,
+                            ) + "\r\n",
+                        )
+                        // 非挂断型 PTY 读错误无法继续桥接；终止子进程，由 waiter 上报真实退出码。
+                        if (pid > 0) {
+                            runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+                        }
+                    }
                 }
-                session.onTransportFinished(0)
             } catch (e: Throwable) {
                 // 捕获 Throwable（含 UnsatisfiedLinkError 等 Error），保证任何 native/引导失败都只是终端里报错，绝不闪退。
-                val b = ("\r\n" + appContext.getString(R.string.mosh_connect_failed, e.message ?: e.javaClass.simpleName) + "\r\n").toByteArray(StandardCharsets.UTF_8)
-                session.processToEmulator(b, b.size)
-                session.onTransportFinished(1)
+                if (!closed && !childExited) {
+                    feed(
+                        session,
+                        "\r\n" + appContext.getString(
+                            R.string.mosh_connect_failed,
+                            e.message ?: e.javaClass.simpleName,
+                        ) + "\r\n",
+                    )
+                }
+                // createSubprocess 成功后仍由 waiter 收口；引导/创建阶段失败才在这里结束。
+                if (pid > 0) {
+                    runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+                } else {
+                    finish(session, 1)
+                }
             }
         }, "moke-mosh-${host.host}").start()
     }
@@ -235,6 +274,12 @@ class MoshTransport(
         session.processToEmulator(b, b.size)
     }
 
+    private fun finish(session: TerminalSession, code: Int) {
+        if (finishReported.compareAndSet(false, true)) {
+            session.onTransportFinished(code)
+        }
+    }
+
     /** 把随包 assets/terminfo 释放到 filesDir/terminfo（幂等），返回该目录供 TERMINFO 使用。 */
     private fun ensureTerminfo(): File {
         val dir = File(appContext.filesDir, "terminfo")
@@ -259,4 +304,16 @@ class MoshTransport(
             for (c in children) copyAsset("$path/$c", destParent)
         }
     }
+}
+
+/**
+ * forkpty 的 slave 关闭时，Linux/Android 对 master read 返回 EIO 而非 EOF。
+ * 不依赖 Android-only ErrnoException 类型，确保相同判定可由本地 JVM 单测覆盖。
+ */
+internal object MoshPty {
+    fun isClosed(error: Throwable): Boolean =
+        generateSequence(error as Throwable?) { it.cause }.any { cause ->
+            val message = cause.message.orEmpty().uppercase()
+            message.contains("EIO") || message.contains("I/O ERROR")
+        }
 }

@@ -1,6 +1,9 @@
 package com.briqt.moke.terminal
 
-/** 远端一个 tmux 会话（侧通道 list-sessions 解析所得）。[id]（#{session_id} 如 $0）为稳定 key。 */
+/**
+ * 远端一个 tmux 会话（侧通道 list-sessions 解析所得）。
+ * [id]（#{session_id} 如 $0）是当前 tmux server 生命周期内的精确句柄；[name] 是跨连接恢复身份。
+ */
 data class TmuxSession(
     val id: String,
     val name: String,
@@ -124,11 +127,26 @@ object Tmux {
     }
 
     /**
-     * 附加始终在一个新的、干净的 Moke 终端连接里执行，绝不注入当前前台输入。
-     * 目标使用稳定 session ID，避免重命名或同名前缀匹配造成竞态。
+     * 本地关联跨刷新收敛：名称优先（跨 tmux server 生命周期），ID 仅作为远端手工重命名的兜底。
+     * server 重启会从 `$0` 重新编号，所以绝不能在旧名称仍存在时优先相信碰巧复用的 ID。
      */
-    fun attachCommand(id: String, detachOthers: Boolean = false) =
-        "tmux attach-session${if (detachOthers) " -d" else ""} -t ${q(id)}"
+    fun resolveAssociation(
+        remoteId: String?,
+        remoteName: String?,
+        sessions: List<TmuxSession>,
+    ): TmuxSession? =
+        remoteName?.let { name -> sessions.firstOrNull { it.name == name } }
+            ?: remoteId?.let { id -> sessions.firstOrNull { it.id == id } }
+
+    /**
+     * 在一个新的、干净的 Moke 终端连接里原子地恢复 tmux，绝不注入当前前台输入。
+     *
+     * attach-session + session_id 有两个竞态：tmux server 重启后 `$N` 会失效；列表刷新与真正
+     * attach 之间会话也可能被关闭。`new-session -A -s name` 由 tmux 自身原子地“存在则附加，
+     * 不存在则创建”，名称还是用户可识别、可跨连接恢复的稳定身份。`-D` 是 tmux 对应的接管语义。
+     */
+    fun attachOrCreateCommand(name: String, detachOthers: Boolean = false) =
+        "tmux new-session -A${if (detachOthers) " -D" else ""} -s ${q(name)}"
 
     /**
      * rc.1 曾把运行时 attach 命令误写回 Host.loginCommand。稳定数字 ID 由 tmux server 临时分配，

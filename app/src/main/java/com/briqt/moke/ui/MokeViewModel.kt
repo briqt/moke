@@ -310,7 +310,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             ).also {
                 sessions.reconcileTmuxAssociations(
                     ts.host.id,
-                    discovery.sessions.mapTo(mutableSetOf()) { session -> session.id },
+                    discovery.sessions,
                 )
             }
             TmuxDiscovery.Malformed -> previous.copy(
@@ -353,7 +353,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun tmuxNew(ts: TermSession, name: String) = tmuxAction(ts, Tmux.newCmd(name))
-    fun tmuxRename(ts: TermSession, id: String, name: String) = tmuxAction(ts, Tmux.renameCmd(id, name))
+    fun tmuxRename(ts: TermSession, id: String, name: String) = tmuxAction(ts, Tmux.renameCmd(id, name)) {
+        sessions.renameTmuxAssociation(ts.host.id, id, name)
+    }
     fun tmuxDetach(ts: TermSession, id: String) = tmuxAction(ts, Tmux.detachCmd(id)) {
         sessions.clearTmuxAssociation(ts.host.id, id)
     }
@@ -362,7 +364,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，再由登录命令附加稳定 session ID。
+     * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，按名称原子恢复。
      * 不向当前前台终端注入文本，因此当前正在运行的 shell/TUI/半输入命令均不会被破坏。
      */
     fun openTmuxSession(
@@ -383,6 +385,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             jumpHost = resolveJump(source.host),
             initialTitle = source.displayTitle.value,
             remoteTmuxId = source.remoteTmuxId.value,
+            remoteTmuxName = source.remoteTmuxName.value,
             startupCommand = source.startupCommand,
         )
         ensureSessionService()
