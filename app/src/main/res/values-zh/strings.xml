@@ -136,6 +136,10 @@
     <string name="field_jump_host">跳板机（可选）</string>
     <string name="jump_none">无（直连）</string>
     <string name="mosh_jump_hint">说明：跳板机仅用于 mosh 引导（经 SSH 拉起 mosh-server）；会话数据走 UDP，需目标从本机可直达。若目标只能经跳板机到达，这台建议用 SSH。</string>
+    <string name="field_startup_command">启动命令（可选）</string>
+    <string name="startup_command_hint">如 powershell.exe、wsl、zsh -l</string>
+    <string name="startup_command_help">直接启动这个程序，替代远端默认登录 shell（SSH exec / mosh-server）。Windows 主机可用它指定 cmd、PowerShell 或 WSL。留空即默认 shell。</string>
+    <string name="startup_command_tmux_note">会话持久化选 tmux 时不生效——启动位置已由 tmux 附加占用。</string>
     <string name="field_login_command">登录后自动执行（可选）</string>
     <string name="login_command_hint">如 cd /var/www &amp;&amp; ls</string>
 
@@ -232,6 +236,7 @@
     <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
     <string name="ssh_via_jump">[moke] 经跳板机 %1$s 连接…</string>
     <string name="ssh_connect_failed">[SSH 连接失败: %1$s]</string>
+    <string name="startup_command_exited">[moke] 启动命令 \"%1$s\" 已退出（%2$d）</string>
     <string name="mosh_unavailable">[mosh 不可用] 此安装包未内置 mosh native 组件（当前仅 arm64-v8a）。请改用 SSH 协议，或安装含 mosh 的版本。</string>
     <string name="mosh_bootstrapping">[moke] 正在通过 SSH 引导 mosh-server…</string>
     <string name="mosh_client_starting">[moke] mosh-server UDP 端口 %1$d，启动 mosh-client…</string>

@@ -26,6 +26,12 @@ data class Host(
     val useMosh: Boolean = false,
     /** 跳板机：引用另一台已存主机的 id（空=直连）。经其 direct-tcpip 转发到本机。 */
     val jumpHostId: String = "",
+    /**
+     * 协议级启动命令（空=远端默认 login shell）。与 [loginCommand] 语义不同：
+     * 这条由 SSH `exec` / `mosh-server -- …` 直接启动（Windows 主机指定 cmd/powershell/wsl 靠它），
+     * 而 [loginCommand] 是 shell 起来之后往 PTY 里敲的一行。
+     */
+    val startupCommand: String = "",
     /** 连接成功后自动执行的命令（空=无）。 */
     val loginCommand: String = "",
     /** 分组（可选，空=未分组）。用于连接页可选分组展示。 */
@@ -41,6 +47,14 @@ data class Host(
     val tmuxSessionName: String = "",
 ) {
     val displayName: String get() = label.ifBlank { if (host.isBlank()) "未命名" else "$username@$host" }
+
+    /**
+     * 本次连接实际要用的协议级启动命令（空=默认 login shell）。
+     * 会话持久化=tmux 时这个位置由 tmux 附加命令占用（见 `Tmux.attachOrCreateCommand`），
+     * 用户设的启动命令让位——否则要么覆盖掉 tmux、要么两条命令抢同一个 exec 通道。
+     */
+    val effectiveStartupCommand: String
+        get() = if (persistence == SessionPersistence.TMUX) "" else startupCommand.trim()
 
     /** 协议短名（连接列表徽标用）。 */
     val protocol: String get() = if (useMosh) "mosh" else "SSH"
@@ -64,6 +78,7 @@ data class Host(
         put("passphrase", passphrase)
         put("useMosh", useMosh)
         put("jumpHostId", jumpHostId)
+        put("startupCommand", startupCommand)
         put("loginCommand", loginCommand)
         put("group", group)
         put("lastConnectedAt", lastConnectedAt)
@@ -85,6 +100,7 @@ data class Host(
             passphrase = o.optString("passphrase", ""),
             useMosh = o.optBoolean("useMosh", false),
             jumpHostId = o.optString("jumpHostId", ""),
+            startupCommand = o.optString("startupCommand", ""),
             loginCommand = o.optString("loginCommand", ""),
             group = o.optString("group", ""),
             lastConnectedAt = o.optLong("lastConnectedAt", 0L),

@@ -78,6 +78,7 @@ fun HostEditScreen(
     var showPrivateKey by remember { mutableStateOf(base.privateKeyPem.isBlank()) }
     var useMosh by remember { mutableStateOf(base.useMosh) }
     var jumpHostId by remember { mutableStateOf(base.jumpHostId) }
+    var startupCommand by remember { mutableStateOf(base.startupCommand) }
     var loginCommand by remember { mutableStateOf(base.loginCommand) }
     var group by remember { mutableStateOf(base.group) }
     var persistence by remember { mutableStateOf(base.persistence) }
@@ -293,6 +294,29 @@ fun HostEditScreen(
                 }
             }
 
+            // 启动命令：协议级 exec（SSH command channel / mosh-server --），空=远端默认 login shell。
+            // 与「登录后自动执行」是两回事：那条是 shell 起来之后往 PTY 里敲的一行。
+            // 会话持久化=tmux 时这个位置归 tmux 附加命令，字段置灰并说明原因。
+            val startupEnabled = persistence != SessionPersistence.TMUX
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                OutlinedTextField(
+                    value = startupCommand, onValueChange = { startupCommand = it },
+                    label = { Text(stringResource(R.string.field_startup_command)) },
+                    placeholder = { Text(stringResource(R.string.startup_command_hint)) },
+                    enabled = startupEnabled,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    stringResource(
+                        if (startupEnabled) R.string.startup_command_help
+                        else R.string.startup_command_tmux_note
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             // 登录后自动执行：支持多行（每行一条命令，按序执行）；传输层按 "命令+\n" 原样下发。
             OutlinedTextField(
                 value = loginCommand, onValueChange = { loginCommand = it },
@@ -346,6 +370,7 @@ fun HostEditScreen(
                                 passphrase = passphrase,
                                 useMosh = useMosh,
                                 jumpHostId = jumpHostId,
+                                startupCommand = startupCommand.trim(),
                                 loginCommand = loginCommand.trim(),
                                 group = group.trim(),
                                 persistence = persistence,

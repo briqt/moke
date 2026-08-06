@@ -14,6 +14,15 @@ class MoshBootstrapTest {
     }
 
     @Test
+    fun `hands a host startup command to mosh-server verbatim`() {
+        // 主机自配的启动命令不加任何包装：mosh-server 按 argv 直接 execvp。
+        assertEquals(
+            "mosh-server new -s -c 256 -l LANG=en_US.UTF-8 -- zsh -l",
+            MoshBootstrap.serverCommand(startupCommand = "zsh -l"),
+        )
+    }
+
+    @Test
     fun `hands the tmux wrapper to mosh-server as its child command`() {
         val cmd = MoshBootstrap.serverCommand(startupCommand = Tmux.attachOrCreateCommand("work"))
         assertTrue(cmd.startsWith("mosh-server new -s -c 256 -l LANG=en_US.UTF-8 -- "))

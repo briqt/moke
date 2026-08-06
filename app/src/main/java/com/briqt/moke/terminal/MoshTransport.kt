@@ -34,9 +34,16 @@ class MoshTransport(
     context: Context,
     /** 跳板机（可空）：SSH 引导阶段经其转发（UDP 数据面仍需目标直连可达）。 */
     private val jumpHost: Host? = null,
-    /** 非空时让 mosh-server 直接启动该交互程序（tmux 等），不经 shell 提示符注入。 */
+    /**
+     * 运行时覆盖的协议级启动命令（tmux 附加用）：非空时让 mosh-server 直接启动该交互程序，
+     * 不经 shell 提示符注入。为 null 时才轮到主机自己配置的启动命令。
+     */
     private val startupCommand: String? = null,
 ) : TerminalTransport {
+
+    /** 本次交给 `mosh-server … -- …` 的程序；null=远端默认 shell。 */
+    private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
+        ?: host.effectiveStartupCommand.ifBlank { null }
 
     private val appContext = context.applicationContext
     private val nativeLibDir = appContext.applicationInfo.nativeLibraryDir
@@ -114,6 +121,7 @@ class MoshTransport(
                 }, "moke-mosh-waiter").start()
 
                 // 连接成功后自动执行命令：mosh 握手需片刻，延迟发送再触发回车。
+                // 与 SSH 侧一致：tmux 覆盖时不注入，主机自配启动命令时仍注入。
                 if (startupCommand == null && host.loginCommand.isNotBlank()) {
                     Thread({
                         runCatching {
@@ -175,7 +183,7 @@ class MoshTransport(
     private fun sshBootstrap(): String {
         return withSshClient { client ->
             client.startSession().use { s ->
-                val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = startupCommand))
+                val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = effectiveStartup))
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
                 cmd.join()
                 stdout

@@ -29,9 +29,16 @@ class SshTransport(
     private val jumpHost: Host? = null,
     /** 实时延迟回调（ms，null=测不到）。用于终端状态条显示 RTT。 */
     private val onLatency: (Int?) -> Unit = {},
-    /** 非空时在已分配 PTY 的 SSH command channel 直接执行，不启动 shell/模拟键入。 */
+    /**
+     * 运行时覆盖的协议级启动命令（tmux 附加用）：非空时在已分配 PTY 的 SSH command channel
+     * 直接执行，不启动 shell/模拟键入。为 null 时才轮到主机自己配置的启动命令。
+     */
     private val startupCommand: String? = null,
 ) : TerminalTransport {
+
+    /** 本次真正要 exec 的命令；null=启动远端默认 login shell。 */
+    private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
+        ?: host.effectiveStartupCommand.ifBlank { null }
 
     private val appContext = context.applicationContext
     private val cacheDir: File = appContext.cacheDir
@@ -81,7 +88,10 @@ class SshTransport(
                 s.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap())
                 // tmux 等专用交互程序必须走 SSH 协议级 exec + PTY。过去先 startShell 再延迟键入，
                 // 会受 shell init、提示符、行编辑器和时序影响，所谓“专用连接”仍可能完全没执行。
-                val channel = if (startupCommand.isNullOrBlank()) s.startShell() else s.exec(startupCommand)
+                // 主机配置的启动命令**不加 sh 包装**：Windows OpenSSH 的 exec 走 cmd/powershell，
+                // 任何 POSIX 包装都会当场失败——这正是这个功能的主要目标之一。命令若立刻退出，
+                // 由下面的退出码提示如实说明，不假装还在。
+                val channel = if (effectiveStartup == null) s.startShell() else s.exec(effectiveStartup)
 
                 ssh = client
                 sshSession = s as? SessionChannel
@@ -93,6 +103,8 @@ class SshTransport(
                 // 登录后自动执行命令：等 shell 首个输出到达、且输出**静默 ~250ms**（提示符画完、bracketed-paste/
                 // 行编辑就绪）后再发；只等"首字节"仍会抢在半就绪的行编辑器里发，丢/错首字符（曾见 `<sh`/`>`）、回显重复。
                 // 换行用 CR（真实回车），与附加键/文本段一致；多行逐行执行。仅发一次。
+                // tmux 覆盖（startupCommand 非空）时不注入：那条通道上跑的是 tmux 自身。
+                // 主机自配启动命令时仍注入——"登录后自动执行"对 cmd/powershell 之类同样成立。
                 val loginCmd = host.loginCommand
                 val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
                 if (startupCommand == null && loginCmd.isNotBlank()) {
@@ -116,6 +128,21 @@ class SshTransport(
                     if (n > 0) {
                         session.processToEmulator(buf, n)
                         lastOut.set(System.currentTimeMillis())
+                    }
+                }
+                // 启动命令非零退出（拼错、远端没这个程序、参数不对）：把退出码摆出来，
+                // 否则屏幕上只剩一句"会话已结束"，用户无从判断是自己写错还是网络断了。
+                if (startupCommand == null && effectiveStartup != null) {
+                    // exit-status 是通道关闭前后才到的异步消息：EOF 之后立刻读通常还是 null，
+                    // 必须先等通道真正 close（真机实测：不等就永远拿不到退出码）。
+                    val code = runCatching {
+                        sshSession?.join(2, java.util.concurrent.TimeUnit.SECONDS)
+                        sshSession?.exitStatus
+                    }.getOrNull()
+                    if (code != null && code != 0) {
+                        feed(session, "\r\n" + appContext.getString(
+                            R.string.startup_command_exited, effectiveStartup, code
+                        ) + "\r\n")
                     }
                 }
                 session.onTransportFinished(0)
