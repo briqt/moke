@@ -289,6 +289,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             val showHidden by vm.filesShowHidden.collectAsState()
             val treeUri by vm.downloadTreeUri.collectAsState()
             val uploadConflict by vm.uploadConflict.collectAsState()
+            val needsDir by vm.needsDownloadDir.collectAsState()
             // 下载目录只问一次：拿到后持久化读写授权，之后静默落盘。
             var pendingDownload by remember { mutableStateOf<com.briqt.moke.terminal.sftp.RemoteEntry?>(null) }
             val context = androidx.compose.ui.platform.LocalContext.current
@@ -313,7 +314,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 tasks = tasks,
                 sort = sort,
                 showHidden = showHidden,
-                hasDownloadDir = treeUri.isNotBlank(),
+                hasDownloadDir = treeUri.isNotBlank() || !needsDir,
                 onNavigate = { vm.filesNavigate(it) },
                 onUp = { vm.filesUp() },
                 onRefresh = { vm.filesRefresh() },
@@ -327,11 +328,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 onOverwriteCancel = { vm.dismissUploadConflict() },
                 onDownload = { entry ->
                     val saved = treeUri.takeIf { it.isNotBlank() }
-                    if (saved != null) {
-                        vm.download(entry, android.net.Uri.parse(saved))
-                    } else {
-                        pendingDownload = entry
-                        treePicker.launch(null)
+                    when {
+                        // 用户自己指定过目录 → 用它
+                        saved != null -> vm.download(entry, android.net.Uri.parse(saved))
+                        // Android 10+ → 默认落「下载/Moke」，不打断
+                        !needsDir -> vm.download(entry, null)
+                        // 老系统没有免权限通道，只能先问一次
+                        else -> {
+                            pendingDownload = entry
+                            treePicker.launch(null)
+                        }
                     }
                 },
                 onPickDownloadDir = { pendingDownload = null; treePicker.launch(null) },

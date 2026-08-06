@@ -549,7 +549,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- 文件（SFTP） ----------
 
     /** 传输队列：Application 作用域，退后台/关屏由 [MokeTransferService] 保活。 */
-    val transfers = (app as MokeApplication).transfers
+    val transfers = (app as MokeApplication).transfers.also { mgr ->
+        // 记住的下载目录失效（被删/撤授权）时忘掉它，之后回到默认落点。
+        mgr.onTreeUnusable = { viewModelScope.launch { settings.setDownloadTreeUri("") } }
+    }
 
     private val filesController = FilesController(app, viewModelScope)
     val filesState: StateFlow<FilesUiState> = filesController.state
@@ -616,7 +619,18 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         return fromCursor ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
     }
 
-    fun download(entry: com.briqt.moke.terminal.sftp.RemoteEntry, treeUri: android.net.Uri) {
+    /**
+     * 是否还得先问用户要一个下载目录。
+     *
+     * Android 10+ 有免权限写系统「下载」的通道，默认落 `下载/Moke`，一次都不问；更低版本没有
+     * 这条路，只能让用户选一个目录（选完记住）。
+     */
+    val needsDownloadDir: StateFlow<Boolean> = downloadTreeUri
+        .map { it.isBlank() && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** [treeUri] 为 null=用默认落点（下载/Moke）。 */
+    fun download(entry: com.briqt.moke.terminal.sftp.RemoteEntry, treeUri: android.net.Uri?) {
         val host = filesState.value.host ?: return
         transfers.enqueueDownload(host, entry, treeUri)
         ensureTransferService()

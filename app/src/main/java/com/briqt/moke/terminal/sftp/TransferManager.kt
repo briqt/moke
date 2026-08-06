@@ -1,8 +1,12 @@
 package com.briqt.moke.terminal.sftp
 
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.briqt.moke.R
@@ -76,8 +80,11 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         addAll(added)
     }
 
-    /** 下载远端文件到目录树 [treeUri] 下（目标文档在真正开始时才创建）。 */
-    fun enqueueDownload(host: Host, entry: RemoteEntry, treeUri: Uri) {
+    /**
+     * 下载远端文件。[treeUri] 为空表示用默认落点（系统「下载」下的 `Moke` 子目录），
+     * 非空则落到用户自己选的目录树。目标文档在真正开始传时才创建。
+     */
+    fun enqueueDownload(host: Host, entry: RemoteEntry, treeUri: Uri?) {
         addAll(
             listOf(
                 TransferTask(
@@ -86,7 +93,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                     direction = TransferDirection.DOWNLOAD,
                     remotePath = entry.path,
                     name = entry.name,
-                    treeUri = treeUri.toString(),
+                    treeUri = treeUri?.toString().orEmpty(),
                     total = entry.size,
                     remoteSize = entry.size,
                     remoteMtime = entry.mtime,
@@ -182,7 +189,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         // 目标文档：第一次创建；续传时沿用上次那份。DocumentsProvider 负责重名不覆盖。
         var target = current.localUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
         if (target == null) {
-            target = createDocument(Uri.parse(current.treeUri), current.name)
+            target = createTarget(current)
             update(task.id) { it.copy(localUri = target.toString()) }
             current = current(task.id) ?: return
         }
@@ -201,10 +208,17 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         } else {
             null
         }
-        // 不能续就必须截断（"wt"），否则新内容会写在旧内容之上，拼出一个看着正常的坏文件。
+        // 不能续就必须截断，否则新内容会写在旧内容之上，拼出一个看着正常的坏文件。
+        // 但**新建的那一次不能用 "wt"**：MediaStore 刚 insert 出来的行还没有落地文件，
+        // 截断模式会直接报 `Missing file for primary:Download/Moke`（HyperOS 实测）。
+        // 默认模式（"w"）才会创建文件与目录；只有在本地已有残留字节时才需要显式截断。
         if (out == null) {
-            out = resolver.openOutputStream(target, "wt")
-                ?: throw IllegalStateException(appContext.getString(R.string.transfer_local_unwritable))
+            out = if (existing == 0L) {
+                resolver.openOutputStream(target)
+            } else {
+                runCatching { resolver.openOutputStream(target, "wt") }.getOrNull()
+                    ?: resolver.openOutputStream(target)
+            } ?: throw IllegalStateException(appContext.getString(R.string.transfer_local_unwritable))
         }
 
         update(task.id) {
@@ -296,11 +310,75 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         scope.launch { store.save(snapshot) }
     }
 
-    private fun createDocument(tree: Uri, name: String): Uri {
+    /**
+     * 目标文档：用户选过目录就落那儿，否则落默认的「下载/Moke」。
+     *
+     * 用户选的目录可能已经不可用（被删掉、被撤授权、SD 卡拔了）。这时不能就这么失败——
+     * 回落到默认落点并让上层忘掉这个目录，下次直接用默认的。
+     */
+    private fun createTarget(task: TransferTask): Uri {
+        val tree = task.treeUri.takeIf { it.isNotBlank() } ?: return createInDownloads(task.name)
+        return runCatching { createInTree(Uri.parse(tree), task.name) }.getOrElse { t ->
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) throw t
+            onTreeUnusable?.invoke()
+            createInDownloads(task.name)
+        }
+    }
+
+    /** 免权限写系统「下载」只有 Android 10+ 有；更低版本本就不会走到这里（见 needsDownloadDir）。 */
+    @Suppress("NewApi")
+    private fun createInDownloads(name: String): Uri {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { "MediaStore downloads requires Android 10+" }
+        return createInDownloadsApi29(name)
+    }
+
+    /** 用户选的下载目录已不可用时回调（上层据此清掉记住的目录）。 */
+    var onTreeUnusable: (() -> Unit)? = null
+
+    private fun createInTree(tree: Uri, name: String): Uri {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         return DocumentsContract.createDocument(resolver, parent, RemotePath.guessMime(name), name)
             ?: throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
     }
+
+    /**
+     * 默认落点：系统「下载」下的 `Moke` 子目录，经 MediaStore 写入——**零存储权限、零选择器**，
+     * 与 Chrome / Telegram 等下载类应用一致。同名由 MediaStore 自己让位（`name (1).ext`），不覆盖。
+     *
+     * 仅 Android 10+ 可用；更低版本没有这条免权限通道，由上层改走"选一个目录"（见
+     * `MokeViewModel.needsDownloadDir`），所以这里到不了。
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun createInDownloadsApi29(name: String): Uri {
+        // 先试子目录；某些 ROM（HyperOS 实测）不会为 RELATIVE_PATH 里不存在的子目录建文件夹，
+        // insert 能成功但随后打开就报 `Missing file for primary:Download/Moke`。所以插入后立刻
+        // 探一次写入：不通就删掉这条无效记录，退回「下载」根目录——宁可少一层目录，也不能下载不了。
+        insertDownload(name, "${Environment.DIRECTORY_DOWNLOADS}/$DEFAULT_SUBDIR")?.let { uri ->
+            if (touchable(uri)) return uri
+            runCatching { resolver.delete(uri, null, null) }
+        }
+        val fallback = insertDownload(name, Environment.DIRECTORY_DOWNLOADS)
+            ?: throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
+        if (!touchable(fallback)) {
+            runCatching { resolver.delete(fallback, null, null) }
+            throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
+        }
+        return fallback
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun insertDownload(name: String, relativePath: String): Uri? = runCatching {
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, RemotePath.guessMime(name))
+            put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+        }
+        resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    }.getOrNull()
+
+    /** 探一次能否真的写入（同时把 0 字节文件落地，后续的截断/追加模式才有对象）。 */
+    private fun touchable(uri: Uri): Boolean =
+        runCatching { resolver.openOutputStream(uri)?.use { } != null }.getOrDefault(false)
 
     private fun localLength(uri: Uri): Long = runCatching {
         resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
@@ -319,6 +397,11 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                     } else null
                 }
         }.getOrNull() ?: (fallback to -1L)
+    }
+
+    companion object {
+        /** 默认下载子目录（系统「下载」之下）。 */
+        const val DEFAULT_SUBDIR = "Moke"
     }
 
     /** 失败原因：优先 TOFU 等提示（没有终端可写，只能在这儿说），其次异常消息。 */
