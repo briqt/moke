@@ -304,4 +304,7 @@
     <string name="scroll_mode_wheel">Always send wheel</string>
     <string name="scroll_mode_arrows">Always send arrow keys</string>
     <string name="scroll_mode_hint">Smart: sends wheel events when the remote enables mouse scrolling; no longer sends arrow keys in line-editor programs (codex, claude code…) where they scroll command history; pagers (less, man) keep arrow-key scrolling.</string>
+    <string name="include_prerelease">Include pre-releases</string>
+    <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
+    <string name="github_repo">GitHub repository</string>
 </resources>

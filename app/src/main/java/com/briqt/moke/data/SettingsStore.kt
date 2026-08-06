@@ -58,6 +58,8 @@ class SettingsStore(private val context: Context) {
     // 静默检查更新：上次检查时间戳 + 已知的最新版本 tag（用于跨启动保留"有更新"小圆点）。
     private val lastUpdateCheckKey = androidx.datastore.preferences.core.longPreferencesKey("last_update_check_at")
     private val latestSeenTagKey = stringPreferencesKey("latest_seen_tag")
+    // 检查更新时是否把预发布版（rc）算进来。
+    private val includePrereleaseKey = booleanPreferencesKey("include_prerelease")
 
     companion object {
         // 字号（sp）：默认 11，0.5 步进；范围 8–24（上限收窄，24sp 在手机上已很大，避免滑轨大半落在不可用大字号）。
@@ -163,6 +165,11 @@ class SettingsStore(private val context: Context) {
     /** 静默检查发现的最新版本 tag（空=无新版；跨启动保留，用于小圆点）。 */
     val latestSeenTag: Flow<String> = context.settingsDataStore.data.map { prefs ->
         prefs[latestSeenTagKey] ?: ""
+    }
+
+    /** 是否把预发布版算进"有更新"（默认关：正式用户不该被 rc 打扰）。 */
+    val includePrerelease: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[includePrereleaseKey] ?: false
     }
 
     /** 连接页分组显示顺序（组名列表；空=按主机首次出现序）。 */
@@ -274,6 +281,18 @@ class SettingsStore(private val context: Context) {
     }
 
     /** 记录一次静默检查的结果（[tag] 为空表示已是最新）。 */
+    /**
+     * 切换"包含预发布"时**一并清掉已记住的 tag 与检查节流**：否则关掉开关后，小圆点还会继续
+     * 替一个用户已经不想要的 rc 版本亮着，而 6 小时节流内又不会重查来纠正它。
+     */
+    suspend fun setIncludePrerelease(enabled: Boolean) {
+        context.settingsDataStore.edit {
+            it[includePrereleaseKey] = enabled
+            it[latestSeenTagKey] = ""
+            it[lastUpdateCheckKey] = 0L
+        }
+    }
+
     suspend fun recordUpdateCheck(at: Long, tag: String) {
         context.settingsDataStore.edit {
             it[lastUpdateCheckKey] = at

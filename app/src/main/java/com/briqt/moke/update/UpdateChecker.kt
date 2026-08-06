@@ -19,16 +19,31 @@ sealed interface UpdateStatus {
     data class Failed(val message: String) : UpdateStatus
 }
 
+/** GitHub Releases 里的一条发布（只取判定所需字段）。 */
+data class ReleaseEntry(
+    val tag: String,
+    val url: String,
+    val prerelease: Boolean,
+    val draft: Boolean,
+)
+
 /** 从 GitHub Releases 查最新版并与当前版本比对。 */
 object UpdateChecker {
+    const val REPO_URL = "https://github.com/briqt/moke"
     private const val LATEST_API = "https://api.github.com/repos/briqt/moke/releases/latest"
+    // 含预发布时必须用列表接口：/releases/latest 按 GitHub 定义只返回正式版。
+    private const val LIST_API = "https://api.github.com/repos/briqt/moke/releases?per_page=20"
 
-    suspend fun check(current: String, context: Context): UpdateStatus = withContext(Dispatchers.IO) {
+    suspend fun check(
+        current: String,
+        context: Context,
+        includePrerelease: Boolean = false,
+    ): UpdateStatus = withContext(Dispatchers.IO) {
         // 硬超时兜底：任何慢网络/卡住都在 12s 内收敛，spinner 不会永转。
         withTimeoutOrNull(12_000) {
             var conn: HttpURLConnection? = null
             try {
-                conn = (URL(LATEST_API).openConnection() as HttpURLConnection).apply {
+                conn = (URL(if (includePrerelease) LIST_API else LATEST_API).openConnection() as HttpURLConnection).apply {
                     setRequestProperty("Accept", "application/vnd.github+json")
                     setRequestProperty("User-Agent", "moke")
                     connectTimeout = 8_000
@@ -40,12 +55,11 @@ object UpdateChecker {
                 if (code == 404) return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_none))
                 if (code !in 200..299) return@withTimeoutOrNull UpdateStatus.Failed("HTTP $code")
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
-                val o = JSONObject(body)
-                val tag = o.optString("tag_name").ifBlank { o.optString("name") }
-                val url = o.optString("html_url").ifBlank { "https://github.com/briqt/moke/releases/latest" }
-                if (tag.isBlank()) return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_parse_failed))
-                val latest = tag.removePrefix("v").removePrefix("V")
-                if (isNewer(latest, current)) UpdateStatus.Available(tag, url)
+                val entries = if (includePrerelease) parseList(body) else listOf(parseOne(JSONObject(body)))
+                val picked = pickLatest(entries, includePrerelease)
+                    ?: return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_parse_failed))
+                val latest = picked.tag.removePrefix("v").removePrefix("V")
+                if (isNewer(latest, current)) UpdateStatus.Available(picked.tag, picked.url)
                 else UpdateStatus.UpToDate(current)
             } catch (e: Throwable) {
                 // 捕获 Throwable（含 Error），否则未捕获异常会让上层 spinner 永转。
@@ -54,6 +68,38 @@ object UpdateChecker {
                 runCatching { conn?.disconnect() }
             }
         } ?: UpdateStatus.Failed(context.getString(R.string.update_timeout))
+    }
+
+    private fun parseOne(o: JSONObject) = ReleaseEntry(
+        tag = o.optString("tag_name").ifBlank { o.optString("name") },
+        url = o.optString("html_url").ifBlank { "$REPO_URL/releases" },
+        prerelease = o.optBoolean("prerelease", false),
+        draft = o.optBoolean("draft", false),
+    )
+
+    private fun parseList(body: String): List<ReleaseEntry> {
+        val arr = org.json.JSONArray(body)
+        return (0 until arr.length()).mapNotNull { i ->
+            runCatching { parseOne(arr.getJSONObject(i)) }.getOrNull()
+        }
+    }
+
+    /**
+     * 从若干发布里挑该提示哪一个。
+     *
+     * 不信任 GitHub 的返回顺序（按创建时间排，补发旧版本就会错位），一律按 SemVer 取最大者；
+     * draft 永不参与；[includePrerelease] 为假时排除预发布。
+     */
+    fun pickLatest(entries: List<ReleaseEntry>, includePrerelease: Boolean): ReleaseEntry? {
+        val usable = entries
+            .filterNot { it.draft }
+            .filter { includePrerelease || !it.prerelease }
+            .filter { it.tag.isNotBlank() }
+        val comparable = usable.mapNotNull { e ->
+            SemVer.parse(e.tag.removePrefix("v").removePrefix("V"))?.let { e to it }
+        }
+        // 没有一个 tag 能解析（命名异常）时，退回第一条可用项，总比什么都不提示好。
+        return comparable.maxByOrNull { it.second }?.first ?: usable.firstOrNull()
     }
 
     /** SemVer 优先级比较：a > b 返回 true；正式版高于相同核心版本的预发布版。 */

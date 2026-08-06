@@ -69,6 +69,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val keepScreenOn by vm.keepScreenOn.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
     val scrollMode by vm.scrollMode.collectAsState()
+    val includePrerelease by vm.includePrerelease.collectAsState()
     val updateTag by vm.updateTag.collectAsState()
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
@@ -263,6 +264,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
 
-        is Screen.About -> AboutScreen(updateTag = updateTag, onBack = { screen = Screen.Home; homeTab = HomeTab.Settings })
+        is Screen.About -> AboutScreen(
+            updateTag = updateTag,
+            includePrerelease = includePrerelease,
+            onIncludePrerelease = { vm.setIncludePrerelease(it) },
+            onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+        )
     }
 }

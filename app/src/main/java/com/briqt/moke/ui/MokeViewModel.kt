@@ -125,6 +125,14 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    /** 检查更新是否包含预发布版（关于页开关）。 */
+    val includePrerelease: StateFlow<Boolean> = settings.includePrerelease
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setIncludePrerelease(enabled: Boolean) = viewModelScope.launch {
+        settings.setIncludePrerelease(enabled)
+        checkUpdateSilently()   // 节流已被清零，这里立刻按新口径重查一次
+    }
 
     /**
      * 静默检查更新的结果：非空 = 远端有更新（值为 tag，如 v0.1.16），UI 据此点一个主题色小圆点。
@@ -146,7 +154,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         val last = settings.lastUpdateCheckAt.first()
         val now = System.currentTimeMillis()
         if (now - last < 6 * 60 * 60 * 1000L) return@launch
-        when (val r = UpdateChecker.check(appVersion, getApplication())) {
+        val includeRc = settings.includePrerelease.first()
+        when (val r = UpdateChecker.check(appVersion, getApplication(), includeRc)) {
             is UpdateStatus.Available -> settings.recordUpdateCheck(now, r.latest)
             is UpdateStatus.UpToDate -> settings.recordUpdateCheck(now, "")
             else -> Unit   // 失败/超时：不记时间戳，下次启动再试；绝不打扰用户

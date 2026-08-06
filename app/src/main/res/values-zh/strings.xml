@@ -300,4 +300,7 @@
     <string name="scroll_mode_wheel">始终发滚轮</string>
     <string name="scroll_mode_arrows">始终发方向键</string>
     <string name="scroll_mode_hint">智能：远端开了鼠标滚动就发滚轮；行编辑型程序（codex、claude code 等）不再误发方向键翻命令历史；翻页器（less、man）保持方向键滚动。</string>
+    <string name="include_prerelease">包含预览版</string>
+    <string name="include_prerelease_sub">检查更新时也算上 rc 预览版。预览版用于抢先验证新功能，可能不稳定。</string>
+    <string name="github_repo">GitHub 仓库</string>
 </resources>

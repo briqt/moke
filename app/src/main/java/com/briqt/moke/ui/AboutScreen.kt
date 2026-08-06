@@ -10,8 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,7 +48,12 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AboutScreen(updateTag: String? = null, onBack: () -> Unit) {
+fun AboutScreen(
+    updateTag: String? = null,
+    includePrerelease: Boolean = false,
+    onIncludePrerelease: (Boolean) -> Unit = {},
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val version = remember {
@@ -84,7 +93,12 @@ fun AboutScreen(updateTag: String? = null, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 14.dp),
+            // 可滚：横屏（或加了行之后）内容会高于视口，否则最后一行被裁掉。
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // 头部：名称 + 定位
@@ -107,7 +121,7 @@ fun AboutScreen(updateTag: String? = null, onBack: () -> Unit) {
                 when (val u = update) {
                     UpdateStatus.Idle -> TextButton(onClick = {
                         update = UpdateStatus.Checking
-                        scope.launch { update = UpdateChecker.check(version, context) }
+                        scope.launch { update = UpdateChecker.check(version, context, includePrerelease) }
                     }) { Text(stringResource(R.string.check_update)) }
                     UpdateStatus.Checking -> CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
                     is UpdateStatus.UpToDate -> Text(stringResource(R.string.up_to_date), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
@@ -116,13 +130,39 @@ fun AboutScreen(updateTag: String? = null, onBack: () -> Unit) {
                     }) { Text(stringResource(R.string.new_version, u.latest)) }
                     is UpdateStatus.Failed -> TextButton(onClick = {
                         update = UpdateStatus.Checking
-                        scope.launch { update = UpdateChecker.check(version, context) }
+                        scope.launch { update = UpdateChecker.check(version, context, includePrerelease) }
                     }) { Text(stringResource(R.string.retry_with_msg, u.message)) }
                 }
             }
+
+            SwitchRow(
+                icon = Icons.Filled.Science,
+                title = stringResource(R.string.include_prerelease),
+                subtitle = stringResource(R.string.include_prerelease_sub),
+                checked = includePrerelease,
+                onCheckedChange = {
+                    onIncludePrerelease(it)
+                    // 口径变了，界面上已有的结论就不再成立——回到未检查态，别让旧结果留着骗人。
+                    update = UpdateStatus.Idle
+                },
+            )
+
+            NavRow(
+                Icons.Filled.Code,
+                stringResource(R.string.github_repo),
+                REPO_LABEL,
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
+                    }
+                },
+            )
         }
     }
 }
+
+/** 仓库地址的展示形态（去掉协议前缀，副标题里更干净）。 */
+private val REPO_LABEL = UpdateChecker.REPO_URL.removePrefix("https://")
 
 @Composable
 private fun InfoLabel(text: String) {
