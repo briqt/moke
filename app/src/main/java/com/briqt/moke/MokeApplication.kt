@@ -3,7 +3,9 @@ package com.briqt.moke
 import android.app.Application
 import android.os.Debug
 import android.util.Log
+import com.briqt.moke.data.HostStore
 import com.briqt.moke.terminal.SessionManager
+import com.briqt.moke.terminal.sftp.TransferManager
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.File
 import java.security.Security
@@ -21,6 +23,9 @@ class MokeApplication : Application() {
 
     /** 全应用唯一的会话管理器。 */
     val sessions: SessionManager by lazy { SessionManager(this) }
+
+    /** 全应用唯一的传输队列（与会话同理：不能随 Activity/ViewModel 销毁而中断）。 */
+    val transfers: TransferManager by lazy { TransferManager(this, HostStore(this)) }
 
     override fun onCreate() {
         super.onCreate()

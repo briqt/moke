@@ -2,17 +2,11 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import com.briqt.moke.R
-import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
-import net.schmizz.keepalive.KeepAliveProvider
-import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
-import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.connection.channel.direct.SessionChannel
-import net.schmizz.sshj.userauth.password.PasswordUtils
-import java.io.File
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
@@ -41,7 +35,6 @@ class SshTransport(
         ?: host.effectiveStartupCommand.ifBlank { null }
 
     private val appContext = context.applicationContext
-    private val cacheDir: File = appContext.cacheDir
 
     private var ssh: SSHClient? = null
     private var jump: SSHClient? = null
@@ -51,37 +44,21 @@ class SshTransport(
 
     @Volatile private var closed = false
 
-    private fun newClient(session: TerminalSession): SSHClient {
-        // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
-        val config = DefaultConfig().apply { keepAliveProvider = KeepAliveProvider.HEARTBEAT }
-        return SSHClient(config).apply {
-            connectTimeout = 15000
-            addHostKeyVerifier(
-                MokeHostKeyVerifier(KnownHosts(appContext), appContext) { msg ->
-                    val b = ("\r\n" + msg + "\r\n").toByteArray(StandardCharsets.UTF_8)
-                    session.processToEmulator(b, b.size)
-                }
-            )
-        }
-    }
-
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         Thread({
             try {
-                val client = newClient(session)
-                if (jumpHost != null) {
-                    // 经跳板机：连 + 认证跳板 → direct-tcpip 到目标 → 在该通道上握手目标 SSH。
-                    feed(session, "\r\n" + appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
-                    val j = newClient(session)
-                    j.connect(jumpHost.host, jumpHost.port)
-                    authenticate(j, jumpHost)
-                    jump = j
-                    val direct = j.newDirectConnection(host.host, host.port)
-                    client.connectVia(direct)
-                } else {
-                    client.connect(host.host, host.port)
+                // TOFU 告警等提示直接写进终端画面（这条连接天然有屏幕可写）。
+                val connector = SshConnector(appContext) { msg ->
+                    val b = ("\r\n" + msg + "\r\n").toByteArray(StandardCharsets.UTF_8)
+                    session.processToEmulator(b, b.size)
                 }
-                authenticate(client, host)
+                if (jumpHost != null) {
+                    feed(session, "\r\n" + appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
+                }
+                // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
+                val conn = connector.connect(host, jumpHost, heartbeat = true)
+                val client = conn.client
+                jump = conn.jump
                 runCatching { client.connection.keepAlive.keepAliveInterval = 30 }
 
                 val s = client.startSession()
@@ -176,29 +153,6 @@ class SshTransport(
                 try { Thread.sleep(4000) } catch (_: InterruptedException) { break }
             }
         }, "moke-ssh-rtt-${host.host}").start()
-    }
-
-    private fun authenticate(client: SSHClient, h: Host) {
-        when (h.authType) {
-            AuthType.PASSWORD -> client.authPassword(h.username, h.password)
-            AuthType.KEY -> {
-                val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
-                try {
-                    keyFile.writeText(h.privateKeyPem)
-                    val kp = if (h.passphrase.isBlank()) {
-                        client.loadKeys(keyFile.absolutePath)
-                    } else {
-                        client.loadKeys(
-                            keyFile.absolutePath,
-                            PasswordUtils.createOneOff(h.passphrase.toCharArray())
-                        )
-                    }
-                    client.authPublickey(h.username, kp)
-                } finally {
-                    keyFile.delete()
-                }
-            }
-        }
     }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {

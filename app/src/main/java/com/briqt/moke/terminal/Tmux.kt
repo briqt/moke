@@ -209,6 +209,13 @@ object Tmux {
     }
 
     /**
+     * 取会话当前活动 pane 的工作目录（文件页的起始路径）。
+     * 只有 tmux 会话拿得到：普通登录壳的 cwd 属于那个 shell 进程，侧通道另开的 exec 看不到。
+     */
+    fun paneCwdCmd(name: String) =
+        "tmux display-message -p -t ${q(name)} '#{pane_current_path}' 2>/dev/null || true"
+
+    /**
      * 附加确认：数一下该会话当前的 tmux 客户端。attach 命令发出不等于附加成功（TERM 不可用、
      * tmux 启动失败都会回落登录壳），不核对就会出现「UI 说在 tmux 里、其实是普通 shell」。
      */

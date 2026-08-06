@@ -10,11 +10,13 @@ import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
+import com.briqt.moke.terminal.MokeTransferService
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.TmuxDiscovery
 import com.briqt.moke.terminal.TmuxPhase
 import com.briqt.moke.terminal.TmuxSession
+import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
@@ -543,6 +545,73 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSession(id: String) = sessions.close(id)
+
+    // ---------- 文件（SFTP） ----------
+
+    /** 传输队列：Application 作用域，退后台/关屏由 [MokeTransferService] 保活。 */
+    val transfers = (app as MokeApplication).transfers
+
+    private val filesController = FilesController(app, viewModelScope)
+    val filesState: StateFlow<FilesUiState> = filesController.state
+
+    val downloadTreeUri: StateFlow<String> = settings.downloadTreeUri
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val filesShowHidden: StateFlow<Boolean> = settings.filesShowHidden
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val filesSort: StateFlow<FilesSort> = settings.filesSort
+        .stateIn(viewModelScope, SharingStarted.Eagerly, FilesSort.NAME)
+
+    /** 打开文件页；[from] 非空（从终端 ⋮ 进）时尝试以终端当前目录为起点。 */
+    fun openFiles(host: Host, from: TermSession? = null) {
+        filesController.open(host, resolveJump(host), from)
+    }
+
+    fun closeFiles() = filesController.close()
+    fun filesNavigate(path: String) = filesController.navigate(path)
+    fun filesUp() = filesController.up()
+    fun filesRefresh() = filesController.refresh()
+    fun filesGoto(path: String) = filesController.goto(path)
+    fun filesMkdir(name: String) = filesController.mkdir(name)
+    fun filesClearError() = filesController.clearError()
+    fun setFilesSort(s: FilesSort) = viewModelScope.launch { settings.setFilesSort(s) }
+    fun setFilesShowHidden(on: Boolean) = viewModelScope.launch { settings.setFilesShowHidden(on) }
+
+    /** 记住下载目录（已在 UI 侧取得持久化读写授权）。 */
+    fun setDownloadTree(uri: String) = viewModelScope.launch { settings.setDownloadTreeUri(uri) }
+
+    fun uploadHere(uris: List<android.net.Uri>) {
+        val host = filesState.value.host ?: return
+        val dir = filesState.value.path.ifBlank { return }
+        transfers.enqueueUpload(host, uris, dir)
+        ensureTransferService()
+    }
+
+    fun download(entry: com.briqt.moke.terminal.sftp.RemoteEntry, treeUri: android.net.Uri) {
+        val host = filesState.value.host ?: return
+        transfers.enqueueDownload(host, entry, treeUri)
+        ensureTransferService()
+    }
+
+    fun resumeTransfer(id: String) {
+        transfers.retry(id)
+        ensureTransferService()
+    }
+
+    fun cancelTransfer(id: String) = transfers.cancel(id)
+    fun removeTransfer(id: String) = transfers.remove(id)
+    fun clearFinishedTransfers() = transfers.clearFinished()
+
+    /** 把远端路径写进终端输入行（已 shell 转义），省掉在手机上手打长路径。 */
+    fun sendToTerminal(sessionId: String, text: String) {
+        sessions.get(sessionId)?.session?.write(text)
+    }
+
+    private fun ensureTransferService() {
+        val ctx = getApplication<Application>()
+        runCatching {
+            ContextCompat.startForegroundService(ctx, Intent(ctx, MokeTransferService::class.java))
+        }
+    }
 
     fun setColorScheme(id: String) = viewModelScope.launch { settings.setColorScheme(id) }
 

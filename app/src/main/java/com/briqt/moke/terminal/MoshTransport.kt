@@ -3,15 +3,12 @@ package com.briqt.moke.terminal
 import android.content.Context
 import com.briqt.moke.R
 import android.os.ParcelFileDescriptor
-import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import com.termux.terminal.JNI
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
-import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.common.IOUtils
-import net.schmizz.sshj.userauth.password.PasswordUtils
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -47,7 +44,6 @@ class MoshTransport(
 
     private val appContext = context.applicationContext
     private val nativeLibDir = appContext.applicationInfo.nativeLibraryDir
-    private val cacheDir: File = appContext.cacheDir
 
     private var pfd: ParcelFileDescriptor? = null
     private var ptyFd: Int = -1
@@ -212,47 +208,9 @@ class MoshTransport(
         }.getOrNull()
     }
 
-    private fun <T> withSshClient(block: (SSHClient) -> T): T {
-        val client = SSHClient(DefaultConfig())
-        client.connectTimeout = 15000
-        client.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
-        var jClient: SSHClient? = null
-        try {
-            if (jumpHost != null) {
-                val j = SSHClient(DefaultConfig())
-                j.connectTimeout = 15000
-                j.addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext) {})
-                j.connect(jumpHost.host, jumpHost.port)
-                authenticate(j, jumpHost)
-                client.connectVia(j.newDirectConnection(host.host, host.port))
-                jClient = j
-            } else {
-                client.connect(host.host, host.port)
-            }
-            authenticate(client, host)
-            return block(client)
-        } finally {
-            runCatching { client.disconnect() }
-            runCatching { jClient?.disconnect() }
-        }
-    }
-
-    private fun authenticate(client: SSHClient, h: Host) {
-        when (h.authType) {
-            AuthType.PASSWORD -> client.authPassword(h.username, h.password)
-            AuthType.KEY -> {
-                val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
-                try {
-                    keyFile.writeText(h.privateKeyPem)
-                    val kp = if (h.passphrase.isBlank()) client.loadKeys(keyFile.absolutePath)
-                    else client.loadKeys(keyFile.absolutePath, PasswordUtils.createOneOff(h.passphrase.toCharArray()))
-                    client.authPublickey(h.username, kp)
-                } finally {
-                    keyFile.delete()
-                }
-            }
-        }
-    }
+    /** 短生命周期控制连接（mosh 数据面是 UDP，管理动作仍需一条 SSH）。 */
+    private fun <T> withSshClient(block: (SSHClient) -> T): T =
+        SshConnector(appContext).use(host, jumpHost, block)
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (closed) return

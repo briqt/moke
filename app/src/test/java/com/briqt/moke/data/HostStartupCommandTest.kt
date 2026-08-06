@@ -27,4 +27,16 @@ class HostStartupCommandTest {
     fun `只有空白的启动命令等同于未设置`() {
         assertEquals("", Host(startupCommand = "   ").effectiveStartupCommand)
     }
+
+    @Test
+    fun `启动命令能在 JSON 往返中保留`() {
+        val h = Host(host = "example.com", username = "u", startupCommand = "powershell.exe")
+        assertEquals("powershell.exe", Host.fromJson(h.toJson()).startupCommand)
+    }
+
+    @Test
+    fun `旧数据没有启动命令字段时读成空`() {
+        val json = Host(host = "example.com", username = "u").toJson().apply { remove("startupCommand") }
+        assertEquals("", Host.fromJson(json).startupCommand)
+    }
 }

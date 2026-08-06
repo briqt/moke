@@ -11,6 +11,9 @@ bouncycastle = "1.78.1"
 eddsa = "0.3.0"
 annotation = "1.9.0"
 junit = "4.13.2"
+# 单测里用真的 org.json：Android 打包的那份在 JVM 单测中只是抛异常的桩，
+# 而任务表/主机表的 JSON 往返正是最该被钉住的部分。
+orgJson = "20240303"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
 
@@ -33,6 +36,7 @@ bouncycastle-prov = { group = "org.bouncycastle", name = "bcprov-jdk18on", versi
 bouncycastle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncycastle" }
 eddsa = { group = "net.i2p.crypto", name = "eddsa", version.ref = "eddsa" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
 

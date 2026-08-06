@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
@@ -105,6 +106,7 @@ fun TerminalScreen(
     onTmuxKill: (String) -> Unit,
     onTmuxAttach: (TmuxSession) -> Unit,
     onTmuxTakeOver: (TmuxSession) -> Unit,
+    onOpenFiles: () -> Unit,
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -269,6 +271,7 @@ fun TerminalScreen(
                 onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
                 onSetTitle = { showTitleDialog = true },
+                onOpenFiles = { keyboard?.hide(); onOpenFiles() },
                 onShowKeyboard = { controller.showKeyboard() },
                 // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
                 onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
@@ -456,6 +459,7 @@ private fun TerminalTopBar(
     onPickKeyboardMode: () -> Unit,
     onToggleExtraKeys: () -> Unit,
     onSetTitle: () -> Unit,
+    onOpenFiles: () -> Unit,
     onShowKeyboard: () -> Unit,
     onClose: () -> Unit,
     onBack: () -> Unit,
@@ -545,6 +549,12 @@ private fun TerminalTopBar(
                         text = { Text(stringResource(R.string.session_set_title), style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; onSetTitle() },
+                    )
+                    // 文件：主入口在这里——从会话进才拿得到"终端当前目录"，也才谈得上把路径发回终端。
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.files_open), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onOpenFiles() },
                     )
                     HorizontalDivider()
                     // 字号步进（点 ± 不关闭菜单，便于连续调整）。

@@ -48,3 +48,6 @@ enum class ScrollMode {
             entries.firstOrNull { it.name == n } ?: def
     }
 }
+
+/** 文件页排序维度。目录始终排在文件前面，本枚举只决定同类之间怎么比。 */
+enum class FilesSort { NAME, TIME, SIZE }

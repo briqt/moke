@@ -11,6 +11,7 @@
     <string name="action_cancel">取消</string>
     <string name="action_save">保存</string>
     <string name="action_retry">重试</string>
+    <string name="action_ok">确定</string>
     <string name="action_close">关闭</string>
 
     <!-- 底部导航 -->
@@ -232,6 +233,51 @@
     <string name="notif_channel_name">会话保持</string>
     <string name="notif_channel_desc">在后台保持活动的 SSH / mosh 会话</string>
     <string name="notif_sessions_active">%1$d 个会话在后台保持</string>
+    <string name="notif_transfer_channel_name">文件传输</string>
+    <string name="notif_transfer_channel_desc">在后台继续上传与下载</string>
+    <string name="notif_transfer_title">正在传输文件</string>
+    <string name="notif_transfer_multi">%1$s（队列中还有 %2$d 个）</string>
+
+    <!-- 文件 / SFTP -->
+    <string name="files_title">文件</string>
+    <string name="files_open">文件</string>
+    <string name="files_connecting">连接中…</string>
+    <string name="files_empty">空目录</string>
+    <string name="files_parent">上级目录</string>
+    <string name="files_new_folder">新建文件夹</string>
+    <string name="files_folder_name">文件夹名</string>
+    <string name="files_show_hidden">显示隐藏文件</string>
+    <string name="files_sort_name">按名称排序</string>
+    <string name="files_sort_time">按时间排序</string>
+    <string name="files_sort_size">按大小排序</string>
+    <string name="files_refresh">刷新</string>
+    <string name="files_goto">跳转到路径…</string>
+    <string name="files_goto_hint">/var/log</string>
+    <string name="files_from_terminal">回到终端当前目录</string>
+    <string name="files_upload_here">上传到此目录</string>
+    <string name="files_download">下载</string>
+    <string name="files_copy_path">复制路径</string>
+    <string name="files_send_to_terminal">把路径发到终端</string>
+    <string name="files_path_copied">已复制路径</string>
+    <string name="files_link">链接</string>
+    <string name="files_pick_download_dir">选择下载目录</string>
+    <string name="files_pick_download_dir_desc">之后下载都会存到这里，可在 ⋮ 菜单里改。</string>
+    <string name="files_change_download_dir">更改下载目录</string>
+    <string name="files_transfers">传输</string>
+    <string name="files_transfer_resume">继续</string>
+    <string name="files_transfer_cancel">取消</string>
+    <string name="files_transfer_remove">移除</string>
+    <string name="files_transfer_clear">清除已完成</string>
+    <string name="files_transfer_done">已完成</string>
+    <string name="files_transfer_cancelled">已取消</string>
+    <string name="files_transfer_queued">排队中</string>
+    <string name="transfer_interrupted">已中断——应用被系统停止</string>
+    <string name="transfer_host_gone">这个连接已经不存在了</string>
+    <string name="transfer_remote_missing">远端文件已不存在</string>
+    <string name="transfer_local_unwritable">无法写入本地文件</string>
+    <string name="transfer_local_unreadable">无法读取本地文件</string>
+    <string name="transfer_local_seek_failed">无法续传：本地文件定位失败</string>
+    <string name="transfer_create_failed">无法在下载目录中创建文件</string>
 
     <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
     <string name="ssh_via_jump">[moke] 经跳板机 %1$s 连接…</string>

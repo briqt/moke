@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -127,6 +128,7 @@ fun HomeScreen(
     onToggleSessionGroupCollapse: (String) -> Unit,
     onAddHost: () -> Unit,
     onEditHost: (Host) -> Unit,
+    onOpenHostFiles: (Host) -> Unit,
     onDuplicateHost: (Host) -> Unit,
     onDeleteHost: (Host) -> Unit,
     onConnectHost: (Host) -> Unit,
@@ -204,7 +206,7 @@ fun HomeScreen(
         },
     ) { padding ->
         when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onDuplicateHost, onDeleteHost, onConnectHost)
+            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
             HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(
                 padding, keyboardMode, updateTag, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
@@ -274,6 +276,7 @@ private fun ConnectionsContent(
     onReorderGroups: (List<String>) -> Unit,
     onReorderHosts: (List<Host>) -> Unit,
     onEdit: (Host) -> Unit,
+    onFiles: (Host) -> Unit,
     onDuplicate: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     onConnect: (Host) -> Unit,
@@ -303,7 +306,7 @@ private fun ConnectionsContent(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) { host, dragging, handle ->
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
             }
         } else {
             val groups = orderedKeys.map { k -> ReorderGroup(k, hosts.filter { keyOf(it) == k }) }
@@ -331,7 +334,7 @@ private fun ConnectionsContent(
                 },
             ) { host, dragging, handle ->
                 // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging)
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging)
             }
         }
     }
@@ -490,6 +493,7 @@ private fun HostCard(
     host: Host,
     onConnect: () -> Unit,
     onEdit: () -> Unit,
+    onFiles: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
     // 是否在副标题尾部展示分组名：按项目分组时分组头已展示、置 false 免重复；平铺/不分组时置 true。
@@ -542,6 +546,12 @@ private fun HostCard(
                         text = { Text(stringResource(R.string.host_edit)) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                         onClick = { menuOpen = false; onEdit() },
+                    )
+                    // 文件：不开会话也能进（主入口仍是终端 ⋮，那里还能带上终端当前目录）。
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.files_open)) },
+                        leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                        onClick = { menuOpen = false; onFiles() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.host_duplicate)) },

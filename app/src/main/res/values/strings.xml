@@ -11,6 +11,7 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_save">Save</string>
     <string name="action_retry">Retry</string>
+    <string name="action_ok">OK</string>
     <string name="action_close">Close</string>
 
     <!-- 底部导航 -->
@@ -236,6 +237,51 @@
     <string name="notif_channel_name">Session keep-alive</string>
     <string name="notif_channel_desc">Keeps SSH / mosh sessions alive in the background</string>
     <string name="notif_sessions_active">%1$d session(s) kept in the background</string>
+    <string name="notif_transfer_channel_name">File transfers</string>
+    <string name="notif_transfer_channel_desc">Keeps uploads and downloads running in the background</string>
+    <string name="notif_transfer_title">Transferring files</string>
+    <string name="notif_transfer_multi">%1$s (+%2$d in queue)</string>
+
+    <!-- 文件 / SFTP -->
+    <string name="files_title">Files</string>
+    <string name="files_open">Files</string>
+    <string name="files_connecting">Connecting…</string>
+    <string name="files_empty">Empty folder</string>
+    <string name="files_parent">Parent folder</string>
+    <string name="files_new_folder">New folder</string>
+    <string name="files_folder_name">Folder name</string>
+    <string name="files_show_hidden">Show hidden files</string>
+    <string name="files_sort_name">Sort by name</string>
+    <string name="files_sort_time">Sort by time</string>
+    <string name="files_sort_size">Sort by size</string>
+    <string name="files_refresh">Refresh</string>
+    <string name="files_goto">Go to path…</string>
+    <string name="files_goto_hint">/var/log</string>
+    <string name="files_from_terminal">Terminal\'s current folder</string>
+    <string name="files_upload_here">Upload here</string>
+    <string name="files_download">Download</string>
+    <string name="files_copy_path">Copy path</string>
+    <string name="files_send_to_terminal">Send path to terminal</string>
+    <string name="files_path_copied">Path copied</string>
+    <string name="files_link">link</string>
+    <string name="files_pick_download_dir">Choose a download folder</string>
+    <string name="files_pick_download_dir_desc">Downloads go here from now on; you can change it later in the ⋮ menu.</string>
+    <string name="files_change_download_dir">Change download folder</string>
+    <string name="files_transfers">Transfers</string>
+    <string name="files_transfer_resume">Resume</string>
+    <string name="files_transfer_cancel">Cancel</string>
+    <string name="files_transfer_remove">Remove</string>
+    <string name="files_transfer_clear">Clear finished</string>
+    <string name="files_transfer_done">Done</string>
+    <string name="files_transfer_cancelled">Cancelled</string>
+    <string name="files_transfer_queued">Queued</string>
+    <string name="transfer_interrupted">Interrupted — the app was stopped</string>
+    <string name="transfer_host_gone">That connection no longer exists</string>
+    <string name="transfer_remote_missing">The remote file is gone</string>
+    <string name="transfer_local_unwritable">Cannot write to the local file</string>
+    <string name="transfer_local_unreadable">Cannot read the local file</string>
+    <string name="transfer_local_seek_failed">Cannot resume: the local file could not be positioned</string>
+    <string name="transfer_create_failed">Could not create the file in the download folder</string>
 
     <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
     <string name="ssh_via_jump">[moke] Connecting via jump host %1$s…</string>

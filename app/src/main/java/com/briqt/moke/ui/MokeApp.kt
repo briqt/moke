@@ -30,6 +30,12 @@ sealed interface Screen {
     data object TerminalSettings : Screen
     data object Fonts : Screen
     data object About : Screen
+
+    /**
+     * 远端文件页。[sessionId] 非空表示从终端 ⋮ 进来的——只有那种情况才拿得到"终端当前目录"，
+     * 也只有那种情况才谈得上把路径发回终端。
+     */
+    data class Files(val hostId: String, val sessionId: String?) : Screen
 }
 
 @Composable
@@ -74,6 +80,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
     val backEnabled = screen !is Screen.Home || homeTab != HomeTab.Connections
+    // 打开文件页：断开旧的（若有）并按新主机建连；从终端进时带上会话以取当前目录。
+    val openFiles: (Host, String?) -> Unit = { host, sessionId ->
+        vm.openFiles(host, sessionId?.let { vm.sessions.get(it) })
+        screen = Screen.Files(host.id, sessionId)
+    }
     BackHandler(enabled = backEnabled) {
         when (screen) {
             is Screen.Fonts -> screen = Screen.Appearance
@@ -82,6 +93,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.Edit -> screen = Screen.Home
             is Screen.Terminal -> screen = Screen.Home
+            // 从终端进来的回终端，从连接列表进来的回列表；离开即断开那条 SFTP 连接。
+            is Screen.Files -> {
+                vm.closeFiles()
+                screen = (screen as Screen.Files).sessionId?.let { Screen.Terminal(it) } ?: Screen.Home
+            }
             is Screen.Home -> homeTab = HomeTab.Connections
         }
     }
@@ -106,6 +122,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onToggleSessionGroupCollapse = { vm.toggleSessionGroupCollapsed(it) },
             onAddHost = { screen = Screen.Edit(null) },
             onEditHost = { screen = Screen.Edit(it) },
+            onOpenHostFiles = { openFiles(it, null) },
             onDuplicateHost = { vm.duplicate(it) },
             onDeleteHost = { vm.delete(it) },
             onConnectHost = { host -> screen = Screen.Terminal(vm.openSession(host)) },
@@ -183,6 +200,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onTmuxTakeOver = { target ->
                             screen = Screen.Terminal(vm.openTmuxSession(ts, target, detachOthers = true))
                         },
+                        onOpenFiles = { openFiles(ts.host, ts.id) },
                     )
                     // 连接即选会话：主机「会话持久化=tmux」且还没记住选择时，连上后弹一次。
                     if (tmuxPickerFor == ts.id) {
@@ -263,6 +281,74 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onConfirmClose = { vm.setConfirmCloseSession(it) },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
+
+        is Screen.Files -> {
+            val filesState by vm.filesState.collectAsState()
+            val tasks by vm.transfers.tasks.collectAsState()
+            val sort by vm.filesSort.collectAsState()
+            val showHidden by vm.filesShowHidden.collectAsState()
+            val treeUri by vm.downloadTreeUri.collectAsState()
+            // 下载目录只问一次：拿到后持久化读写授权，之后静默落盘。
+            var pendingDownload by remember { mutableStateOf<com.briqt.moke.terminal.sftp.RemoteEntry?>(null) }
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val treePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+            ) { uri ->
+                if (uri != null) {
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                        )
+                    }
+                    vm.setDownloadTree(uri.toString())
+                    pendingDownload?.let { vm.download(it, uri) }
+                }
+                pendingDownload = null
+            }
+            FilesScreen(
+                state = filesState,
+                tasks = tasks,
+                sort = sort,
+                showHidden = showHidden,
+                hasDownloadDir = treeUri.isNotBlank(),
+                onNavigate = { vm.filesNavigate(it) },
+                onUp = { vm.filesUp() },
+                onRefresh = { vm.filesRefresh() },
+                onGoto = { vm.filesGoto(it) },
+                onMkdir = { vm.filesMkdir(it) },
+                onSort = { vm.setFilesSort(it) },
+                onShowHidden = { vm.setFilesShowHidden(it) },
+                onUpload = { vm.uploadHere(it) },
+                onDownload = { entry ->
+                    val saved = treeUri.takeIf { it.isNotBlank() }
+                    if (saved != null) {
+                        vm.download(entry, android.net.Uri.parse(saved))
+                    } else {
+                        pendingDownload = entry
+                        treePicker.launch(null)
+                    }
+                },
+                onPickDownloadDir = { pendingDownload = null; treePicker.launch(null) },
+                onSendToTerminal = s.sessionId?.let { id ->
+                    { path: String ->
+                        vm.sendToTerminal(id, path)
+                        vm.closeFiles()
+                        screen = Screen.Terminal(id)
+                    }
+                },
+                onClearError = { vm.filesClearError() },
+                onTaskResume = { vm.resumeTransfer(it) },
+                onTaskCancel = { vm.cancelTransfer(it) },
+                onTaskRemove = { vm.removeTransfer(it) },
+                onClearFinished = { vm.clearFinishedTransfers() },
+                onBack = {
+                    vm.closeFiles()
+                    screen = s.sessionId?.let { Screen.Terminal(it) } ?: Screen.Home
+                },
+            )
+        }
 
         is Screen.About -> AboutScreen(
             updateTag = updateTag,

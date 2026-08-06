@@ -60,6 +60,11 @@ class SettingsStore(private val context: Context) {
     private val latestSeenTagKey = stringPreferencesKey("latest_seen_tag")
     // 检查更新时是否把预发布版（rc）算进来。
     private val includePrereleaseKey = booleanPreferencesKey("include_prerelease")
+    // 下载目录（SAF 目录树 URI，已持久化读写授权）；空=还没选过，首次下载时问一次。
+    private val downloadTreeKey = stringPreferencesKey("download_tree_uri")
+    // 文件页：是否显示隐藏文件 + 排序方式。
+    private val filesShowHiddenKey = booleanPreferencesKey("files_show_hidden")
+    private val filesSortKey = stringPreferencesKey("files_sort")
 
     companion object {
         // 字号（sp）：默认 11，0.5 步进；范围 8–24（上限收窄，24sp 在手机上已很大，避免滑轨大半落在不可用大字号）。
@@ -170,6 +175,32 @@ class SettingsStore(private val context: Context) {
     /** 是否把预发布版算进"有更新"（默认关：正式用户不该被 rc 打扰）。 */
     val includePrerelease: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[includePrereleaseKey] ?: false
+    }
+
+    /** 下载目录（SAF 目录树 URI 字符串；空=未选）。 */
+    val downloadTreeUri: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[downloadTreeKey] ?: ""
+    }
+
+    val filesShowHidden: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[filesShowHiddenKey] ?: false
+    }
+
+    val filesSort: Flow<FilesSort> = context.settingsDataStore.data.map { prefs ->
+        runCatching { FilesSort.valueOf(prefs[filesSortKey] ?: FilesSort.NAME.name) }
+            .getOrDefault(FilesSort.NAME)
+    }
+
+    suspend fun setDownloadTreeUri(uri: String) {
+        context.settingsDataStore.edit { it[downloadTreeKey] = uri }
+    }
+
+    suspend fun setFilesShowHidden(on: Boolean) {
+        context.settingsDataStore.edit { it[filesShowHiddenKey] = on }
+    }
+
+    suspend fun setFilesSort(s: FilesSort) {
+        context.settingsDataStore.edit { it[filesSortKey] = s.name }
     }
 
     /** 连接页分组显示顺序（组名列表；空=按主机首次出现序）。 */
