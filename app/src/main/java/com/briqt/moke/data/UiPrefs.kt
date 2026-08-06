@@ -29,3 +29,22 @@ enum class KeyboardMode {
             entries.firstOrNull { it.name == n } ?: def
     }
 }
+
+/**
+ * 全屏（备用屏）程序内的滑动语义。社区实报：codex / claude code / snow-cli 里上下滑动被当成
+ * ↑/↓，翻的是命令历史而不是看输出。
+ *
+ * - [SMART]  智能（默认）：远端开了鼠标跟踪→发滚轮；否则按远端是否开启**括号粘贴模式**区分——
+ *            开了的是行编辑型程序（Ink/readline 系都会开），不再发方向键；没开的是翻页器
+ *            （less/man），保持方向键滚动的既有手感。
+ * - [WHEEL]  始终发滚轮：远端支持鼠标但没在当前界面开启跟踪时有用。
+ * - [ARROWS] 始终发方向键：v0.1.16 及更早的行为。
+ */
+enum class ScrollMode {
+    SMART, WHEEL, ARROWS;
+
+    companion object {
+        fun fromName(n: String?, def: ScrollMode = SMART): ScrollMode =
+            entries.firstOrNull { it.name == n } ?: def
+    }
+}

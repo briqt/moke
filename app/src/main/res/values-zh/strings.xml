@@ -70,6 +70,11 @@
     </plurals>
     <string name="tmux_kill_confirm_title">关闭 tmux 会话？</string>
     <string name="tmux_kill_confirm_message">“%1$s”中的程序将被终止，此操作无法撤销。</string>
+    <string name="tmux_picker_prompt">选择要进入的会话，或新建一个。选择会被记住，下次连接直接进入。</string>
+    <string name="tmux_plain_shell">打开纯 shell</string>
+    <string name="tmux_left">已离开 tmux，远端会话仍在运行</string>
+    <string name="tmux_left_short">已离开 tmux</string>
+    <string name="tmux_attach_unconfirmed">未能附加到 tmux，已回落到普通 shell（原因见上方输出）</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>
@@ -232,7 +237,11 @@
     <string name="mosh_client_starting">[moke] mosh-server UDP 端口 %1$d，启动 mosh-client…</string>
     <string name="mosh_connect_failed">[mosh 连接失败: %1$s]</string>
     <string name="hostkey_first_seen">首次连接 %1$s，已记录主机指纹 %2$s</string>
-    <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确为服务器变更，请删除该主机后重建。</string>
+    <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确认服务器换过密钥，请到该连接的编辑页点「清除已保存的主机指纹」后重连（删除并重建连接不会清除指纹）。</string>
+    <string name="hostkey_clear">清除已保存的主机指纹</string>
+    <string name="hostkey_clear_hint">当前记录：%1$s</string>
+    <string name="hostkey_none">尚未记录该主机的指纹</string>
+    <string name="hostkey_cleared">已清除，下次连接将重新记录指纹</string>
 
     <!-- 覆盖 vendored terminal-view 的选中菜单文案 -->
     <string name="copy_text">复制</string>
@@ -282,4 +291,13 @@
     <string name="menu_keep_screen_on_sub">打开终端时不自动息屏，较耗电</string>
     <string name="update_found">发现新版本 %1$s</string>
 
+    <string name="host_persistence">会话持久化</string>
+    <string name="persistence_none">无</string>
+    <string name="persistence_tmux">tmux（连接即进入）</string>
+    <string name="host_persistence_hint">选 tmux：连接这台主机时自动进入 tmux 会话——已记住会话名就直接进入，否则先让你选一个。</string>
+    <string name="scroll_mode">全屏程序内滑动</string>
+    <string name="scroll_mode_smart">智能</string>
+    <string name="scroll_mode_wheel">始终发滚轮</string>
+    <string name="scroll_mode_arrows">始终发方向键</string>
+    <string name="scroll_mode_hint">智能：远端开了鼠标滚动就发滚轮；行编辑型程序（codex、claude code 等）不再误发方向键翻命令历史；翻页器（less、man）保持方向键滚动。</string>
 </resources>

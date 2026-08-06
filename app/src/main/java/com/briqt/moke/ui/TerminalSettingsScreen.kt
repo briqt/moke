@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.SwipeVertical
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.ui.theme.MokeDimens
 
 /**
@@ -40,14 +42,17 @@ import com.briqt.moke.ui.theme.MokeDimens
 @Composable
 fun TerminalSettingsScreen(
     keyboardMode: KeyboardMode,
+    scrollMode: ScrollMode,
     keepScreenOn: Boolean,
     confirmClose: Boolean,
     onKeyboardMode: (KeyboardMode) -> Unit,
+    onScrollMode: (ScrollMode) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onConfirmClose: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     var kbDialog by remember { mutableStateOf(false) }
+    var scrollDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -83,6 +88,12 @@ fun TerminalSettingsScreen(
                 stringResource(keyboardModeLabel(keyboardMode)),
                 onClick = { kbDialog = true },
             )
+            NavRow(
+                Icons.Filled.SwipeVertical,
+                stringResource(R.string.scroll_mode),
+                stringResource(scrollModeLabel(scrollMode)),
+                onClick = { scrollDialog = true },
+            )
             SwitchRow(
                 icon = Icons.Filled.LightMode,
                 title = stringResource(R.string.menu_keep_screen_on),
@@ -98,6 +109,14 @@ fun TerminalSettingsScreen(
                 onCheckedChange = onConfirmClose,
             )
         }
+    }
+
+    if (scrollDialog) {
+        ScrollModeDialog(
+            current = scrollMode,
+            onPick = { onScrollMode(it); scrollDialog = false },
+            onDismiss = { scrollDialog = false },
+        )
     }
 
     if (kbDialog) {

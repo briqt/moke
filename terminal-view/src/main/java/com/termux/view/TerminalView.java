@@ -585,16 +585,28 @@ public final class TerminalView extends View {
         mEmulator.sendMouseEvent(button, x, y, pressed);
     }
 
+    /**
+     * Swipe/wheel behaviour in full-screen (alternate buffer) programs — moke addition.
+     * 0 = smart (default), 1 = always wheel, 2 = always arrow keys (pre-0.1.17 behaviour).
+     */
+    public int mokeScrollMode = 0;
+
     /** Perform a scroll, either from dragging the screen or by scrolling a mouse wheel. */
     void doScroll(MotionEvent event, int rowsDown) {
         boolean up = rowsDown < 0;
         int amount = Math.abs(rowsDown);
         for (int i = 0; i < amount; i++) {
-            if (mEmulator.isMouseTrackingActive()) {
+            if (mEmulator.isMouseTrackingActive() || mokeScrollMode == 1) {
                 sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
             } else if (mEmulator.isAlternateBufferActive()) {
                 // Send up and down key events for scrolling, which is what some terminals do to make scroll work in
                 // e.g. less, which shifts to the alt screen without mouse handling.
+                //
+                // moke: skip this in smart mode when the program enabled bracketed paste — that marks a line
+                // editor / REPL TUI (Ink-based CLIs, readline), where arrow keys walk the command history
+                // instead of scrolling. The alternate buffer has no scrollback, so there is nothing else to
+                // scroll; doing nothing beats destroying the user's prompt.
+                if (mokeScrollMode == 0 && mEmulator.isBracketedPasteMode()) return;
                 handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
             } else {
                 mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));

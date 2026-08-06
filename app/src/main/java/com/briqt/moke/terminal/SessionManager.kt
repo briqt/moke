@@ -63,6 +63,19 @@ class TermSession(
     val tmuxState: MutableStateFlow<TmuxUiState> = MutableStateFlow(TmuxUiState())
     val tmuxMutex = Mutex()
 
+    /**
+     * 远端协商出的可用 TERM（[Tmux.DISCOVER_CMD] 的产物）；null=还没探测/远端无判定工具。
+     * 附加 tmux 时必须用它，否则远端缺 `xterm-256color` 条目时 tmux 会拒绝启动。
+     */
+    val negotiatedTerm: MutableStateFlow<String?> = MutableStateFlow(null)
+
+    /**
+     * 本终端是否**确实**附加在 [remoteTmuxName] 上（侧通道核对客户端数的结果）。
+     * null=尚未确认；false=确认未附上（tmux 缺失/启动失败，已回落登录壳）。
+     * 光有 startupCommand 不能当作附加成功，否则 UI 会撒谎。
+     */
+    val tmuxAttached: MutableStateFlow<Boolean?> = MutableStateFlow(null)
+
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
 
@@ -184,6 +197,7 @@ class SessionManager(context: Context) {
         target: TmuxSession,
         jumpHost: Host? = null,
         detachOthers: Boolean = false,
+        term: String? = null,
     ): TermSession {
         if (!detachOthers) {
             _sessions.value.firstOrNull {
@@ -197,10 +211,16 @@ class SessionManager(context: Context) {
             host = source.host,
             jumpHost = jumpHost,
             initialTitle = "tmux · ${target.name}",
-            remoteTmuxId = target.id,
+            // 选择器「新建」走同一条路（`new-session -A` 原子创建），此时还没有远端 ID；
+            // 空串不能当成合法 ID，否则关闭确认等按 ID 判断的分支会误判。
+            remoteTmuxId = target.id.takeIf { it.isNotBlank() },
             remoteTmuxName = target.name,
-            startupCommand = Tmux.attachOrCreateCommand(target.name, detachOthers),
-        )
+            startupCommand = Tmux.attachOrCreateCommand(
+                target.name,
+                detachOthers,
+                term ?: source.negotiatedTerm.value,
+            ),
+        ).also { it.negotiatedTerm.value = term ?: source.negotiatedTerm.value }
     }
 
     /** 根据实时标题冲突派生复制标记；用户自定义标题具有绝对优先级。 */

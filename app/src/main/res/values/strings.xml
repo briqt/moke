@@ -74,6 +74,11 @@
     </plurals>
     <string name="tmux_kill_confirm_title">Kill tmux session?</string>
     <string name="tmux_kill_confirm_message">Programs in “%1$s” will be terminated. This cannot be undone.</string>
+    <string name="tmux_picker_prompt">Pick a session to enter, or create one. Your choice is remembered for next time.</string>
+    <string name="tmux_plain_shell">Open a plain shell</string>
+    <string name="tmux_left">Left tmux. The remote session is still running.</string>
+    <string name="tmux_left_short">left tmux</string>
+    <string name="tmux_attach_unconfirmed">Could not attach to tmux; fell back to a plain shell (see the output above).</string>
     <string name="host_edit">Edit</string>
     <string name="host_duplicate">Duplicate</string>
     <string name="host_copy_command">Copy connect command</string>
@@ -236,7 +241,11 @@
     <string name="mosh_client_starting">[moke] mosh-server UDP port %1$d, starting mosh-client…</string>
     <string name="mosh_connect_failed">[mosh failed: %1$s]</string>
     <string name="hostkey_first_seen">First connection to %1$s; host fingerprint saved: %2$s</string>
-    <string name="hostkey_changed">⚠️ Host key changed!\n  saved:   %1$s\n  current: %2$s\nThis may be a man-in-the-middle attack; connection rejected. If the server really changed, delete this host and re-add it.</string>
+    <string name="hostkey_changed">⚠️ Host key changed!\n  saved:   %1$s\n  current: %2$s\nThis may be a man-in-the-middle attack; connection rejected. If you are sure the server rotated its key, open this connection’s edit page and tap “Clear saved host fingerprint”, then reconnect (deleting and re-adding the connection does not clear it).</string>
+    <string name="hostkey_clear">Clear saved host fingerprint</string>
+    <string name="hostkey_clear_hint">Saved: %1$s</string>
+    <string name="hostkey_none">No fingerprint saved for this host yet</string>
+    <string name="hostkey_cleared">Cleared. The fingerprint will be recorded again on next connect.</string>
 
     <!-- 覆盖 vendored terminal-view 的选中菜单文案（app 资源优先于 library，随 App 语言本地化；不改 vendored 组件） -->
     <string name="copy_text">Copy</string>
@@ -286,4 +295,13 @@
     <string name="menu_keep_screen_on_sub">Stays awake while a terminal tab is open; uses more battery</string>
     <string name="update_found">New version %1$s available</string>
 
+    <string name="host_persistence">Session persistence</string>
+    <string name="persistence_none">None</string>
+    <string name="persistence_tmux">tmux (attach on connect)</string>
+    <string name="host_persistence_hint">With tmux: connecting to this host enters a tmux session — straight in if a session name is remembered, otherwise you pick one first.</string>
+    <string name="scroll_mode">Swipe in full-screen programs</string>
+    <string name="scroll_mode_smart">Smart</string>
+    <string name="scroll_mode_wheel">Always send wheel</string>
+    <string name="scroll_mode_arrows">Always send arrow keys</string>
+    <string name="scroll_mode_hint">Smart: sends wheel events when the remote enables mouse scrolling; no longer sends arrow keys in line-editor programs (codex, claude code…) where they scroll command history; pagers (less, man) keep arrow-key scrolling.</string>
 </resources>

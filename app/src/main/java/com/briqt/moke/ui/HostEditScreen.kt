@@ -1,6 +1,7 @@
 package com.briqt.moke.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.ui.theme.MokeDimens
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +59,9 @@ fun HostEditScreen(
     allHosts: List<Host>,
     onSave: (Host) -> Unit,
     onCancel: () -> Unit,
+    /** 该 host:port 已记录的指纹（null=无记录），用于「清除已保存的主机指纹」。 */
+    savedFingerprint: String? = null,
+    onClearFingerprint: (String, Int) -> Unit = { _, _ -> },
 ) {
     val base = initial ?: Host()
     var label by remember { mutableStateOf(base.label) }
@@ -75,6 +80,8 @@ fun HostEditScreen(
     var jumpHostId by remember { mutableStateOf(base.jumpHostId) }
     var loginCommand by remember { mutableStateOf(base.loginCommand) }
     var group by remember { mutableStateOf(base.group) }
+    var persistence by remember { mutableStateOf(base.persistence) }
+    var fingerprintCleared by remember { mutableStateOf(false) }
 
     // 跳板机候选：其它主机（排除自身，避免自引用）。
     val jumpOptions = listOf(DropdownOption(id = "", title = stringResource(R.string.jump_none))) +
@@ -251,6 +258,41 @@ fun HostEditScreen(
                 }
             }
 
+            // 会话持久化：选 tmux 后，连接这台主机即进入 tmux 会话（记住过会话名就直接进）。
+            RichDropdown(
+                label = stringResource(R.string.host_persistence),
+                options = listOf(
+                    DropdownOption(
+                        id = SessionPersistence.NONE.name,
+                        title = stringResource(R.string.persistence_none),
+                    ),
+                    DropdownOption(
+                        id = SessionPersistence.TMUX.name,
+                        title = stringResource(R.string.persistence_tmux),
+                    ),
+                ),
+                selectedId = persistence.name,
+                onSelect = { persistence = SessionPersistence.valueOf(it) },
+            )
+            if (persistence == SessionPersistence.TMUX) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stringResource(R.string.host_persistence_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             // 登录后自动执行：支持多行（每行一条命令，按序执行）；传输层按 "命令+\n" 原样下发。
             OutlinedTextField(
                 value = loginCommand, onValueChange = { loginCommand = it },
@@ -259,6 +301,31 @@ fun HostEditScreen(
                 minLines = 1, maxLines = 6,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // 主机指纹：服务器换过密钥时的自救路径。指纹按 host:port 存、与本条目无关，
+            // 删除重建连接不会清除它——社区实报有人因此彻底连不上、只能清应用数据。
+            if (host.isNotBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(
+                        onClick = {
+                            onClearFingerprint(host.trim(), port.toIntOrNull() ?: 22)
+                            fingerprintCleared = true
+                        },
+                        enabled = savedFingerprint != null && !fingerprintCleared,
+                        contentPadding = PaddingValues(0.dp),
+                    ) { Text(stringResource(R.string.hostkey_clear)) }
+                    Text(
+                        when {
+                            fingerprintCleared -> stringResource(R.string.hostkey_cleared)
+                            savedFingerprint != null ->
+                                stringResource(R.string.hostkey_clear_hint, savedFingerprint)
+                            else -> stringResource(R.string.hostkey_none)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -281,6 +348,13 @@ fun HostEditScreen(
                                 jumpHostId = jumpHostId,
                                 loginCommand = loginCommand.trim(),
                                 group = group.trim(),
+                                persistence = persistence,
+                                // 关掉持久化时一并忘记记住的会话名，避免下次重新开启后悄悄附加到旧会话。
+                                tmuxSessionName = if (persistence == SessionPersistence.TMUX) {
+                                    base.tmuxSessionName
+                                } else {
+                                    ""
+                                },
                             )
                         )
                     },

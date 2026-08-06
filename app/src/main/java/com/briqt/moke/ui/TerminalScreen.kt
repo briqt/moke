@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
@@ -87,6 +88,7 @@ fun TerminalScreen(
     schemeId: String,
     extraKeysVisible: Boolean,
     keyboardMode: KeyboardMode,
+    scrollMode: ScrollMode,
     confirmClose: Boolean,
     keepScreenOn: Boolean,
     resolveTypeface: (String, String) -> android.graphics.Typeface,
@@ -111,6 +113,9 @@ fun TerminalScreen(
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val remoteTmuxName by ts.remoteTmuxName.collectAsState()
+    // 只有侧通道确认过"确实附加上了"才敢说「已离开 tmux」；tmux 缺失/启动失败会回落普通 shell，
+    // 那种情况必须说清没附上，否则 UI 在撒谎。
+    val tmuxAttached by ts.tmuxAttached.collectAsState()
     val tmuxRoute = if (ts.jumpHost != null) {
         stringResource(R.string.tmux_via_jump, ts.jumpHost.displayName)
     } else {
@@ -165,6 +170,7 @@ fun TerminalScreen(
         controller.cursorStyle = cursorStyle
         controller.cursorBlink = cursorBlink
         controller.keyboardMode = keyboardMode
+        view.mokeScrollMode = scrollMode.ordinal
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被消费后，熄灭 Ctrl/Alt 高亮（用一次即取消）。
@@ -216,6 +222,8 @@ fun TerminalScreen(
     // 常亮开关热生效（不必退出会话重进）。
     LaunchedEffect(ts.id, keepScreenOn) { view.keepScreenOn = keepScreenOn }
     // 键盘模式热切换：restartInput 让输入法立刻按新 EditorInfo 重建（否则要退出会话再进才生效）。
+    LaunchedEffect(ts.id, scrollMode) { view.mokeScrollMode = scrollMode.ordinal }
+
     LaunchedEffect(ts.id, keyboardMode) {
         controller.keyboardMode = keyboardMode
         controller.restartInput()
@@ -244,6 +252,7 @@ fun TerminalScreen(
                 deviceName = ts.host.displayName,
                 useMosh = ts.host.useMosh,
                 alive = alive,
+                tmuxDetached = remoteTmuxName != null && tmuxAttached == true,
                 latencyMs = latency,
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
@@ -302,7 +311,18 @@ fun TerminalScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(stringResource(R.string.session_ended), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            stringResource(
+                                when {
+                                    remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
+                                    remoteTmuxName == null && tmuxAttached == false ->
+                                        R.string.tmux_attach_unconfirmed
+                                    else -> R.string.session_ended
+                                },
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = onReconnect) {
                                 Icon(Icons.Filled.Refresh, contentDescription = null)
@@ -423,6 +443,7 @@ private fun TerminalTopBar(
     deviceName: String,
     useMosh: Boolean,
     alive: Boolean,
+    tmuxDetached: Boolean = false,
     latencyMs: Int?,
     showLatency: Boolean,
     fontSizeSp: Float,
@@ -475,7 +496,15 @@ private fun TerminalTopBar(
                     // 协议徽标：与连接列表一致，mosh 用强调色高亮标识。
                     ProtocolBadge(useMosh)
                     when {
-                        !alive -> Text("· " + stringResource(R.string.offline), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        !alive -> Text(
+                            "· " + stringResource(
+                                if (tmuxDetached) R.string.tmux_left_short else R.string.offline,
+                            ),
+                            fontFamily = MokeMono,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                         latencyMs != null -> Text(
                             "· $latencyMs ms",
                             fontFamily = MokeMono,

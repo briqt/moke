@@ -5,6 +5,12 @@ import java.util.UUID
 
 enum class AuthType { PASSWORD, KEY }
 
+/**
+ * 会话持久化：连接这台主机时是否自动接入多路复用器。
+ * [NONE] 与历史行为一致（普通登录壳）；[TMUX] 连接即进 tmux（存在则附加、不存在则创建）。
+ */
+enum class SessionPersistence { NONE, TMUX }
+
 /** 连接主机配置。v0.1 持久化在 DataStore（明文 JSON），后续再上安全存储。 */
 data class Host(
     val id: String = UUID.randomUUID().toString(),
@@ -26,6 +32,13 @@ data class Host(
     val group: String = "",
     /** 最近连接时间（epoch ms，0=从未），用于"最近使用"排序。 */
     val lastConnectedAt: Long = 0L,
+    /** 会话持久化方式（默认 NONE=保持历史行为）。 */
+    val persistence: SessionPersistence = SessionPersistence.NONE,
+    /**
+     * 上次在这台主机选择的 tmux 会话名（空=还没选过）。
+     * [SessionPersistence.TMUX] 下：非空则连接时直接按名附加；空则先开普通壳并弹选择器。
+     */
+    val tmuxSessionName: String = "",
 ) {
     val displayName: String get() = label.ifBlank { if (host.isBlank()) "未命名" else "$username@$host" }
 
@@ -54,6 +67,8 @@ data class Host(
         put("loginCommand", loginCommand)
         put("group", group)
         put("lastConnectedAt", lastConnectedAt)
+        put("persistence", persistence.name)
+        put("tmuxSessionName", tmuxSessionName)
     }
 
     companion object {
@@ -73,6 +88,10 @@ data class Host(
             loginCommand = o.optString("loginCommand", ""),
             group = o.optString("group", ""),
             lastConnectedAt = o.optLong("lastConnectedAt", 0L),
+            persistence = runCatching {
+                SessionPersistence.valueOf(o.optString("persistence", "NONE"))
+            }.getOrDefault(SessionPersistence.NONE),
+            tmuxSessionName = o.optString("tmuxSessionName", ""),
         )
     }
 }

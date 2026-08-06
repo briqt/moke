@@ -81,11 +81,9 @@ class TmuxTest {
 
     @Test
     fun `atomically attaches or creates by stable name`() {
-        assertEquals("tmux new-session -A -s 'work'", Tmux.attachOrCreateCommand("work"))
-        assertEquals(
-            "tmux new-session -A -D -s 'it'\\''s'",
-            Tmux.attachOrCreateCommand("it's", detachOthers = true),
-        )
+        // 附加命令的完整形态见 TmuxAttachTest；这里只钉住"按名 attach-or-create"与侧通道命令。
+        assertTrue(Tmux.attachOrCreateCommand("work").contains("new-session -A -s \"\$1\""))
+        assertTrue(Tmux.attachOrCreateCommand("work").endsWith("sh 'work'"))
         assertEquals("tmux detach-client -s '\$7'", Tmux.detachCmd("\$7"))
     }
 

@@ -490,6 +490,17 @@ public final class TerminalEmulator {
         return isDecsetInternalBitSet(DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE) || isDecsetInternalBitSet(DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT);
     }
 
+    /**
+     * If the remote program enabled bracketed paste mode (DECSET 2004) — moke addition.
+     *
+     * Used to tell line editors / REPL-style TUIs (readline, Ink-based CLIs) apart from pagers:
+     * the former enable it to receive pasted text, the latter (less, man) do not. Sending arrow
+     * keys to scroll is right for a pager but walks the command history in a line editor.
+     */
+    public boolean isBracketedPasteMode() {
+        return isDecsetInternalBitSet(DECSET_BIT_BRACKETED_PASTE_MODE);
+    }
+
     private void setDefaultTabStops() {
         for (int i = 0; i < mColumns; i++)
             mTabStop[i] = (i & 7) == 0 && i != 0;

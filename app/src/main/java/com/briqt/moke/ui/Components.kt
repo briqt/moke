@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeShapes
@@ -141,6 +142,50 @@ private fun keyboardModeDesc(m: KeyboardMode): Int = when (m) {
  * 键盘模式选择弹窗：三档带说明的单选。终端页 ⋮ 与设置页共用同一个，
  * 保证"在哪儿改都是同一个开关"。
  */
+/** 全屏程序内滑动语义选择（社区反馈：codex/snow-cli 里滑动被当成翻命令历史）。 */
+@Composable
+fun ScrollModeDialog(
+    current: ScrollMode,
+    onPick: (ScrollMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.scroll_mode), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                ScrollMode.entries.forEach { m ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(MokeShapes.control).clickable { onPick(m) }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = current == m, onClick = { onPick(m) })
+                        Text(
+                            stringResource(scrollModeLabel(m)),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.scroll_mode_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+fun scrollModeLabel(m: ScrollMode): Int = when (m) {
+    ScrollMode.SMART -> R.string.scroll_mode_smart
+    ScrollMode.WHEEL -> R.string.scroll_mode_wheel
+    ScrollMode.ARROWS -> R.string.scroll_mode_arrows
+}
+
 @Composable
 fun KeyboardModeDialog(
     current: KeyboardMode,

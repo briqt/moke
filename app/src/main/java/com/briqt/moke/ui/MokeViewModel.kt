@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
+import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
@@ -18,6 +19,8 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.ScrollMode
+import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
@@ -116,6 +119,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val keyboardMode: StateFlow<KeyboardMode> = settings.keyboardMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.SECURE)
+    val scrollMode: StateFlow<ScrollMode> = settings.scrollMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ScrollMode.SMART)
     val confirmCloseSession: StateFlow<Boolean> = settings.confirmCloseSession
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
@@ -224,7 +229,24 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun save(host: Host) = viewModelScope.launch { store.upsert(host, hosts.value) }
 
-    fun delete(host: Host) = viewModelScope.launch { store.delete(host, hosts.value) }
+    fun delete(host: Host) = viewModelScope.launch {
+        store.delete(host, hosts.value)
+        // 同时忘记指纹：否则服务器换密钥后"删除重建连接"依然连不上（指纹按 host:port 存，与条目无关）。
+        if (hosts.value.none { it.id != host.id && it.host == host.host && it.port == host.port }) {
+            knownHosts.forget(KnownHosts.idOf(host.host, host.port))
+        }
+    }
+
+    private val knownHosts by lazy { KnownHosts(getApplication()) }
+
+    /** 该主机已记录的指纹（null=还没记录）。 */
+    fun savedFingerprint(host: Host): String? =
+        knownHosts.stored(KnownHosts.idOf(host.host, host.port))
+
+    /** 显式忘记指纹：服务器换过密钥时的自救路径（编辑页动作）。 */
+    fun clearFingerprint(host: Host) {
+        knownHosts.forget(KnownHosts.idOf(host.host, host.port))
+    }
 
     /** 复制主机为新条目（label 加「副本」，新 id，清空最近连接时间）。 */
     fun duplicate(host: Host) = viewModelScope.launch {
@@ -308,6 +330,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 busy = false,
                 message = null,
             ).also {
+                // 记下远端真的可用的 TERM，供后续 attach 使用（远端缺 xterm-256color 条目时
+                // tmux 会拒绝启动，这是 rc.3 附加全挂的根因）。
+                discovery.term?.let { t -> ts.negotiatedTerm.value = t }
                 sessions.reconcileTmuxAssociations(
                     ts.host.id,
                     discovery.sessions,
@@ -374,8 +399,44 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     ): String {
         val session = sessions.openTmux(source, target, resolveJump(source.host), detachOthers)
         ensureSessionService()
+        rememberTmuxSession(source.host, target.name)
+        confirmTmuxAttach(session, target.name)
         return session.id
     }
+
+    /** 记住该主机上最后选择的 tmux 会话名：下次连接可直接按名附加，不再打扰用户选。 */
+    private fun rememberTmuxSession(host: Host, name: String) = viewModelScope.launch {
+        val current = hosts.value.firstOrNull { it.id == host.id } ?: host
+        if (current.tmuxSessionName != name) {
+            store.upsert(current.copy(tmuxSessionName = name), hosts.value)
+        }
+    }
+
+    /**
+     * 附加确认：发出 attach 命令 ≠ 附加成功。远端 tmux 缺失或启动失败时包装命令会回落成登录壳，
+     * 此时若仍标成「当前 tmux 会话」，面板与顶栏就在撒谎。用源会话的侧通道数一下客户端：
+     * 明确为 0 且新终端仍存活 → 判定未附上，清除关联。数不出来（null）视为"无法确认"，不动状态。
+     */
+    private fun confirmTmuxAttach(session: TermSession, name: String) =
+        viewModelScope.launch(Dispatchers.IO) {
+            // 用**该会话自己**的侧通道：源会话（临时登录壳）在选定后就被关掉了，拿它去问必然失败。
+            // 传输要等 View 测量后才 start，所以给若干次重试；数不出来一律当"无法确认"，不动状态。
+            repeat(8) {
+                delay(1000)
+                if (!session.alive.value) return@launch
+                val count = Tmux.parseClientCount(
+                    runCatching { session.transport.exec(Tmux.clientsCmd(name)) }.getOrNull()
+                ) ?: return@repeat
+                if (count > 0) {
+                    session.tmuxAttached.value = true
+                } else {
+                    session.tmuxAttached.value = false
+                    session.remoteTmuxId.value = null
+                    session.remoteTmuxName.value = null
+                }
+                return@launch
+            }
+        }
 
     /** 重连时保留协议级启动命令；tmux 专用会话不能退回成普通 shell。 */
     fun reconnectSession(source: TermSession): String {
@@ -397,12 +458,59 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         store.upsert(host.copy(lastConnectedAt = System.currentTimeMillis()), hosts.value)
     }
 
-    /** 新建会话并返回其 id（UI 据此导航到终端页），并记录最近连接。解析跳板机（避免自引用）。 */
+    /**
+     * 新建会话并返回其 id（UI 据此导航到终端页），并记录最近连接。解析跳板机（避免自引用）。
+     *
+     * 会话持久化=tmux 时自适应两条路：
+     * - 已记住会话名 → 连接即按名附加（`new-session -A` 原子"存在则附加、否则创建"），零额外往返。
+     * - 还没记住 → 先开普通登录壳，连上后侧通道探测，再弹选择器。**不**在连接前另开一条探测连接：
+     *   那会多一次握手，还会让探测连接成为 TOFU 的首次信任（指纹静默入库）。
+     */
     fun openSession(host: Host): String {
         touchHost(host)
-        val id = sessions.open(host, resolveJump(host)).id
+        val remembered = host.tmuxSessionName
+            .takeIf { host.persistence == SessionPersistence.TMUX && it.isNotBlank() }
+        val ts = sessions.open(
+            host = host,
+            jumpHost = resolveJump(host),
+            remoteTmuxName = remembered,
+            startupCommand = remembered?.let { Tmux.attachOrCreateCommand(it) },
+        )
         ensureSessionService()
-        return id
+        if (remembered != null) {
+            confirmTmuxAttach(ts, remembered)
+        } else if (host.persistence == SessionPersistence.TMUX) {
+            requestTmuxPickerWhenReady(ts)
+        }
+        return ts.id
+    }
+
+    /** 连接就绪后探测一次；确实装了 tmux 才弹选择器（未安装/失败都不打扰）。 */
+    private fun requestTmuxPickerWhenReady(ts: TermSession) = viewModelScope.launch {
+        refreshTmux(ts).join()
+        if (ts.alive.value && ts.tmuxState.value.phase == TmuxPhase.READY) {
+            _tmuxPicker.value = ts.id
+        }
+    }
+
+    /** 连接时待弹选择器的会话 id（null=不弹）。 */
+    private val _tmuxPicker = MutableStateFlow<String?>(null)
+    val tmuxPicker: StateFlow<String?> = _tmuxPicker.asStateFlow()
+
+    fun dismissTmuxPicker() { _tmuxPicker.value = null }
+
+    /**
+     * 从选择器选定一个会话名（已存在或新建都走同一条路——`new-session -A` 原子处理）。
+     * 用独立连接附加，并关掉刚才那条临时登录壳，避免一台主机上挂两条连接。
+     */
+    fun pickTmuxSession(sourceId: String, name: String): String? {
+        val source = sessions.get(sourceId) ?: return null
+        _tmuxPicker.value = null
+        val target = source.tmuxState.value.sessions.firstOrNull { it.name == name }
+            ?: TmuxSession(id = "", name = name, windows = 0, clients = 0, created = 0L)
+        val newId = openTmuxSession(source, target)
+        if (newId != sourceId) sessions.close(sourceId)
+        return newId
     }
 
     /** 复制会话：用同一主机再开一个独立连接，沿用来源的标题/前缀并加不重复标记。源不存在时返回 null。 */
@@ -454,6 +562,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setDynamicColor(on: Boolean) = viewModelScope.launch { settings.setDynamicColor(on) }
 
     fun setKeyboardMode(m: KeyboardMode) = viewModelScope.launch { settings.setKeyboardMode(m) }
+    fun setScrollMode(m: ScrollMode) = viewModelScope.launch { settings.setScrollMode(m) }
 
     fun setConfirmCloseSession(on: Boolean) = viewModelScope.launch { settings.setConfirmCloseSession(on) }
 

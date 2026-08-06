@@ -13,6 +13,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
+import com.briqt.moke.terminal.Tmux
 
 /** 底部导航分区。 */
 enum class HomeTab { Connections, Sessions, Settings }
@@ -66,6 +67,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val keyboardMode by vm.keyboardMode.collectAsState()
     val confirmClose by vm.confirmCloseSession.collectAsState()
     val keepScreenOn by vm.keepScreenOn.collectAsState()
+    val tmuxPickerFor by vm.tmuxPicker.collectAsState()
+    val scrollMode by vm.scrollMode.collectAsState()
     val updateTag by vm.updateTag.collectAsState()
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
@@ -126,6 +129,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 screen = Screen.Home
             },
             onCancel = { screen = Screen.Home },
+            savedFingerprint = s.host?.let { vm.savedFingerprint(it) },
+            onClearFingerprint = { h, p -> vm.clearFingerprint(Host(host = h, port = p)) },
         )
 
         is Screen.Terminal -> {
@@ -149,6 +154,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         schemeId = effectiveSchemeId,
                         extraKeysVisible = extraKeysVisible,
                         keyboardMode = keyboardMode,
+                        scrollMode = scrollMode,
                         confirmClose = confirmClose,
                         keepScreenOn = keepScreenOn,
                         resolveTypeface = vm.fonts::resolveTypeface,
@@ -177,6 +183,18 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                             screen = Screen.Terminal(vm.openTmuxSession(ts, target, detachOthers = true))
                         },
                     )
+                    // 连接即选会话：主机「会话持久化=tmux」且还没记住选择时，连上后弹一次。
+                    if (tmuxPickerFor == ts.id) {
+                        val tmuxState by ts.tmuxState.collectAsState()
+                        TmuxPickerDialog(
+                            sessions = tmuxState.sessions,
+                            defaultName = Tmux.defaultSessionName(ts.host.displayName),
+                            onPick = { name ->
+                                vm.pickTmuxSession(ts.id, name)?.let { screen = Screen.Terminal(it) }
+                            },
+                            onPlainShell = { vm.dismissTmuxPicker() },
+                        )
+                    }
                 }
             }
         }
@@ -235,9 +253,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
         is Screen.TerminalSettings -> TerminalSettingsScreen(
             keyboardMode = keyboardMode,
+            scrollMode = scrollMode,
             keepScreenOn = keepScreenOn,
             confirmClose = confirmClose,
             onKeyboardMode = { vm.setKeyboardMode(it) },
+            onScrollMode = { vm.setScrollMode(it) },
             onKeepScreenOn = { vm.setKeepScreenOn(it) },
             onConfirmClose = { vm.setConfirmCloseSession(it) },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
