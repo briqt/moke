@@ -255,6 +255,9 @@
     <string name="files_goto_hint">/var/log</string>
     <string name="files_from_terminal">回到终端当前目录</string>
     <string name="files_upload_here">上传到此目录</string>
+    <string name="files_overwrite_title">覆盖服务器上的文件？</string>
+    <string name="files_overwrite_message">这个目录里已经有同名文件，上传会替换它们：\n\n%1$s</string>
+    <string name="files_overwrite_confirm">覆盖</string>
     <string name="files_download">下载</string>
     <string name="files_copy_path">复制路径</string>
     <string name="files_send_to_terminal">把路径发到终端</string>

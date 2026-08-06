@@ -579,11 +579,41 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 记住下载目录（已在 UI 侧取得持久化读写授权）。 */
     fun setDownloadTree(uri: String) = viewModelScope.launch { settings.setDownloadTreeUri(uri) }
 
-    fun uploadHere(uris: List<android.net.Uri>) {
+    /** 待确认覆盖的上传（非空=显示确认弹窗）。 */
+    private val _uploadConflict = MutableStateFlow<UploadConflict?>(null)
+    val uploadConflict: StateFlow<UploadConflict?> = _uploadConflict.asStateFlow()
+
+    /** 选好文件后先查远端是否已有同名：有就先问，没有就直接传。 */
+    fun uploadHere(uris: List<android.net.Uri>) = viewModelScope.launch {
+        if (filesState.value.host == null || filesState.value.path.isBlank()) return@launch
+        val names = uris.map { displayNameOfUri(it) }
+        val clash = filesController.existingNames(names)
+        if (clash.isEmpty()) startUpload(uris) else _uploadConflict.value = UploadConflict(uris, clash)
+    }
+
+    fun confirmUploadOverwrite() {
+        val pending = _uploadConflict.value ?: return
+        _uploadConflict.value = null
+        startUpload(pending.uris)
+    }
+
+    fun dismissUploadConflict() { _uploadConflict.value = null }
+
+    private fun startUpload(uris: List<android.net.Uri>) {
         val host = filesState.value.host ?: return
         val dir = filesState.value.path.ifBlank { return }
         transfers.enqueueUpload(host, uris, dir)
         ensureTransferService()
+    }
+
+    /** SAF URI 的显示名（拿不到就退回最后一段路径，与传输层同一口径）。 */
+    private fun displayNameOfUri(uri: android.net.Uri): String {
+        val ctx = getApplication<Application>()
+        val fromCursor = runCatching {
+            ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
+        }.getOrNull()
+        return fromCursor ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
     }
 
     fun download(entry: com.briqt.moke.terminal.sftp.RemoteEntry, treeUri: android.net.Uri) {

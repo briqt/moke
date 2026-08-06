@@ -288,6 +288,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             val sort by vm.filesSort.collectAsState()
             val showHidden by vm.filesShowHidden.collectAsState()
             val treeUri by vm.downloadTreeUri.collectAsState()
+            val uploadConflict by vm.uploadConflict.collectAsState()
             // 下载目录只问一次：拿到后持久化读写授权，之后静默落盘。
             var pendingDownload by remember { mutableStateOf<com.briqt.moke.terminal.sftp.RemoteEntry?>(null) }
             val context = androidx.compose.ui.platform.LocalContext.current
@@ -321,6 +322,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 onSort = { vm.setFilesSort(it) },
                 onShowHidden = { vm.setFilesShowHidden(it) },
                 onUpload = { vm.uploadHere(it) },
+                overwrite = uploadConflict,
+                onOverwriteConfirm = { vm.confirmUploadOverwrite() },
+                onOverwriteCancel = { vm.dismissUploadConflict() },
                 onDownload = { entry ->
                     val saved = treeUri.takeIf { it.isNotBlank() }
                     if (saved != null) {

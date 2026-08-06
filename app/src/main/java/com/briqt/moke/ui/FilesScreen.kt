@@ -94,6 +94,9 @@ fun FilesScreen(
     onSort: (FilesSort) -> Unit,
     onShowHidden: (Boolean) -> Unit,
     onUpload: (List<Uri>) -> Unit,
+    overwrite: UploadConflict?,
+    onOverwriteConfirm: () -> Unit,
+    onOverwriteCancel: () -> Unit,
     onDownload: (RemoteEntry) -> Unit,
     onPickDownloadDir: () -> Unit,
     onSendToTerminal: ((String) -> Unit)?,
@@ -303,6 +306,26 @@ fun FilesScreen(
             initial = state.path,
             onConfirm = { gotoOpen = false; if (it.isNotBlank()) onGoto(it) },
             onDismiss = { gotoOpen = false },
+        )
+    }
+
+    // 覆盖远端文件必须问一次：被覆盖的是服务器上的东西，误操作代价比本地大。
+    overwrite?.let { conflict ->
+        AlertDialog(
+            onDismissRequest = onOverwriteCancel,
+            title = { Text(stringResource(R.string.files_overwrite_title)) },
+            text = {
+                Text(
+                    stringResource(R.string.files_overwrite_message, conflict.names.joinToString("\n")),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onOverwriteConfirm) {
+                    Text(stringResource(R.string.files_overwrite_confirm), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = onOverwriteCancel) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 

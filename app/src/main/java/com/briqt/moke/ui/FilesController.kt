@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 一次会覆盖远端文件的上传：[names] 是已存在的同名文件，确认后才真正入队。 */
+data class UploadConflict(val uris: List<android.net.Uri>, val names: List<String>)
+
 /** 文件页的一屏状态。[terminalPath] 非空表示"终端当前目录"可用（用于 ⋮ 里的回跳）。 */
 data class FilesUiState(
     val host: Host? = null,
@@ -115,6 +118,23 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
     }
 
     fun clearError() = _state.update { it.copy(error = "") }
+
+    /**
+     * 当前目录下这些名字里，哪些远端已经有了。
+     *
+     * 上传是**覆盖**语义（SFTP 写入，和 scp 一样），而被覆盖的是服务器上的文件——比本地误覆盖
+     * 代价大得多，所以只要有一个撞名就得先问过用户。查不到会话时返回空（让上传照常进行并在
+     * 传输失败里报错，而不是因为一次探测失败就挡住用户）。
+     */
+    suspend fun existingNames(names: List<String>): List<String> {
+        val s = session ?: return emptyList()
+        val dir = _state.value.path.ifBlank { return emptyList() }
+        return withContext(Dispatchers.IO) {
+            names.filter { name ->
+                runCatching { s.stat(RemotePath.join(dir, name)) }.getOrNull() != null
+            }
+        }
+    }
 
     fun close() {
         job?.cancel()

@@ -259,6 +259,9 @@
     <string name="files_goto_hint">/var/log</string>
     <string name="files_from_terminal">Terminal\'s current folder</string>
     <string name="files_upload_here">Upload here</string>
+    <string name="files_overwrite_title">Overwrite files on the server?</string>
+    <string name="files_overwrite_message">These files already exist in this folder and will be replaced:\n\n%1$s</string>
+    <string name="files_overwrite_confirm">Overwrite</string>
     <string name="files_download">Download</string>
     <string name="files_copy_path">Copy path</string>
     <string name="files_send_to_terminal">Send path to terminal</string>
