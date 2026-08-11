@@ -35,6 +35,8 @@ class TermSession(
     val startupCommand: String?,
     /** 原生动态标题（转义序列设置，缺省用连接名）。展示请用 [displayTitle]。 */
     val title: StateFlow<String>,
+    /** 标题基座（`user@host` 或 tmux 会话名）：动态标题缺失/被清空时回落到它，保证标题行永不空白。 */
+    val baseTitle: String,
     /** 用户自定义标题：非空则优先级最高，完全覆盖动态标题。 */
     val customTitle: MutableStateFlow<String?>,
     private val displayTitleState: MutableStateFlow<String>,
@@ -88,10 +90,17 @@ class TermSession(
         // 协议已由徽标标识，展示时去掉它。防御性地允许重复与多余空白/点。
         private val MOSH_PREFIX = Regex("^(?:\\[mosh][\\s.·]*)+", RegexOption.IGNORE_CASE)
 
-        /** 组合标题本体；复制标记由 SessionManager 根据实时冲突另行派生，不写进标题本体。 */
-        fun composeTitle(useMosh: Boolean, raw: String, custom: String?): String {
+        /**
+         * 组合标题本体；复制标记由 SessionManager 根据实时冲突另行派生，不写进标题本体。
+         *
+         * [base] 是兜底：mosh 会给窗口标题加 `[mosh] ` 前缀，而远端程序退出时常发一条**空 OSC**
+         * 重置标题（mosh 对任何 OSC 都置 title_initialized，于是把 `[mosh] ` 单独发过来）——
+         * 剥掉前缀后就只剩空串，标题行会整条空白。剥完为空即回落基座。
+         */
+        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, base: String): String {
             custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-            return if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
+            val stripped = if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
+            return stripped.trim().ifEmpty { base }
         }
 
         fun disambiguateTitle(base: String, custom: String?, mark: String?, hasCollision: Boolean): String =
@@ -134,16 +143,20 @@ class SessionManager(context: Context) {
         val initialCustom = carryFrom?.customTitle?.value
         val mark = if (carryFrom != null) nextCopyMark(host.id) else null
 
+        // 基座 = 会话固有身份（tmux 会话名或 user@host）：动态标题被远端清空时回落到它。
+        val titleBase = initialTitle ?: baseTitle
         val title = MutableStateFlow(initialTitle ?: carryFrom?.title?.value ?: baseTitle)
         val customTitle = MutableStateFlow(initialCustom)
-        val initialDisplay = TermSession.composeTitle(host.useMosh, title.value, initialCustom)
+        val initialDisplay = TermSession.composeTitle(host.useMosh, title.value, initialCustom, titleBase)
         val displayTitle = MutableStateFlow(initialDisplay)
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
         val controller = TerminalController(
             context = appContext,
             onFinished = { alive.value = false; latency.value = null },
-            onTitle = { t -> if (!t.isNullOrBlank()) title.value = t },
+            // 空标题（远端程序退出时常发的空 OSC）当作「清除」处理，回落基座；
+            // 早期实现直接忽略，结果标题一直挂着上一个程序的名字。
+            onTitle = { t -> title.value = if (t.isNullOrBlank()) titleBase else t },
         )
         // 传输选择：偏好 mosh 的主机走 MoshTransport（SSH 引导 + native mosh-client 子进程 PTY），
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
@@ -168,6 +181,7 @@ class SessionManager(context: Context) {
             jumpHost = jumpHost,
             startupCommand = startupCommand,
             title = title.asStateFlow(),
+            baseTitle = titleBase,
             customTitle = customTitle,
             displayTitleState = displayTitle,
             alive = alive.asStateFlow(),
@@ -227,7 +241,7 @@ class SessionManager(context: Context) {
     private fun refreshDisplayTitles() {
         val list = _sessions.value
         val baseById = list.associate { ts ->
-            ts.id to TermSession.composeTitle(ts.host.useMosh, ts.title.value, ts.customTitle.value)
+            ts.id to TermSession.composeTitle(ts.host.useMosh, ts.title.value, ts.customTitle.value, ts.baseTitle)
         }
         val collisionCount = list.groupingBy { ts ->
             ts.host.id to baseById.getValue(ts.id)

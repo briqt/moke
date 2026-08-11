@@ -33,6 +33,9 @@ class TerminalController(
 
     @Volatile var ctrlActive = false
     @Volatile var altActive = false
+    /** 修饰键是否处于锁定态：锁定时不被单次输入消费（连发 Ctrl+C / 连走光标）。 */
+    @Volatile var ctrlLocked = false
+    @Volatile var altLocked = false
     /** 粘滞修饰键被一次输入消费后回调（让 UI 熄灭 Ctrl/Alt 高亮）——实现 one-shot「用一次即取消」。 */
     var onModifiersConsumed: (() -> Unit)? = null
 
@@ -130,9 +133,11 @@ class TerminalController(
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean {
         // one-shot 粘滞修饰：本次按键的 ctrl/alt 已在 TerminalView 内读入本地变量并会照常应用，
         // 这里把吸附状态复位（下次按键不再带修饰）并通知 UI 熄灭高亮。返回 false 不拦截本次输入。
-        if (ctrlActive || altActive) {
-            ctrlActive = false
-            altActive = false
+        // 锁定态不复位——那正是"按住不放"的语义。
+        val consumable = (ctrlActive && !ctrlLocked) || (altActive && !altLocked)
+        if (consumable) {
+            if (!ctrlLocked) ctrlActive = false
+            if (!altLocked) altActive = false
             onModifiersConsumed?.invoke()
         }
         return false

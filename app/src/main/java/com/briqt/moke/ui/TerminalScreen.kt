@@ -63,6 +63,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ScrollMode
+import com.briqt.moke.terminal.KeyId
+import com.briqt.moke.terminal.ModKind
+import com.briqt.moke.terminal.ModState
+import com.briqt.moke.terminal.Modifiers
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
@@ -146,8 +150,10 @@ fun TerminalScreen(
     var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
     // 进入会话后探测远端 tmux；SSH 复用现有连接，mosh 按需走独立 SSH 控制连接。
     LaunchedEffect(ts.id) { onTmuxRefresh() }
-    var ctrlOn by remember(ts.id) { mutableStateOf(false) }
-    var altOn by remember(ts.id) { mutableStateOf(false) }
+    // 修饰键三态（一次性/锁定/关）：附加键与面板共用一份状态，并同步给 controller 供 IME 输入使用。
+    var mods by remember(ts.id) { mutableStateOf(Modifiers()) }
+    // 全键盘面板是否展开（浮在终端之上，不挤压终端 → 不触发远端 resize）。
+    var panelOpen by remember(ts.id) { mutableStateOf(false) }
 
     var showComposer by remember(ts.id) { mutableStateOf(false) }
     // 顶栏 ⋮ 里的「修改标题」弹窗开关。
@@ -175,8 +181,8 @@ fun TerminalScreen(
         view.mokeScrollMode = scrollMode.ordinal
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
-        // one-shot 粘滞修饰被消费后，熄灭 Ctrl/Alt 高亮（用一次即取消）。
-        controller.onModifiersConsumed = { ctrlOn = false; altOn = false }
+        // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
+        controller.onModifiersConsumed = { mods = mods.consumeOnce() }
         // 终端底色必须由 View 自己铺：vendored TerminalRenderer 只在"单元格背景 ≠ 调色板默认背景"时
         // 才画矩形，默认背景那片区域完全不画 → 露出的是 View/窗口背景。此前应用恒深色才碰巧看着对，
         // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
@@ -305,6 +311,18 @@ fun TerminalScreen(
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
                     )
                 }
+                // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
+                // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
+                if (panelOpen && extraKeysVisible && !showComposer) {
+                    KeyboardPanel(
+                        sections = KEY_SECTIONS,
+                        mods = mods,
+                        onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                        onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                        onDismiss = { panelOpen = false },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             }
 
             if (!alive) {
@@ -363,12 +381,16 @@ fun TerminalScreen(
                 )
                 extraKeysVisible -> ExtraKeys(
                     rows = DEFAULT_EXTRA_KEYS,
-                    ctrlOn = ctrlOn,
-                    altOn = altOn,
-                    onSeq = { seq -> ts.session.write(seq) },
-                    onToggleCtrl = { ctrlOn = !ctrlOn; controller.ctrlActive = ctrlOn },
-                    onToggleAlt = { altOn = !altOn; controller.altActive = altOn },
-                    onAction = { id -> if (id == "composer") showComposer = true },
+                    mods = mods,
+                    panelOpen = panelOpen,
+                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                    onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                    onAction = { id ->
+                        when (id) {
+                            ACTION_COMPOSER -> showComposer = true
+                            ACTION_PANEL -> panelOpen = !panelOpen
+                        }
+                    },
                 )
             }
         }
@@ -422,6 +444,33 @@ fun TerminalScreen(
             onNew = { onTmuxNew(it) },
         )
     }
+}
+
+/**
+ * 按当前修饰把一个附加键编码后写入会话，并消费一次性修饰（锁定态保留）。
+ * 字节一律经 `KeySeq` 生成——这样 Ctrl+← / Shift+Tab 这类组合才成立。
+ */
+private fun sendKey(ts: TermSession, controller: TerminalController, mods: Modifiers, key: KeyId): Modifiers {
+    val bytes = mods.encode(key)
+    if (bytes.isNotEmpty()) ts.session.write(bytes)
+    // 附加键消费掉一次性修饰后必须同步 controller，否则输入法打的下一个字母会被重复加上 Ctrl。
+    return mods.consumeOnce().also { syncMods(controller, it) }
+}
+
+/** 切换修饰键三态，并把 Ctrl/Alt 同步给 controller（输入法打字那条路要用）。 */
+private fun toggleMod(controller: TerminalController, mods: Modifiers, kind: ModKind): Modifiers =
+    mods.toggle(kind).also { syncMods(controller, it) }
+
+/**
+ * 把修饰状态下发给 [TerminalController]（TerminalView 在处理输入法/硬件按键时读它）。
+ * Shift 不下发：那条路只影响硬件键盘按 kcm 取字，软键盘的大小写归输入法自己管，
+ * moke 的 Shift 只作用于附加键与宏（Shift+Tab、Shift+方向）。
+ */
+private fun syncMods(controller: TerminalController, mods: Modifiers) {
+    controller.ctrlActive = mods.ctrlOn
+    controller.altActive = mods.altOn
+    controller.ctrlLocked = mods.ctrl == ModState.Locked
+    controller.altLocked = mods.alt == ModState.Locked
 }
 
 /** 配色方案 id → 终端底色（ARGB int）。方案里存的是 #rrggbb 字符串，解析失败兜底纯黑。 */

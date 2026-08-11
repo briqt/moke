@@ -11,9 +11,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -37,55 +42,151 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
+import com.briqt.moke.terminal.KeyId
+import com.briqt.moke.terminal.ModKind
+import com.briqt.moke.terminal.ModState
+import com.briqt.moke.terminal.Modifiers
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
+import kotlinx.coroutines.launch
 
-/** 附加键：发送字节序列 / 粘滞修饰键(Ctrl·Alt) / 触发动作。 */
+/** 附加键：普通按键（字节由 `KeySeq` 按当前修饰统一编码）/ 修饰键 / 动作键。 */
 sealed interface ExtraKey {
     val label: String
 
-    /** 发送固定字节序列（转义键、箭头、翻页等）。 */
-    data class Seq(override val label: String, val bytes: String) : ExtraKey
-    /** 粘滞修饰键；[ctrl]=true 为 Ctrl，false 为 Alt。 */
-    data class Mod(override val label: String, val ctrl: Boolean) : ExtraKey
+    /** 普通按键：只描述"按了哪个键"，序列交给编码器，故能与 Ctrl/Alt/Shift 组合。 */
+    data class Key(override val label: String, val key: KeyId) : ExtraKey
+    /** 修饰键（三态：一次性 / 锁定 / 关）。 */
+    data class Mod(override val label: String, val kind: ModKind) : ExtraKey
     /** 动作键（[id] 交给上层处理）。 */
     data class Action(override val label: String, val id: String) : ExtraKey
 }
 
+/** 动作键 id：文本段入口、展开全键盘面板。 */
+const val ACTION_COMPOSER = "composer"
+const val ACTION_PANEL = "panel"
+
 /**
- * 默认双排附加键（参考 termux 两排布局 + 倒 T 方向键）。均匀铺满宽度、不横向滚动。
- * 每排 7 键；右端两格放「文本」段入口（行1）与回车（行2），故终端顶栏右上角留空。
+ * 常驻双排附加键（参考 termux 两排布局 + 倒 T 方向键）。均匀铺满宽度、不横向滚动。
+ * 行 1 第 2 个键是「更多」——展开全键盘面板的入口；原先那个 `/` 已并入面板的符号页。
  */
 val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
     listOf(
-        ExtraKey.Seq("ESC", ""),
-        ExtraKey.Seq("/", "/"),
-        ExtraKey.Seq("HOME","[H"),
-        ExtraKey.Seq("↑", "[A"),
-        ExtraKey.Seq("END", "[F"),
-        ExtraKey.Seq("PgUp", "[5~"),
-        ExtraKey.Action("文本", "composer"),
+        ExtraKey.Key("ESC", KeyId.Esc),
+        ExtraKey.Action("更多", ACTION_PANEL),
+        ExtraKey.Key("HOME", KeyId.Home),
+        ExtraKey.Key("↑", KeyId.Up),
+        ExtraKey.Key("END", KeyId.End),
+        ExtraKey.Key("PgUp", KeyId.PageUp),
+        ExtraKey.Action("文本", ACTION_COMPOSER),
     ),
     listOf(
-        ExtraKey.Seq("TAB", "\t"),
-        ExtraKey.Mod("CTRL", ctrl = true),
-        ExtraKey.Seq("←", "[D"),
-        ExtraKey.Seq("↓", "[B"),
-        ExtraKey.Seq("→", "[C"),
-        ExtraKey.Seq("PgDn", "[6~"),
+        ExtraKey.Key("TAB", KeyId.Tab),
+        ExtraKey.Mod("CTRL", ModKind.Ctrl),
+        ExtraKey.Key("←", KeyId.Left),
+        ExtraKey.Key("↓", KeyId.Down),
+        ExtraKey.Key("→", KeyId.Right),
+        ExtraKey.Key("PgDn", KeyId.PageDown),
         // 回车用文字 "Enter"：↵ 字形在等宽字体里偏小且视觉不居中，文字标签与 TAB/HOME 等一致、清晰居中。
-        ExtraKey.Seq("Enter", "\r"),
+        ExtraKey.Key("Enter", KeyId.Enter),
+    ),
+)
+
+/** 全键盘面板的一个分段。 */
+data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>)
+
+private fun ch(c: String) = ExtraKey.Key(c, KeyId.Chars(c))
+private fun macro(label: String, bytes: String) = ExtraKey.Key(label, KeyId.Macro(bytes))
+
+/** Ctrl+字母的字节（宏用；标签沿用终端惯例的 `^X` 写法）。 */
+private fun ctrlOf(c: Char) = ((c.uppercaseChar().code - 64)).toChar().toString()
+
+/**
+ * 展开面板的四个分段：导航编辑 / 功能键 / 符号 / 快捷。
+ * 符号页只收手机输入法上难打的那批（`| \ ~ ^ {} [] <>` 等），常见标点不占位。
+ */
+val KEY_SECTIONS: List<KeySection> = listOf(
+    KeySection(
+        R.string.keys_section_nav,
+        listOf(
+            listOf(
+                ExtraKey.Mod("SHIFT", ModKind.Shift),
+                ExtraKey.Mod("CTRL", ModKind.Ctrl),
+                ExtraKey.Mod("ALT", ModKind.Alt),
+                ExtraKey.Key("ESC", KeyId.Esc),
+                ExtraKey.Key("TAB", KeyId.Tab),
+                ExtraKey.Key("Enter", KeyId.Enter),
+                ExtraKey.Key("⌫", KeyId.Backspace),
+            ),
+            listOf(
+                ExtraKey.Key("INS", KeyId.Insert),
+                ExtraKey.Key("DEL", KeyId.Delete),
+                ExtraKey.Key("HOME", KeyId.Home),
+                ExtraKey.Key("END", KeyId.End),
+                ExtraKey.Key("PgUp", KeyId.PageUp),
+                ExtraKey.Key("PgDn", KeyId.PageDown),
+                ExtraKey.Key("↑", KeyId.Up),
+            ),
+            listOf(
+                ExtraKey.Key("⇧TAB", KeyId.Macro("\u001b[Z")),
+                // 标签不用 ⌥：等宽字体里没有该字形，真机上会渲染成豆腐块。
+                ExtraKey.Key("ALT↵", KeyId.Macro("\u001b\r")),
+                ch("/"),
+                ch("-"),
+                ExtraKey.Key("←", KeyId.Left),
+                ExtraKey.Key("↓", KeyId.Down),
+                ExtraKey.Key("→", KeyId.Right),
+            ),
+        ),
+    ),
+    KeySection(
+        R.string.keys_section_fn,
+        listOf(
+            (1..6).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
+            (7..12).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
+        ),
+    ),
+    KeySection(
+        R.string.keys_section_symbols,
+        listOf(
+            listOf(ch("|"), ch("\\"), ch("/"), ch("~"), ch("`"), ch("^"), ch("=")),
+            listOf(ch("("), ch(")"), ch("["), ch("]"), ch("{"), ch("}"), ch("<")),
+            listOf(ch(">"), ch("_"), ch("+"), ch("*"), ch("&"), ch("$"), ch("#")),
+        ),
+    ),
+    KeySection(
+        R.string.keys_section_macros,
+        listOf(
+            listOf(
+                macro("^C", ctrlOf('c')),
+                macro("^D", ctrlOf('d')),
+                macro("^Z", ctrlOf('z')),
+                macro("^L", ctrlOf('l')),
+                macro("^R", ctrlOf('r')),
+                macro("^A", ctrlOf('a')),
+                macro("^E", ctrlOf('e')),
+            ),
+            listOf(
+                macro("^U", ctrlOf('u')),
+                macro("^K", ctrlOf('k')),
+                macro("^W", ctrlOf('w')),
+                macro("^Y", ctrlOf('y')),
+                macro("^P", ctrlOf('p')),
+                macro("^N", ctrlOf('n')),
+                // tmux 默认前缀：面板里直接给一个，省得先按 CTRL 再切输入法打 b。
+                macro("tmux ^B", ctrlOf('b')),
+            ),
+        ),
     ),
 )
 
 @Composable
 fun ExtraKeys(
     rows: List<List<ExtraKey>>,
-    ctrlOn: Boolean,
-    altOn: Boolean,
-    onSeq: (String) -> Unit,
-    onToggleCtrl: () -> Unit,
-    onToggleAlt: () -> Unit,
+    mods: Modifiers,
+    panelOpen: Boolean = false,
+    onKey: (KeyId) -> Unit,
+    onToggleMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
@@ -94,25 +195,103 @@ fun ExtraKeys(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             rows.forEach { row ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    row.forEach { key ->
-                        val active = key is ExtraKey.Mod && ((key.ctrl && ctrlOn) || (!key.ctrl && altOn))
-                        // 「文本段」入口用图标（与符号键风格一致、无需 i18n）；本地化文案作无障碍描述。
-                        val isComposer = key is ExtraKey.Action && key.id == "composer"
-                        val label = if (isComposer) stringResource(R.string.key_text) else key.label
-                        KeyCap(
-                            label = label,
-                            icon = if (isComposer) Icons.Filled.EditNote else null,
-                            active = active,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                when (key) {
-                                    is ExtraKey.Seq -> onSeq(key.bytes)
-                                    is ExtraKey.Mod -> if (key.ctrl) onToggleCtrl() else onToggleAlt()
-                                    is ExtraKey.Action -> onAction(key.id)
-                                }
+                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onAction)
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyRow(
+    row: List<ExtraKey>,
+    mods: Modifiers,
+    panelOpen: Boolean,
+    onKey: (KeyId) -> Unit,
+    onToggleMod: (ModKind) -> Unit,
+    onAction: (String) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        row.forEach { key ->
+            val state = if (key is ExtraKey.Mod) mods.state(key.kind) else ModState.Off
+            // 「文本段」与「更多」用图标（与符号键风格一致、无需 i18n）；本地化文案作无障碍描述。
+            val isComposer = key is ExtraKey.Action && key.id == ACTION_COMPOSER
+            val isPanel = key is ExtraKey.Action && key.id == ACTION_PANEL
+            val label = when {
+                isComposer -> stringResource(R.string.key_text)
+                isPanel -> stringResource(R.string.key_more)
+                else -> key.label
+            }
+            KeyCap(
+                label = label,
+                icon = when {
+                    isComposer -> Icons.Filled.EditNote
+                    isPanel -> if (panelOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp
+                    else -> null
+                },
+                // 一次性修饰用主色实心，锁定态用更强的色块区分——否则分不清"这次有效"和"一直有效"。
+                active = state.active || (isPanel && panelOpen),
+                locked = state == ModState.Locked,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    when (key) {
+                        is ExtraKey.Key -> onKey(key.key)
+                        is ExtraKey.Mod -> onToggleMod(key.kind)
+                        is ExtraKey.Action -> onAction(key.id)
+                    }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 展开的全键盘面板：**浮在终端之上**（调用方把它放在终端 Box 里），不挤压终端——
+ * 挤压会改行数触发远端 SIGWINCH，全屏 TUI 会跟着重绘抖动。
+ * 分段可点标签切换，也可左右滑动；常驻两排仍在下方原位不动。
+ */
+@Composable
+fun KeyboardPanel(
+    sections: List<KeySection>,
+    mods: Modifiers,
+    onKey: (KeyId) -> Unit,
+    onToggleMod: (ModKind) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pager = rememberPagerState(pageCount = { sections.size })
+    val scope = rememberCoroutineScope()
+    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                sections.forEachIndexed { index, section ->
+                    val selected = pager.currentPage == index
+                    TextButton(onClick = { scope.launch { pager.animateScrollToPage(index) } }) {
+                        Text(
+                            stringResource(section.titleRes),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                            maxLines = 1,
                         )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = stringResource(R.string.keys_panel_collapse),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            HorizontalPager(state = pager) { page ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                    sections[page].rows.forEach { row ->
+                        KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onAction = {})
                     }
                 }
             }
@@ -121,18 +300,33 @@ fun ExtraKeys(
 }
 
 @Composable
-private fun KeyCap(label: String, active: Boolean, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun KeyCap(
+    label: String,
+    active: Boolean,
+    locked: Boolean = false,
+    icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     // 近乎平直的键帽（微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
     Surface(
         onClick = onClick,
         modifier = modifier.height(34.dp),
         shape = MokeShapes.keycap,
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        color = when {
+            locked -> MaterialTheme.colorScheme.tertiary
+            active -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        contentColor = when {
+            locked -> MaterialTheme.colorScheme.onTertiary
+            active -> MaterialTheme.colorScheme.onPrimary
+            else -> MaterialTheme.colorScheme.onSurface
+        },
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (icon != null) {
-                // 图标键（如文本段入口）：label 作无障碍描述，视觉用图标。
+                // 图标键（文本段 / 更多）：label 作无障碍描述，视觉用图标。
                 Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
             } else {
                 // 方向键单字符符号（↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签（含 Enter）保持 13sp。
