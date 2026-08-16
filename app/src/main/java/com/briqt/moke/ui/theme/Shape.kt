@@ -11,6 +11,9 @@ object MokeShapes {
     /** 附加键键帽：刻意近乎平直，贴合终端观感。 */
     val keycap = RoundedCornerShape(3.dp)
 
+    /** 全键盘面板：浮在终端之上的一块面，只圆上边两角（下边贴着常驻附加键行）。 */
+    val keyPanel = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+
     /** 极小圆角：色块、下拉项裁剪等。 */
     val xs = RoundedCornerShape(4.dp)
 

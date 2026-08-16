@@ -1,5 +1,6 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,8 +12,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
@@ -30,14 +33,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,7 +53,6 @@ import com.briqt.moke.terminal.ModState
 import com.briqt.moke.terminal.Modifiers
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
-import kotlinx.coroutines.launch
 
 /** 附加键：普通按键（字节由 `KeySeq` 按当前修饰统一编码）/ 修饰键 / 动作键。 */
 sealed interface ExtraKey {
@@ -66,76 +70,73 @@ sealed interface ExtraKey {
 const val ACTION_COMPOSER = "composer"
 const val ACTION_PANEL = "panel"
 
+/*
+ * 收录标准（rc.3 重定）：**只放软键盘给不了的键**。
+ *
+ * 字母、数字、标点（含 `| ~ \ {} <>`）输入法都打得出来，摆在这里等于用最贵的屏幕位置重复一遍
+ * 已有的功能。只有实体全键盘才有的是：修饰键、Esc/Tab、方向与翻页、行首行尾、F1–F12、
+ * Ctrl 组合、Shift+Tab。按这条线砍掉了 rc.2 的整页符号，以及散在导航行里的 `/` `-`。
+ *
+ * 分工：**常驻两排 = 给不了 ∩ 高频**；**面板 = 给不了的其余全部**（外加 Enter/⌫ 两个
+ * "软键盘被隐藏时"的兜底键）。同一个键不在两处重复出现——面板就浮在常驻两排上方，
+ * 重复只会让人分不清该按哪个，也是 rc.2 显得乱的主要来源。
+ */
+
 /**
- * 常驻双排附加键（参考 termux 两排布局 + 倒 T 方向键）。均匀铺满宽度、不横向滚动。
- * 行 1 第 2 个键是「更多」——展开全键盘面板的入口；原先那个 `/` 已并入面板的符号页。
+ * 常驻双排附加键：均匀铺满宽度、不横向滚动，中间三列保持倒 T 方向键。
+ *
+ * 取舍：Enter/⌫ 让位给 ⇧TAB 与 ^C——前者输入法上永远都在，后者输入法永远给不了；
+ * 而 ⇧TAB（切 agent 模式）与 ^C（打断）正是这类会话里按得最多的两个。
  */
 val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
     listOf(
         ExtraKey.Key("ESC", KeyId.Esc),
-        ExtraKey.Action("更多", ACTION_PANEL),
-        ExtraKey.Key("HOME", KeyId.Home),
+        ExtraKey.Mod("CTRL", ModKind.Ctrl),
+        ExtraKey.Mod("ALT", ModKind.Alt),
         ExtraKey.Key("↑", KeyId.Up),
+        ExtraKey.Key("HOME", KeyId.Home),
         ExtraKey.Key("END", KeyId.End),
-        ExtraKey.Key("PgUp", KeyId.PageUp),
-        ExtraKey.Action("文本", ACTION_COMPOSER),
+        ExtraKey.Action("更多", ACTION_PANEL),
     ),
     listOf(
         ExtraKey.Key("TAB", KeyId.Tab),
-        ExtraKey.Mod("CTRL", ModKind.Ctrl),
+        ExtraKey.Key("⇧TAB", KeyId.Macro("\u001b[Z")),
         ExtraKey.Key("←", KeyId.Left),
         ExtraKey.Key("↓", KeyId.Down),
         ExtraKey.Key("→", KeyId.Right),
-        ExtraKey.Key("PgDn", KeyId.PageDown),
-        // 回车用文字 "Enter"：↵ 字形在等宽字体里偏小且视觉不居中，文字标签与 TAB/HOME 等一致、清晰居中。
-        ExtraKey.Key("Enter", KeyId.Enter),
+        ExtraKey.Key("^C", KeyId.Macro(ctrlOf('c'))),
+        ExtraKey.Action("文本", ACTION_COMPOSER),
     ),
 )
 
-/** 全键盘面板的一个分段。 */
+/** 全键盘面板的一个分组（面板是单页竖排，分组只作视觉分区，不再有分段切换）。 */
 data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>)
 
-private fun ch(c: String) = ExtraKey.Key(c, KeyId.Chars(c))
 private fun macro(label: String, bytes: String) = ExtraKey.Key(label, KeyId.Macro(bytes))
 
 /** Ctrl+字母的字节（宏用；标签沿用终端惯例的 `^X` 写法）。 */
 private fun ctrlOf(c: Char) = ((c.uppercaseChar().code - 64)).toChar().toString()
 
 /**
- * 展开面板的四个分段：导航编辑 / 功能键 / 符号 / 快捷。
- * 符号页只收手机输入法上难打的那批（`| \ ~ ^ {} [] <>` 等），常见标点不占位。
+ * 面板的三个分组：编辑 / 功能键 / 控制键。**一屏全在，不用切**。
+ *
+ * rc.2 是四分段 pager，每段行数还不一样：翻页时 Surface 的高度与页内内容各按各的节奏变，
+ * 看上去就是"卡"和"边框与内容不同步"。键收敛到 33 个之后一页放得下，分段机制连同它那套
+ * 滑动/高度动画一起去掉——不做的动画不会卡。
  */
 val KEY_SECTIONS: List<KeySection> = listOf(
     KeySection(
-        R.string.keys_section_nav,
+        R.string.keys_section_edit,
         listOf(
             listOf(
                 ExtraKey.Mod("SHIFT", ModKind.Shift),
-                ExtraKey.Mod("CTRL", ModKind.Ctrl),
-                ExtraKey.Mod("ALT", ModKind.Alt),
-                ExtraKey.Key("ESC", KeyId.Esc),
-                ExtraKey.Key("TAB", KeyId.Tab),
-                ExtraKey.Key("Enter", KeyId.Enter),
-                ExtraKey.Key("⌫", KeyId.Backspace),
-            ),
-            listOf(
                 ExtraKey.Key("INS", KeyId.Insert),
                 ExtraKey.Key("DEL", KeyId.Delete),
-                ExtraKey.Key("HOME", KeyId.Home),
-                ExtraKey.Key("END", KeyId.End),
                 ExtraKey.Key("PgUp", KeyId.PageUp),
                 ExtraKey.Key("PgDn", KeyId.PageDown),
-                ExtraKey.Key("↑", KeyId.Up),
-            ),
-            listOf(
-                ExtraKey.Key("⇧TAB", KeyId.Macro("\u001b[Z")),
-                // 标签不用 ⌥：等宽字体里没有该字形，真机上会渲染成豆腐块。
-                ExtraKey.Key("ALT↵", KeyId.Macro("\u001b\r")),
-                ch("/"),
-                ch("-"),
-                ExtraKey.Key("←", KeyId.Left),
-                ExtraKey.Key("↓", KeyId.Down),
-                ExtraKey.Key("→", KeyId.Right),
+                // Enter/⌫ 输入法上有，这里留一份是给"隐藏软键盘只看输出"的场景兜底。
+                ExtraKey.Key("⌫", KeyId.Backspace),
+                ExtraKey.Key("Enter", KeyId.Enter),
             ),
         ),
     ),
@@ -147,34 +148,28 @@ val KEY_SECTIONS: List<KeySection> = listOf(
         ),
     ),
     KeySection(
-        R.string.keys_section_symbols,
+        R.string.keys_section_ctrl,
         listOf(
-            listOf(ch("|"), ch("\\"), ch("/"), ch("~"), ch("`"), ch("^"), ch("=")),
-            listOf(ch("("), ch(")"), ch("["), ch("]"), ch("{"), ch("}"), ch("<")),
-            listOf(ch(">"), ch("_"), ch("+"), ch("*"), ch("&"), ch("$"), ch("#")),
-        ),
-    ),
-    KeySection(
-        R.string.keys_section_macros,
-        listOf(
+            // 行编辑：行首 / 行尾 / 删到行首 / 删到行尾 / 删词 / 粘回 / 清屏。
             listOf(
-                macro("^C", ctrlOf('c')),
-                macro("^D", ctrlOf('d')),
-                macro("^Z", ctrlOf('z')),
-                macro("^L", ctrlOf('l')),
-                macro("^R", ctrlOf('r')),
                 macro("^A", ctrlOf('a')),
                 macro("^E", ctrlOf('e')),
-            ),
-            listOf(
                 macro("^U", ctrlOf('u')),
                 macro("^K", ctrlOf('k')),
                 macro("^W", ctrlOf('w')),
                 macro("^Y", ctrlOf('y')),
+                macro("^L", ctrlOf('l')),
+            ),
+            // 作业控制与历史；^B 是 tmux 默认前缀；ALT↵ = ESC+CR（多行输入换行不提交）。
+            listOf(
+                macro("^D", ctrlOf('d')),
+                macro("^Z", ctrlOf('z')),
+                macro("^R", ctrlOf('r')),
                 macro("^P", ctrlOf('p')),
                 macro("^N", ctrlOf('n')),
-                // tmux 默认前缀：面板里直接给一个，省得先按 CTRL 再切输入法打 b。
-                macro("tmux ^B", ctrlOf('b')),
+                macro("^B", ctrlOf('b')),
+                // 标签不用 ⌥：等宽字体里没有该字形，真机上会渲染成豆腐块。
+                macro("ALT↵", "\u001b\r"),
             ),
         ),
     ),
@@ -245,9 +240,12 @@ private fun KeyRow(
 }
 
 /**
- * 展开的全键盘面板：**浮在终端之上**（调用方把它放在终端 Box 里），不挤压终端——
+ * 展开的全键盘面板：**浮在终端之上**（调用方把它放进终端 Box），不挤压终端——
  * 挤压会改行数触发远端 SIGWINCH，全屏 TUI 会跟着重绘抖动。
- * 分段可点标签切换，也可左右滑动；常驻两排仍在下方原位不动。
+ *
+ * 单页竖排、分组标题分区，**没有分段切换、没有 pager**：内容与外框同一次布局产出，
+ * 不存在"边框先动内容后动"。内容比可用高度长（横屏）时整块滚动，面板本身不改高。
+ * 顶部那根横条是收起把手（点一下收起），与常驻行上的「更多」键（展开时高亮成 ⌄）互为两条出路。
  */
 @Composable
 fun KeyboardPanel(
@@ -258,39 +256,52 @@ fun KeyboardPanel(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val pager = rememberPagerState(pageCount = { sections.size })
-    val scope = rememberCoroutineScope()
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                sections.forEachIndexed { index, section ->
-                    val selected = pager.currentPage == index
-                    TextButton(onClick = { scope.launch { pager.animateScrollToPage(index) } }) {
-                        Text(
-                            stringResource(section.titleRes),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            maxLines = 1,
-                        )
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.keys_panel_collapse),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+    val config = LocalConfiguration.current
+    // 最高只吃屏幕的 6 成：再高就把终端整块盖没了。父 Box 更矮时由父约束接管，内容滚动。
+    val maxHeight = (config.screenHeightDp * 0.6f).dp
+    // 横屏矮而宽：竖屏的 5 排在这里放不下（只能滚），但一排塞得下十几个键——
+    // 把每组压成尽量少的排，三组一次全见，不用滚。
+    val perRow = if (config.screenWidthDp >= 600) 14 else 0
+    val collapseLabel = stringResource(R.string.keys_panel_collapse)
+    Surface(
+        modifier = modifier.fillMaxWidth().heightIn(max = maxHeight),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MokeShapes.keyPanel,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 5.dp)
+                .padding(bottom = 6.dp),
+        ) {
+            // 收起把手：整条可点，命中区域比一个图标按钮大，也不占一整行高度。
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .clickable(onClick = onDismiss)
+                    .semantics { contentDescription = collapseLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    modifier = Modifier.width(34.dp).height(4.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                ) {}
             }
-            HorizontalPager(state = pager) { page ->
+            sections.forEachIndexed { index, section ->
+                Text(
+                    stringResource(section.titleRes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 3.dp, top = if (index == 0) 0.dp else 9.dp, bottom = 4.dp),
+                )
+                val rows = if (perRow > 0) section.rows.flatten().chunked(perRow) else section.rows
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                    sections[page].rows.forEach { row ->
+                    rows.forEach { row ->
                         KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onAction = {})
                     }
                 }

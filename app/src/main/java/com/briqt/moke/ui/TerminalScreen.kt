@@ -1,5 +1,11 @@
 package com.briqt.moke.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -313,16 +319,16 @@ fun TerminalScreen(
                 }
                 // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
                 // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
-                if (panelOpen && extraKeysVisible && !showComposer) {
-                    KeyboardPanel(
-                        sections = KEY_SECTIONS,
-                        mods = mods,
-                        onKey = { key -> mods = sendKey(ts, controller, mods, key) },
-                        onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
-                        onDismiss = { panelOpen = false },
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
-                }
+                // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
+                // 因此不会出现 rc.2 那种边框与内容各走各的。
+                KeyboardPanelOverlay(
+                    visible = panelOpen && extraKeysVisible && !showComposer,
+                    mods = mods,
+                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                    onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                    onDismiss = { panelOpen = false },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
 
             if (!alive) {
@@ -442,6 +448,39 @@ fun TerminalScreen(
             onDetach = { onTmuxDetach(it.id) },
             onKill = { onTmuxKill(it.id) },
             onNew = { onTmuxNew(it) },
+        )
+    }
+}
+
+/**
+ * 全键盘面板的进出场：整块从下方滑入/滑出。面板自身高度恒定，动画期间没有内容重排，
+ * 不会出现边框与内容各走各的。
+ *
+ * 单独拆一个 composable 而不是就地写 `AnimatedVisibility`：终端页外层是 Column、内层是 Box，
+ * `ColumnScope.AnimatedVisibility` 这个重载会被优先选中，而 DslMarker 又不允许隐式用外层
+ * 的 ColumnScope——在这里没有作用域接收者，直接落到顶层重载。
+ */
+@Composable
+private fun KeyboardPanelOverlay(
+    visible: Boolean,
+    mods: Modifiers,
+    onKey: (KeyId) -> Unit,
+    onToggleMod: (ModKind) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(animationSpec = tween(160)) { it } + fadeIn(tween(120)),
+        exit = slideOutVertically(animationSpec = tween(140)) { it } + fadeOut(tween(100)),
+        modifier = modifier,
+    ) {
+        KeyboardPanel(
+            sections = KEY_SECTIONS,
+            mods = mods,
+            onKey = onKey,
+            onToggleMod = onToggleMod,
+            onDismiss = onDismiss,
         )
     }
 }

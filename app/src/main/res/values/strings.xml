@@ -167,10 +167,9 @@
     <string name="key_text">Text</string>
     <string name="key_more">More keys</string>
     <string name="keys_panel_collapse">Collapse</string>
-    <string name="keys_section_nav">Navigation</string>
+    <string name="keys_section_edit">Editing</string>
     <string name="keys_section_fn">Function</string>
-    <string name="keys_section_symbols">Symbols</string>
-    <string name="keys_section_macros">Shortcuts</string>
+    <string name="keys_section_ctrl">Control</string>
     <string name="composer_title">Text block</string>
     <string name="composer_field">Text to send</string>
     <string name="composer_clear">Clear</string>
