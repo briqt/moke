@@ -256,10 +256,20 @@ class SessionManager(context: Context) {
         }
     }
 
-    /** 断开/关闭远端 tmux 后，关联的 Moke 终端已回到普通 shell，不应继续标成“当前”。 */
-    fun clearTmuxAssociation(hostId: String, remoteId: String) {
+    /**
+     * 断开/关闭远端 tmux 后，关联的 Moke 终端已回到普通 shell，不应继续标成“当前”。
+     *
+     * 名称也要参与匹配：从选择器「新建」出来的终端在第一次刷新之前 `remoteTmuxId` 还是 null，
+     * 只按 ID 清会漏掉它——于是面板已经把会话 detach 掉了，顶栏还挂着「当前 tmux 会话」。
+     * 同一主机上 tmux 会话名是唯一的，按名匹配不会误伤别的会话。
+     */
+    fun clearTmuxAssociation(hostId: String, remoteId: String, remoteName: String? = null) {
         _sessions.value
-            .filter { it.host.id == hostId && it.remoteTmuxId.value == remoteId }
+            .filter {
+                it.host.id == hostId &&
+                    (it.remoteTmuxId.value == remoteId ||
+                        (remoteName != null && it.remoteTmuxName.value == remoteName))
+            }
             .forEach {
                 it.remoteTmuxId.value = null
                 it.remoteTmuxName.value = null

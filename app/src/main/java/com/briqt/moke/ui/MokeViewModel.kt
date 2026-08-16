@@ -393,11 +393,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         sessions.renameTmuxAssociation(ts.host.id, id, name)
     }
     fun tmuxDetach(ts: TermSession, id: String) = tmuxAction(ts, Tmux.detachCmd(id)) {
-        sessions.clearTmuxAssociation(ts.host.id, id)
+        sessions.clearTmuxAssociation(ts.host.id, id, tmuxNameOf(ts, id))
     }
     fun tmuxKill(ts: TermSession, id: String) = tmuxAction(ts, Tmux.killCmd(id)) {
-        sessions.clearTmuxAssociation(ts.host.id, id)
+        sessions.clearTmuxAssociation(ts.host.id, id, tmuxNameOf(ts, id))
     }
+
+    /** 面板列表里该 ID 对应的会话名：本地关联可能还没拿到 ID，只能按名清（见 clearTmuxAssociation）。 */
+    private fun tmuxNameOf(ts: TermSession, id: String): String? =
+        ts.tmuxState.value.sessions.firstOrNull { it.id == id }?.name
 
     /**
      * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，按名称原子恢复。

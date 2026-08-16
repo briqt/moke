@@ -47,6 +47,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     /** 已请求取消的任务 id（工作线程按块检查）。 */
     private val cancelling = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var pump: Job? = null
+    private val pumpLock = Any()
 
     init {
         scope.launch {
@@ -137,13 +138,27 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
 
     // ---------- 执行 ----------
 
+    /**
+     * 起（或复用）唯一的串行工作协程。
+     *
+     * `pump` 的置空与判空都在同一把锁里：只判 `isActive` 会有一个真实的窗口——工作协程刚看到
+     * 队列为空、还没真正返回时，新入队的任务看它"还活着"就不再起新的，那条任务会永远停在
+     * 「排队中」。窗口很窄，但卡住的是用户的文件。
+     */
     private fun start() {
-        if (pump?.isActive == true) return
-        pump = scope.launch {
-            while (true) {
-                val task = _tasks.value.firstOrNull { it.state == TransferState.QUEUED } ?: break
-                runOne(task)
-            }
+        synchronized(pumpLock) {
+            if (pump != null) return
+            pump = scope.launch { pumpLoop() }
+        }
+    }
+
+    private suspend fun pumpLoop() {
+        while (true) {
+            val task = synchronized(pumpLock) {
+                _tasks.value.firstOrNull { it.state == TransferState.QUEUED }
+                    ?: run { pump = null; null }
+            } ?: return
+            runOne(task)
         }
     }
 
@@ -224,7 +239,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         update(task.id) {
             it.copy(done = startAt, total = remote.size, remoteSize = remote.size, remoteMtime = remote.mtime)
         }
-        out.use { sink ->
+        val pos = out.use { sink ->
             session.download(
                 remote = task.remotePath,
                 sink = sink,
@@ -233,6 +248,8 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                 cancelled = { cancelling.contains(task.id) },
             )
         }
+        // 断点必须记**真实**落点：progress 是节流的，最后那一小段没推给 UI。
+        update(task.id) { it.copy(done = pos) }
         finish(task.id)
     }
 
@@ -246,7 +263,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         update(task.id) { it.copy(done = offset, total = localSize) }
         val input = resolver.openInputStream(source)
             ?: throw IllegalStateException(appContext.getString(R.string.transfer_local_unreadable))
-        input.use { stream ->
+        val pos = input.use { stream ->
             if (offset > 0L) skipExactly(stream, offset)
             session.upload(
                 source = stream,
@@ -256,6 +273,9 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                 cancelled = { cancelling.contains(task.id) },
             )
         }
+        // 上传续传要求「远端已有字节数 == 我们记的 done」**完全相等**，而 progress 是节流的：
+        // 不把真实落点写回去，取消后 done 恒小于远端实际大小，续传判定必不成立 → 每次都从 0 重传。
+        update(task.id) { it.copy(done = pos) }
         finish(task.id)
     }
 
