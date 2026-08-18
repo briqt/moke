@@ -32,6 +32,7 @@ import com.briqt.moke.terminal.FontRepository
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.terminal.TerminalThemes
 import com.briqt.moke.update.UpdateChecker
+import com.briqt.moke.update.UpdateInfo
 import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -140,8 +141,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * 静默检查更新的结果：非空 = 远端有更新（值为 tag，如 v0.1.16），UI 据此点一个主题色小圆点。
      * 跨启动保留（存在 DataStore），所以离线打开也还看得见上次发现的新版。
      */
-    val updateTag: StateFlow<String?> = settings.latestSeenTag
-        .map { it.takeIf { t -> t.isNotBlank() && UpdateChecker.isNewer(t.removePrefix("v"), appVersion) } }
+    val updateInfo: StateFlow<UpdateInfo?> = combine(settings.latestSeenTag, settings.latestSeenUrl) { tag, url ->
+        tag.takeIf { it.isNotBlank() && UpdateChecker.isNewer(it.removePrefix("v"), appVersion) }
+            ?.let { UpdateInfo(it, url) }
+    }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** 本机版本号（versionName）。 */
@@ -158,7 +161,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         if (now - last < 6 * 60 * 60 * 1000L) return@launch
         val includeRc = settings.includePrerelease.first()
         when (val r = UpdateChecker.check(appVersion, getApplication(), includeRc)) {
-            is UpdateStatus.Available -> settings.recordUpdateCheck(now, r.latest)
+            is UpdateStatus.Available -> settings.recordUpdateCheck(now, r.latest, r.url)
             is UpdateStatus.UpToDate -> settings.recordUpdateCheck(now, "")
             else -> Unit   // 失败/超时：不记时间戳，下次启动再试；绝不打扰用户
         }

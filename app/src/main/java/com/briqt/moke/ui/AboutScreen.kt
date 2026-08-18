@@ -43,13 +43,14 @@ import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.update.UpdateChecker
+import com.briqt.moke.update.UpdateInfo
 import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
-    updateTag: String? = null,
+    updateInfo: UpdateInfo? = null,
     includePrerelease: Boolean = false,
     onIncludePrerelease: (Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -61,9 +62,11 @@ fun AboutScreen(
             .getOrDefault("-")
     }
     // 启动时的静默检查若已发现新版，进来就直接呈现"有新版本"，不用再点一次检查。
+    // 跳转目标用静默检查当时记下的该发布页地址（rc 就跳 rc 页）；
+    // 旧版本只存了 tag 没存地址，为空时退回 releases/latest 兜底。
     var update by remember {
         mutableStateOf<UpdateStatus>(
-            updateTag?.let { UpdateStatus.Available(it, "https://github.com/briqt/moke/releases/latest") }
+            updateInfo?.let { UpdateStatus.Available(it.tag, it.url.ifBlank { "${UpdateChecker.REPO_URL}/releases/latest" }) }
                 ?: UpdateStatus.Idle
         )
     }

@@ -102,6 +102,7 @@ import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
+import com.briqt.moke.update.UpdateInfo
 
 /**
  * 主界面：底部导航「连接 · 会话 · 设置」三分区。终端本体是独立全屏页（不带底栏），
@@ -139,7 +140,7 @@ fun HomeScreen(
     onReorderSessions: (List<String>) -> Unit,
     keyboardMode: KeyboardMode,
     confirmClose: Boolean,
-    updateTag: String?,
+    updateInfo: UpdateInfo?,
     onOpenAppearance: () -> Unit,
     onOpenTerminalSettings: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -194,7 +195,7 @@ fun HomeScreen(
                 NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, onTab)
                 NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, onTab)
                 // 有新版时给「设置」tab 点一个主题色小圆点（顺着分组一路指到「关于」）。
-                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab, dot = updateTag != null)
+                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab, dot = updateInfo != null)
             }
         },
         floatingActionButton = {
@@ -209,7 +210,7 @@ fun HomeScreen(
             HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
             HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(
-                padding, keyboardMode, updateTag, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
+                padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
             )
         }
     }
@@ -809,7 +810,7 @@ private fun SessionCard(
 private fun SettingsMenuContent(
     padding: PaddingValues,
     keyboardMode: KeyboardMode,
-    updateTag: String?,
+    updateInfo: UpdateInfo?,
     onOpenAppearance: () -> Unit,
     onOpenTerminalSettings: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -835,9 +836,9 @@ private fun SettingsMenuContent(
         NavRow(
             Icons.Filled.Info,
             stringResource(R.string.menu_about),
-            updateTag?.let { stringResource(R.string.update_found, it) } ?: stringResource(R.string.menu_about_sub),
+            updateInfo?.let { stringResource(R.string.update_found, it.tag) } ?: stringResource(R.string.menu_about_sub),
             onClick = onOpenAbout,
-            showDot = updateTag != null,
+            showDot = updateInfo != null,
         )
     }
 

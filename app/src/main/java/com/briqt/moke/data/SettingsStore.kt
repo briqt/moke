@@ -55,9 +55,10 @@ class SettingsStore(private val context: Context) {
     private val confirmCloseKey = booleanPreferencesKey("confirm_close_session")
     // 终端页是否保持屏幕常亮（看长任务输出方便，但耗电）。
     private val keepScreenOnKey = booleanPreferencesKey("keep_screen_on")
-    // 静默检查更新：上次检查时间戳 + 已知的最新版本 tag（用于跨启动保留"有更新"小圆点）。
+    // 静默检查更新：上次检查时间戳 + 已知的最新版本 tag 与其发布页地址（用于跨启动保留"有更新"小圆点与跳转目标）。
     private val lastUpdateCheckKey = androidx.datastore.preferences.core.longPreferencesKey("last_update_check_at")
     private val latestSeenTagKey = stringPreferencesKey("latest_seen_tag")
+    private val latestSeenUrlKey = stringPreferencesKey("latest_seen_url")
     // 检查更新时是否把预发布版（rc）算进来。
     private val includePrereleaseKey = booleanPreferencesKey("include_prerelease")
     // 下载目录（SAF 目录树 URI，已持久化读写授权）；空=还没选过，首次下载时问一次。
@@ -170,6 +171,11 @@ class SettingsStore(private val context: Context) {
     /** 静默检查发现的最新版本 tag（空=无新版；跨启动保留，用于小圆点）。 */
     val latestSeenTag: Flow<String> = context.settingsDataStore.data.map { prefs ->
         prefs[latestSeenTagKey] ?: ""
+    }
+
+    /** 与 latestSeenTag 配对的发布页地址（rc 指向 rc 页，正式版指向正式版页；空=无记录）。 */
+    val latestSeenUrl: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[latestSeenUrlKey] ?: ""
     }
 
     /** 是否把预发布版算进"有更新"（默认关：正式用户不该被 rc 打扰）。 */
@@ -320,14 +326,16 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit {
             it[includePrereleaseKey] = enabled
             it[latestSeenTagKey] = ""
+            it[latestSeenUrlKey] = ""
             it[lastUpdateCheckKey] = 0L
         }
     }
 
-    suspend fun recordUpdateCheck(at: Long, tag: String) {
+    suspend fun recordUpdateCheck(at: Long, tag: String, url: String = "") {
         context.settingsDataStore.edit {
             it[lastUpdateCheckKey] = at
             it[latestSeenTagKey] = tag
+            it[latestSeenUrlKey] = url
         }
     }
 

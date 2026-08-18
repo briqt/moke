@@ -27,6 +27,9 @@ data class ReleaseEntry(
     val draft: Boolean,
 )
 
+/** 静默检查发现的新版：tag + 该发布自己的页面地址（rc 与正式版各不相同，须一起记住）。 */
+data class UpdateInfo(val tag: String, val url: String)
+
 /** 从 GitHub Releases 查最新版并与当前版本比对。 */
 object UpdateChecker {
     const val REPO_URL = "https://github.com/briqt/moke"
