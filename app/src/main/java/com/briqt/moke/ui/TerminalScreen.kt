@@ -53,6 +53,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -108,6 +109,7 @@ fun TerminalScreen(
     onClose: () -> Unit,
     onFontSize: (Float) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
+    onScrollMode: (ScrollMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
@@ -169,9 +171,12 @@ fun TerminalScreen(
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
     var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
     // 「无处可滚」提示：滑动落到既没有历史、也判不出方向键是否安全的状态时说明原因。
-    // 每个会话只提示一次——重复弹会变成噪音。
+    // 不能只提示一次（之后就变回静默，用户以为坏了），也不能每次都弹（滑一下弹一次是噪音）：
+    // 显示期间随滑动续期，隐藏后有一段静默窗口期，过了窗口再滑又会提示。
     var scrollHint by remember(ts.id) { mutableStateOf(false) }
-    var scrollHintShown by remember(ts.id) { mutableStateOf(false) }
+    // 触发时间戳：每次滑动刷新它以续期；同时作为 LaunchedEffect 的 key 重置倒计时。
+    var scrollHintAt by remember(ts.id) { mutableLongStateOf(0L) }
+    var scrollHintHiddenAt by remember(ts.id) { mutableLongStateOf(0L) }
 
     val controller = ts.controller
     val scope = rememberCoroutineScope()
@@ -192,7 +197,11 @@ fun TerminalScreen(
         // mosh 会话里的备用屏是 mosh-client 自己的，不能当作「远端在跑全屏程序」的判据。
         view.mokeMoshSession = ts.host.useMosh
         view.mokeOnScrollUnavailable = Runnable {
-            if (!scrollHintShown) { scrollHintShown = true; scrollHint = true }
+            val now = android.os.SystemClock.elapsedRealtime()
+            // 静默窗口期：提示消失后 SCROLL_HINT_COOLDOWN_MS 内不再打扰；之后再滑仍会提示。
+            if (!scrollHint && now - scrollHintHiddenAt < SCROLL_HINT_COOLDOWN_MS) return@Runnable
+            scrollHint = true
+            scrollHintAt = now
         }
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
@@ -265,11 +274,12 @@ fun TerminalScreen(
             zoomHintSp = null
         }
     }
-    // 「无处可滚」提示比缩放提示信息量大，留久一点。
-    LaunchedEffect(scrollHint) {
+    // 「无处可滚」提示比缩放提示信息量大，留久一点；key 含时间戳，滑动期间每次触发都会续期。
+    LaunchedEffect(scrollHint, scrollHintAt) {
         if (scrollHint) {
-            delay(4500)
+            delay(SCROLL_HINT_VISIBLE_MS)
             scrollHint = false
+            scrollHintHiddenAt = android.os.SystemClock.elapsedRealtime()
         }
     }
 
@@ -341,6 +351,13 @@ fun TerminalScreen(
                         text = stringResource(
                             if (ts.host.useMosh) R.string.scroll_none_mosh else R.string.scroll_none_alt
                         ),
+                        // 直接给出可执行的出路：翻页器（less/vim）用方向键就能滚。已经是方向键模式
+                        // 却还走到这里是不可能的（那条分支不经过提示），故仅在非方向键模式下提供。
+                        onUseArrows = if (scrollMode != ScrollMode.ARROWS) {
+                            { onScrollMode(ScrollMode.ARROWS); scrollHint = false }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 12.dp, end = 12.dp),
                     )
                 }
@@ -738,6 +755,10 @@ private fun TerminalTopBar(
     }
 }
 
+/** 「无处可滚」提示的可见时长与静默窗口期：滑动期间续期，隐藏后一段时间内不再打扰。 */
+private const val SCROLL_HINT_VISIBLE_MS = 3500L
+private const val SCROLL_HINT_COOLDOWN_MS = 8000L
+
 @Composable
 fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     ms < 120 -> MaterialTheme.colorScheme.primary
@@ -750,18 +771,28 @@ fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
  * 静默会让人以为滑动坏了，所以把原因说清楚。
  */
 @Composable
-private fun ScrollUnavailableHint(text: String, modifier: Modifier = Modifier) {
+private fun ScrollUnavailableHint(
+    text: String,
+    onUseArrows: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
         contentColor = MaterialTheme.colorScheme.inverseOnSurface,
         shape = MokeShapes.floating,
         modifier = modifier,
     ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.bodySmall,
-        )
+        Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 4.dp)) {
+            Text(text, style = MaterialTheme.typography.bodySmall)
+            if (onUseArrows != null) {
+                TextButton(onClick = onUseArrows, modifier = Modifier.align(Alignment.End)) {
+                    Text(
+                        stringResource(R.string.scroll_use_arrows),
+                        color = MaterialTheme.colorScheme.inversePrimary,
+                    )
+                }
+            }
+        }
     }
 }
 

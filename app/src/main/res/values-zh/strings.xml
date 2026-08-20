@@ -358,11 +358,12 @@
     <string name="host_persistence_hint">选 tmux：连接这台主机时自动进入 tmux 会话——已记住会话名就直接进入，否则先让你选一个。</string>
     <string name="scroll_none_mosh">mosh 协议不传输滚动缓冲，这里没有可滚的历史。在远端用 tmux（或改用 SSH）即可滚屏。</string>
     <string name="scroll_none_alt">全屏程序正占用整个屏幕，没有可滚的历史。</string>
+    <string name="scroll_use_arrows">改用方向键滚动</string>
     <string name="scroll_mode">全屏程序内滑动</string>
     <string name="scroll_mode_smart">智能</string>
     <string name="scroll_mode_wheel">始终发滚轮</string>
     <string name="scroll_mode_arrows">始终发方向键</string>
-    <string name="scroll_mode_hint">智能：远端开了鼠标滚动就发滚轮；mosh 会话滚本地历史（不再被 mosh 自己的全屏模式挡住）；行编辑型程序（codex、claude code 等）不再误发方向键翻命令历史；翻页器（less、man）保持方向键滚动。</string>
+    <string name="scroll_mode_hint">智能（推荐）：远端开了鼠标滚动就发滚轮；普通输出滚本地历史；判不出来时什么都不发，避免方向键去翻命令历史。\n始终发滚轮：远端支持鼠标但当前界面没开启跟踪时可试。\n始终发方向键：翻页器（less、man、vim）滚不动时用它——尤其是 mosh 会话，mosh 不传递前台程序信息，只能由你指定。</string>
     <string name="include_prerelease">包含预览版</string>
     <string name="include_prerelease_sub">检查更新时也算上 rc 预览版。预览版用于抢先验证新功能，可能不稳定。</string>
     <string name="github_repo">GitHub 仓库</string>

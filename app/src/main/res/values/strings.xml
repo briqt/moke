@@ -362,11 +362,12 @@
     <string name="host_persistence_hint">With tmux: connecting to this host enters a tmux session — straight in if a session name is remembered, otherwise you pick one first.</string>
     <string name="scroll_none_mosh">mosh does not carry a scrollback buffer, so there is no history to scroll here. Run tmux on the remote (or use SSH) to scroll.</string>
     <string name="scroll_none_alt">A full-screen program owns the screen; there is no history to scroll.</string>
+    <string name="scroll_use_arrows">Send arrow keys instead</string>
     <string name="scroll_mode">Swipe in full-screen programs</string>
     <string name="scroll_mode_smart">Smart</string>
     <string name="scroll_mode_wheel">Always send wheel</string>
     <string name="scroll_mode_arrows">Always send arrow keys</string>
-    <string name="scroll_mode_hint">Smart: sends wheel events when the remote enables mouse scrolling; scrolls local history in mosh sessions (no longer blocked by the full-screen mode mosh itself uses); no longer sends arrow keys in line-editor programs (codex, claude code…) where they scroll command history; pagers (less, man) keep arrow-key scrolling.</string>
+    <string name="scroll_mode_hint">Smart (recommended): sends wheel events when the remote enables mouse scrolling; scrolls local history for ordinary output; sends nothing when it cannot tell, so arrow keys never walk your command history.\nAlways send wheel: worth trying when the remote supports the mouse but has not enabled tracking on the current screen.\nAlways send arrow keys: use it when pagers (less, man, vim) will not scroll — especially over mosh, which carries no information about the foreground program, so only you can decide.</string>
     <string name="include_prerelease">Include pre-releases</string>
     <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
     <string name="github_repo">GitHub repository</string>
