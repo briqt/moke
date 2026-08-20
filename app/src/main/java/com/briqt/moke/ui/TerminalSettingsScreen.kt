@@ -43,10 +43,12 @@ import com.briqt.moke.ui.theme.MokeDimens
 fun TerminalSettingsScreen(
     keyboardMode: KeyboardMode,
     scrollMode: ScrollMode,
+    tmuxScrollSetup: Boolean,
     keepScreenOn: Boolean,
     confirmClose: Boolean,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
+    onTmuxScrollSetup: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onConfirmClose: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -93,6 +95,13 @@ fun TerminalSettingsScreen(
                 stringResource(R.string.scroll_mode),
                 stringResource(scrollModeLabel(scrollMode)),
                 onClick = { scrollDialog = true },
+            )
+            SwitchRow(
+                icon = Icons.Filled.SwipeVertical,
+                title = stringResource(R.string.menu_tmux_scroll_setup),
+                subtitle = stringResource(R.string.menu_tmux_scroll_setup_sub),
+                checked = tmuxScrollSetup,
+                onCheckedChange = onTmuxScrollSetup,
             )
             SwitchRow(
                 icon = Icons.Filled.LightMode,

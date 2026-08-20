@@ -271,7 +271,22 @@ public final class TerminalEmulator {
 
     public final TerminalColors mColors = new TerminalColors();
 
+    /**
+     * [moke] 忽略备用屏切换（DECSET 47/1047/1049）。
+     *
+     * <p>为 mosh 会话而加：mosh-client 自己就是个全屏程序，一连上就发 {@code ESC[?1049h} 把客户端
+     * 钉在备用屏里，而它**不会**转发远端程序自己的 1049——于是"当前是不是全屏程序"这个信号在
+     * mosh 下恒为真且毫无信息量，备用屏没有 scrollback 也让本地滚动彻底失效。忽略它之后，mosh
+     * 会话回到主屏：远端输出照常沉进 transcript，滚动手感与 SSH 一致。
+     */
+    private boolean mMokeIgnoreAltScreen;
+
     private static final String LOG_TAG = "TerminalEmulator";
+
+    /** [moke] 见 {@link #mMokeIgnoreAltScreen}。只在会话创建时按传输类型设置一次。 */
+    public void setMokeIgnoreAltScreen(boolean ignore) {
+        mMokeIgnoreAltScreen = ignore;
+    }
 
     private boolean isDecsetInternalBitSet(int bit) {
         return (mCurrentDecSetFlags & bit) != 0;
@@ -1266,6 +1281,8 @@ public final class TerminalEmulator {
             case 1049: {
                 // Set: Save cursor as in DECSC and use Alternate Screen Buffer, clearing it first.
                 // Reset: Use Normal Screen Buffer and restore cursor as in DECRC.
+                // [moke] mosh 会话：整段忽略（含 reset），见 mMokeIgnoreAltScreen。
+                if (mMokeIgnoreAltScreen) break;
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);

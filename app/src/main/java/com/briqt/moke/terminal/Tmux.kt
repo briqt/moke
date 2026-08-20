@@ -222,6 +222,31 @@ object Tmux {
     fun clientsCmd(name: String) =
         "tmux -u list-clients -t ${q(name)} -F 'c' 2>/dev/null | grep -c '^c' || true"
 
+    /**
+     * 把「当前前台是翻页器还是命令行」这个判定交给 tmux（附加成功后经侧通道下发一次）。
+     *
+     * 客户端侧判不了：mosh 只转发 1002/1003/1006/2004/1004，**丢掉 1049（备用屏）与 1（应用光标键）**，
+     * 所以 moke 手里没有任何区分 less 与 shell 提示符的带内信号。而 tmux 就在远端、看得见真相
+     * （`alternate_on` / `mouse_any_flag` / `pane_in_mode`），把决策下放给它就不必再猜：
+     *
+     * - 面板里的程序自己要鼠标，或已在 copy-mode → 原样转发滚轮（`send -M`）。
+     * - 程序在备用屏（less / man / vim）→ 滚轮转成 3 次方向键，正常翻页，不会跳进 copy-mode。
+     * - 其余（shell 提示符）→ 进 copy-mode 滚 tmux 自己的历史。
+     *
+     * `set` 不带 `-g`：只作用于这个会话，不改用户 tmux server 的全局默认。`bind -n` 只有 root
+     * 键表这一种形态，改动对该 server 的其它客户端同样可见——这也正是把它做成可关设置项的原因。
+     */
+    fun scrollSetupCmd(name: String): String {
+        // 已在 copy-mode 或程序自己要鼠标时，一律原样转发（与 tmux 默认绑定同义）。
+        val forward = "#{||:#{pane_in_mode},#{mouse_any_flag}}"
+        fun bind(key: String, arrow: String, fallback: String) =
+            "tmux bind -n $key if -F \"$forward\" \"send -M\" " +
+                "\"if -F '#{alternate_on}' 'send -N3 $arrow' '$fallback'\" >/dev/null 2>&1"
+        return "tmux set -t ${q(name)} mouse on >/dev/null 2>&1; " +
+            bind("WheelUpPane", "Up", "copy-mode -e; send -M") + "; " +
+            bind("WheelDownPane", "Down", "send -M") + "; true"
+    }
+
     /** 解析 [clientsCmd] 的输出；无法解析返回 null（视为"无法确认"，不等于未附加）。 */
     fun parseClientCount(out: String?): Int? =
         out?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() }?.toIntOrNull()

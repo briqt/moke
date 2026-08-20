@@ -124,6 +124,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.SECURE)
     val scrollMode: StateFlow<ScrollMode> = settings.scrollMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, ScrollMode.SMART)
+    val tmuxScrollSetup: StateFlow<Boolean> = settings.tmuxScrollSetup
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val confirmCloseSession: StateFlow<Boolean> = settings.confirmCloseSession
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
@@ -447,6 +449,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 ) ?: return@repeat
                 if (count > 0) {
                     session.tmuxAttached.value = true
+                    // 附上了才下发滚动绑定：让 tmux 现场判定翻页器/命令行（客户端侧判不了，见
+                    // Tmux.scrollSetupCmd）。失败无所谓——退回原有的客户端启发式。
+                    if (tmuxScrollSetup.value) {
+                        runCatching { session.transport.exec(Tmux.scrollSetupCmd(name)) }
+                    }
                 } else {
                     session.tmuxAttached.value = false
                     session.remoteTmuxId.value = null
@@ -692,6 +699,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setKeyboardMode(m: KeyboardMode) = viewModelScope.launch { settings.setKeyboardMode(m) }
     fun setScrollMode(m: ScrollMode) = viewModelScope.launch { settings.setScrollMode(m) }
+
+    fun setTmuxScrollSetup(on: Boolean) = viewModelScope.launch { settings.setTmuxScrollSetup(on) }
 
     fun setConfirmCloseSession(on: Boolean) = viewModelScope.launch { settings.setConfirmCloseSession(on) }
 

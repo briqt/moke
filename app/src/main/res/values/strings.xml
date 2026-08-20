@@ -350,6 +350,8 @@
     <string name="menu_terminal_input">Terminal &amp; input</string>
     <string name="menu_terminal_input_sub">Keyboard mode · screen · session prompts</string>
     <string name="section_ui">Interface</string>
+    <string name="menu_tmux_scroll_setup">Let tmux handle swipe scrolling</string>
+    <string name="menu_tmux_scroll_setup_sub">After attaching, enables mouse mode for that session and binds the wheel so pagers page and prompts scroll history. Adds a root-table key binding on the remote tmux server.</string>
     <string name="menu_keep_screen_on">Keep screen on in terminal</string>
     <string name="menu_keep_screen_on_sub">Stays awake while a terminal tab is open; uses more battery</string>
     <string name="update_found">New version %1$s available</string>
@@ -362,7 +364,7 @@
     <string name="scroll_mode_smart">Smart</string>
     <string name="scroll_mode_wheel">Always send wheel</string>
     <string name="scroll_mode_arrows">Always send arrow keys</string>
-    <string name="scroll_mode_hint">Smart: sends wheel events when the remote enables mouse scrolling; no longer sends arrow keys in line-editor programs (codex, claude code…) where they scroll command history; pagers (less, man) keep arrow-key scrolling.</string>
+    <string name="scroll_mode_hint">Smart: sends wheel events when the remote enables mouse scrolling; scrolls local history in mosh sessions (no longer blocked by the full-screen mode mosh itself uses); no longer sends arrow keys in line-editor programs (codex, claude code…) where they scroll command history; pagers (less, man) keep arrow-key scrolling.</string>
     <string name="include_prerelease">Include pre-releases</string>
     <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
     <string name="github_repo">GitHub repository</string>

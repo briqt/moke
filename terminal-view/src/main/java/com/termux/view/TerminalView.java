@@ -596,7 +596,11 @@ public final class TerminalView extends View {
         boolean up = rowsDown < 0;
         int amount = Math.abs(rowsDown);
         for (int i = 0; i < amount; i++) {
-            if (mEmulator.isMouseTrackingActive() || mokeScrollMode == 1) {
+            if (mokeScrollMode == 2) {
+                // moke: 用户显式选定的模式优先。此前鼠标跟踪写在第一个条件里，远端一开鼠标就把
+                // 「始终发方向键」短路掉，设置形同虚设。
+                handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
+            } else if (mEmulator.isMouseTrackingActive() || mokeScrollMode == 1) {
                 sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
             } else if (mEmulator.isAlternateBufferActive()) {
                 // Send up and down key events for scrolling, which is what some terminals do to make scroll work in
@@ -606,7 +610,10 @@ public final class TerminalView extends View {
                 // editor / REPL TUI (Ink-based CLIs, readline), where arrow keys walk the command history
                 // instead of scrolling. The alternate buffer has no scrollback, so there is nothing else to
                 // scroll; doing nothing beats destroying the user's prompt.
-                if (mokeScrollMode == 0 && mEmulator.isBracketedPasteMode()) return;
+                //
+                // 到这里只可能是智能模式（模式 1/2 已在上面分流）。mosh 会话已在 emulator 层忽略备用屏，
+                // 所以这条分支现在只服务「SSH + 真正切到备用屏的程序」。
+                if (mEmulator.isBracketedPasteMode()) return;
                 handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
             } else {
                 mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));

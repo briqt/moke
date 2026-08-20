@@ -51,6 +51,8 @@ class SettingsStore(private val context: Context) {
     private val keyboardModeKey = stringPreferencesKey("keyboard_mode")
     // 全屏程序内的滑动语义（见 ScrollMode）。
     private val scrollModeKey = stringPreferencesKey("scroll_mode")
+    // 附加 tmux 后下发滚动绑定（让 tmux 判定翻页器/命令行，见 Tmux.scrollSetupCmd）。
+    private val tmuxScrollSetupKey = booleanPreferencesKey("tmux_scroll_setup")
     // 关闭会话前二次确认（误触保护）。
     private val confirmCloseKey = booleanPreferencesKey("confirm_close_session")
     // 终端页是否保持屏幕常亮（看长任务输出方便，但耗电）。
@@ -151,6 +153,11 @@ class SettingsStore(private val context: Context) {
     /** 全屏程序内滑动语义（默认智能）。 */
     val scrollMode: Flow<ScrollMode> = context.settingsDataStore.data.map { prefs ->
         ScrollMode.fromName(prefs[scrollModeKey], ScrollMode.SMART)
+    }
+
+    /** 附加 tmux 后是否下发滚动绑定（默认开；关掉则完全不动远端 tmux 配置）。 */
+    val tmuxScrollSetup: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[tmuxScrollSetupKey] ?: true
     }
 
     /** 关闭会话前是否二次确认（默认开）。 */
@@ -307,6 +314,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setScrollMode(m: ScrollMode) {
         context.settingsDataStore.edit { it[scrollModeKey] = m.name }
+    }
+
+    suspend fun setTmuxScrollSetup(on: Boolean) {
+        context.settingsDataStore.edit { it[tmuxScrollSetupKey] = on }
     }
 
     suspend fun setConfirmCloseSession(on: Boolean) {

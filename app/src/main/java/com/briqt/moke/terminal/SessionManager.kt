@@ -172,6 +172,9 @@ class SessionManager(context: Context) {
             )
         }
         val session = TerminalSession(transport, 2000, controller)
+        // mosh-client 自己是全屏程序，一连上就把客户端推进备用屏（且不转发远端程序的备用屏切换）。
+        // 忽略它，mosh 会话才有 scrollback 可滚——否则任何滑动都无处可去。
+        if (host.useMosh) session.setMokeIgnoreAltScreen(true)
         val ts = TermSession(
             id = UUID.randomUUID().toString(),
             host = host,

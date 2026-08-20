@@ -110,6 +110,27 @@ class TmuxTest {
         assertTrue(Tmux.DISCOVER_CMD.contains("tmux -u list-sessions"))
     }
 
+    /**
+     * 滚动绑定：判定必须交给 tmux（客户端在 mosh 下拿不到 1049/1），且不能污染用户的全局配置。
+     * 引号层级也在这里钉住——外层双引号包 tmux 命令、内层单引号包 if 分支，写错远端会静默失败。
+     */
+    @Test
+    fun `scroll setup delegates the decision to tmux`() {
+        val cmd = Tmux.scrollSetupCmd("work")
+        // 只给这个会话开鼠标，不用 -g（不改用户 tmux server 的全局默认）。
+        assertTrue(cmd.contains("tmux set -t 'work' mouse on"))
+        assertEquals(false, cmd.contains("set -g"))
+        // 已在 copy-mode 或程序自己要鼠标 → 原样转发。
+        assertTrue(cmd.contains("#{||:#{pane_in_mode},#{mouse_any_flag}}"))
+        // 备用屏（less/man/vim）→ 方向键翻页；否则进 copy-mode 滚历史。
+        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N3 Up' 'copy-mode -e; send -M'"))
+        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N3 Down' 'send -M'"))
+        assertTrue(cmd.contains("bind -n WheelUpPane"))
+        assertTrue(cmd.contains("bind -n WheelDownPane"))
+        // 侧通道命令失败不该把整条链路带崩。
+        assertTrue(cmd.trimEnd().endsWith("true"))
+    }
+
     @Test
     fun `recognizes only legacy injected stable id login commands`() {
         assertTrue(Tmux.isLegacyInjectedLoginCommand("tmux attach-session -t '\$3'"))
