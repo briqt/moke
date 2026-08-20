@@ -168,6 +168,10 @@ fun TerminalScreen(
     var composerText by remember(ts.id) { mutableStateOf("") }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
     var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
+    // 「无处可滚」提示：滑动落到既没有历史、也判不出方向键是否安全的状态时说明原因。
+    // 每个会话只提示一次——重复弹会变成噪音。
+    var scrollHint by remember(ts.id) { mutableStateOf(false) }
+    var scrollHintShown by remember(ts.id) { mutableStateOf(false) }
 
     val controller = ts.controller
     val scope = rememberCoroutineScope()
@@ -185,6 +189,11 @@ fun TerminalScreen(
         controller.cursorBlink = cursorBlink
         controller.keyboardMode = keyboardMode
         view.mokeScrollMode = scrollMode.ordinal
+        // mosh 会话里的备用屏是 mosh-client 自己的，不能当作「远端在跑全屏程序」的判据。
+        view.mokeMoshSession = ts.host.useMosh
+        view.mokeOnScrollUnavailable = Runnable {
+            if (!scrollHintShown) { scrollHintShown = true; scrollHint = true }
+        }
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
@@ -206,6 +215,7 @@ fun TerminalScreen(
                 controller.onFontSizeSp = null
                 controller.onModifiersConsumed = null
             }
+            view.mokeOnScrollUnavailable = null
         }
     }
 
@@ -253,6 +263,13 @@ fun TerminalScreen(
         if (zoomHintSp != null) {
             delay(2000)
             zoomHintSp = null
+        }
+    }
+    // 「无处可滚」提示比缩放提示信息量大，留久一点。
+    LaunchedEffect(scrollHint) {
+        if (scrollHint) {
+            delay(4500)
+            scrollHint = false
         }
     }
 
@@ -315,6 +332,16 @@ fun TerminalScreen(
                         sp = sp,
                         onResetDefault = { onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
+                    )
+                }
+                // 「无处可滚」提示：说明原因（mosh 不传滚动历史 / 全屏程序自己占着屏幕），
+                // 而不是让滑动看起来像坏了。
+                if (scrollHint) {
+                    ScrollUnavailableHint(
+                        text = stringResource(
+                            if (ts.host.useMosh) R.string.scroll_none_mosh else R.string.scroll_none_alt
+                        ),
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 12.dp, end = 12.dp),
                     )
                 }
                 // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
@@ -716,6 +743,26 @@ fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     ms < 120 -> MaterialTheme.colorScheme.primary
     ms < 300 -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.error
+}
+
+/**
+ * 「无处可滚」提示。滑动在这些状态下什么都不发（发方向键会去翻用户的命令历史），
+ * 静默会让人以为滑动坏了，所以把原因说清楚。
+ */
+@Composable
+private fun ScrollUnavailableHint(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        shape = MokeShapes.floating,
+        modifier = modifier,
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
 }
 
 /** 捏合缩放提示：字号 sp + 相对默认的百分比；非默认时提供「恢复默认」。 */

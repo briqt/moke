@@ -49,21 +49,12 @@ public class TerminalSession extends TerminalOutput {
     /** 传输是否已结束。 */
     private volatile boolean mFinished = false;
 
-    /** [moke] 见 {@link TerminalEmulator#setMokeIgnoreAltScreen(boolean)}；emulator 惰性创建，故先存在会话上。 */
-    private boolean mMokeIgnoreAltScreen = false;
-
     private static final String LOG_TAG = "TerminalSession";
 
     public TerminalSession(TerminalTransport transport, Integer transcriptRows, TerminalSessionClient client) {
         this.mTransport = transport;
         this.mTranscriptRows = transcriptRows;
         this.mClient = client;
-    }
-
-    /** [moke] mosh 会话专用：忽略备用屏切换（须在 emulator 创建前或创建后任意时刻调用，两者都会生效）。 */
-    public void setMokeIgnoreAltScreen(boolean ignore) {
-        mMokeIgnoreAltScreen = ignore;
-        if (mEmulator != null) mEmulator.setMokeIgnoreAltScreen(ignore);
     }
 
     public void updateTerminalSessionClient(TerminalSessionClient client) {
@@ -95,7 +86,6 @@ public class TerminalSession extends TerminalOutput {
     /** 创建 emulator 并启动底层传输。 */
     public void initializeEmulator(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
         mEmulator = new TerminalEmulator(this, columns, rows, cellWidthPixels, cellHeightPixels, mTranscriptRows, mClient);
-        mEmulator.setMokeIgnoreAltScreen(mMokeIgnoreAltScreen);
         try {
             mTransport.start(this, columns, rows, cellWidthPixels, cellHeightPixels);
         } catch (Exception e) {

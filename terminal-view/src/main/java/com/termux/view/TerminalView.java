@@ -591,6 +591,23 @@ public final class TerminalView extends View {
      */
     public int mokeScrollMode = 0;
 
+    /**
+     * moke: 本会话走的是 mosh。
+     *
+     * <p>mosh-client 自己就是全屏程序，连上即切到备用屏，而它**不转发**远端程序的备用屏切换
+     * （1049）与应用光标键（1）。所以在 mosh 会话里「当前处于备用屏」恒为真、不含任何信息：
+     * 既不能据此断定远端在跑翻页器（发方向键在 shell 提示符上就是翻命令历史），本地也确实没有
+     * 历史可滚（滚动缓冲根本不在 mosh 协议里）。唯一诚实的做法是什么都不发，并告诉用户原因。
+     */
+    public boolean mokeMoshSession = false;
+
+    /** moke: 滑动落到「无处可滚」时的一次性提示回调（由应用层展示浮层）。 */
+    public Runnable mokeOnScrollUnavailable;
+
+    private void mokeNotifyScrollUnavailable() {
+        if (mokeOnScrollUnavailable != null) mokeOnScrollUnavailable.run();
+    }
+
     /** Perform a scroll, either from dragging the screen or by scrolling a mouse wheel. */
     void doScroll(MotionEvent event, int rowsDown) {
         boolean up = rowsDown < 0;
@@ -611,9 +628,13 @@ public final class TerminalView extends View {
                 // instead of scrolling. The alternate buffer has no scrollback, so there is nothing else to
                 // scroll; doing nothing beats destroying the user's prompt.
                 //
-                // 到这里只可能是智能模式（模式 1/2 已在上面分流）。mosh 会话已在 emulator 层忽略备用屏，
-                // 所以这条分支现在只服务「SSH + 真正切到备用屏的程序」。
-                if (mEmulator.isBracketedPasteMode()) return;
+                // 到这里只可能是智能模式（模式 1/2 已在上面分流）。两种情况都判不出方向键是否安全，
+                // 一律不发并提示：①mosh 会话（备用屏是 mosh 自己的，见 mokeMoshSession）；
+                // ②远端开了括号粘贴模式（行编辑型程序）。真要发方向键可显式选「始终发方向键」。
+                if (mokeMoshSession || mEmulator.isBracketedPasteMode()) {
+                    mokeNotifyScrollUnavailable();
+                    return;
+                }
                 handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
             } else {
                 mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));

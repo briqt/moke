@@ -356,6 +356,8 @@
     <string name="persistence_none">无</string>
     <string name="persistence_tmux">tmux（连接即进入）</string>
     <string name="host_persistence_hint">选 tmux：连接这台主机时自动进入 tmux 会话——已记住会话名就直接进入，否则先让你选一个。</string>
+    <string name="scroll_none_mosh">mosh 协议不传输滚动缓冲，这里没有可滚的历史。在远端用 tmux（或改用 SSH）即可滚屏。</string>
+    <string name="scroll_none_alt">全屏程序正占用整个屏幕，没有可滚的历史。</string>
     <string name="scroll_mode">全屏程序内滑动</string>
     <string name="scroll_mode_smart">智能</string>
     <string name="scroll_mode_wheel">始终发滚轮</string>

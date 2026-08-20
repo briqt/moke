@@ -360,6 +360,8 @@
     <string name="persistence_none">None</string>
     <string name="persistence_tmux">tmux (attach on connect)</string>
     <string name="host_persistence_hint">With tmux: connecting to this host enters a tmux session — straight in if a session name is remembered, otherwise you pick one first.</string>
+    <string name="scroll_none_mosh">mosh does not carry a scrollback buffer, so there is no history to scroll here. Run tmux on the remote (or use SSH) to scroll.</string>
+    <string name="scroll_none_alt">A full-screen program owns the screen; there is no history to scroll.</string>
     <string name="scroll_mode">Swipe in full-screen programs</string>
     <string name="scroll_mode_smart">Smart</string>
     <string name="scroll_mode_wheel">Always send wheel</string>
