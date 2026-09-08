@@ -233,6 +233,13 @@ fun TerminalScreen(
         }
     }
 
+    // 进终端页就把键盘焦点交给终端本身（不弹软键盘——那是点击/键盘键的事）。
+    // 少了这一步，焦点会停在顶栏返回键上：外接键盘打字全落空，第一次回车激活的是返回键
+    // ——用户以为自己在敲命令，实际是退出了会话。isFocusable 只是"能被聚焦"，不等于"已聚焦"。
+    LaunchedEffect(ts.id) {
+        view.requestFocus()
+    }
+
     // 热切换：设置变更时对当前活动终端即时生效（含空闲会话——强制重绘，不必等新输出）。
     LaunchedEffect(ts.id, primaryFontId, fallbackFontId) {
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))

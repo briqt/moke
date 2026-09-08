@@ -59,9 +59,7 @@ class HostStore(private val context: Context) {
      * @return 是否真的落盘；false = 被上面两条规则挡下。
      */
     suspend fun save(list: List<Host>): Boolean {
-        val arr = JSONArray()
-        list.forEach { arr.put(it.toJson()) }
-        val encrypted = runCatching { CredentialCrypto.encrypt(arr.toString()) }.getOrNull() ?: return false
+        val encrypted = encode(list) ?: return false
         var written = false
         context.dataStore.edit { prefs ->
             // 在同一个事务里重新判定，避免「读到空 → 用户操作 → 写空」这条竞态。
@@ -79,6 +77,27 @@ class HostStore(private val context: Context) {
         return save(next)
     }
 
+    /**
+     * 只改一条记录的若干字段，**读-改-写在同一个 DataStore 事务里完成**。
+     *
+     * [upsert] 需要调用方交出"整张表 + 整条记录"，于是有两种丢改动的方式：调用方手里的记录是旧快照
+     * （会话持有的 Host 是打开那一刻的），或两个写入并发各拿到旧列表。最近连接时间、tmux 会话名
+     * 这类"顺手记一下"的字段一律走这里，避免顺手把用户的编辑抹掉。
+     *
+     * @return 是否真的落盘；false = 记录不存在，或被 [save] 的两条硬规则挡下。
+     */
+    suspend fun update(id: String, transform: (Host) -> Host): Boolean {
+        var written = false
+        context.dataStore.edit { prefs ->
+            val current = decode(prefs[key])
+            if (current.unreadable) return@edit
+            val next = updateHostIn(parse(current.json), id, transform) ?: return@edit
+            prefs[key] = encode(next) ?: return@edit
+            written = true
+        }
+        return written
+    }
+
     suspend fun delete(host: Host, current: List<Host>): Boolean =
         save(current.filterNot { it.id == host.id })
 
@@ -86,4 +105,18 @@ class HostStore(private val context: Context) {
         val arr = JSONArray(json)
         (0 until arr.length()).map { Host.fromJson(arr.getJSONObject(it)) }
     }.getOrDefault(emptyList())
+
+    /** 序列化 + 加密；加密失败返回 null（调用方据此放弃写入，绝不退回明文）。 */
+    private fun encode(list: List<Host>): String? {
+        val arr = JSONArray()
+        list.forEach { arr.put(it.toJson()) }
+        return runCatching { CredentialCrypto.encrypt(arr.toString()) }.getOrNull()
+    }
+}
+
+/** 按 id 改一条、其余原样返回；找不到返回 null（纯逻辑，便于单测）。 */
+internal fun updateHostIn(list: List<Host>, id: String, transform: (Host) -> Host): List<Host>? {
+    val idx = list.indexOfFirst { it.id == id }
+    if (idx < 0) return null
+    return list.toMutableList().also { it[idx] = transform(it[idx]) }
 }

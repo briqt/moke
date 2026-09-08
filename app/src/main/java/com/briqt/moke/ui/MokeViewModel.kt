@@ -440,10 +440,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 记住该主机上最后选择的 tmux 会话名：下次连接可直接按名附加，不再打扰用户选。 */
     private fun rememberTmuxSession(host: Host, name: String) = viewModelScope.launch {
-        val current = hosts.value.firstOrNull { it.id == host.id } ?: host
-        if (current.tmuxSessionName != name) {
-            store.upsert(current.copy(tmuxSessionName = name), hosts.value)
-        }
+        store.update(host.id) { if (it.tmuxSessionName == name) it else it.copy(tmuxSessionName = name) }
     }
 
     /**
@@ -496,9 +493,16 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         return session.id
     }
 
-    /** 记录最近连接时间（用于"最近连接"排序）。 */
+    /**
+     * 记录最近连接时间（用于"最近连接"排序）。
+     *
+     * **只能按 id 重读当前记录再改这一个字段**：`upsert` 是整条替换，而调用方手里的 [host] 往往是
+     * 会话**打开那一刻**的快照（重连/复制会话都拿 `TermSession.host`）。把快照整条写回去，等于把
+     * 此后的一切改动静默回滚——实测「会话开着时编辑主机 → 复制会话」编辑即丢，`tmuxSessionName`
+     * 也是这样被吃掉的（于是"选择会被记住"失效、选择器反复弹）。
+     */
     fun touchHost(host: Host) = viewModelScope.launch {
-        store.upsert(host.copy(lastConnectedAt = System.currentTimeMillis()), hosts.value)
+        store.update(host.id) { it.copy(lastConnectedAt = System.currentTimeMillis()) }
     }
 
     /**

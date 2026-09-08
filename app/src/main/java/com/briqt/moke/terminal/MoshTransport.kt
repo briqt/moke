@@ -295,10 +295,28 @@ class MoshTransport(
     }
 
     override fun close() {
+        val child = pid
+        val stream = out
         closed = true
+        // 关会话要连远端一起收掉：直接 SIGKILL 只杀本地 mosh-client，远端 mosh-server 按漫游语义
+        // 会把"客户端不见了"当成网络断了继续等下一个客户端——实测每关一个会话就在服务器上留下一个
+        // mosh-server（~4.5MB + 占住一个 UDP 端口），tmux 也一直显示 (attached)，直到主机重启。
+        // 正解是让 mosh-client 走它自己的退出协议（Ctrl-^ 后 '.'，MOSH_ESCAPE_KEY 未改即默认 0x1E），
+        // 它会通知 server 结束。整段跑在 writeExec（后台单线程）上：close 来自 UI，不能阻塞。
         writeExec.execute {
+            val quitSent = child > 0 && !childExited && stream != null &&
+                runCatching { stream.write(MOSH_QUIT_SEQUENCE); stream.flush(); true }.getOrDefault(false)
+            if (quitSent) {
+                // 等它把 shutdown 发出去并退出；一个 RTT 量级的事，超时就照旧 SIGKILL（不回退风险）。
+                val deadline = System.currentTimeMillis() + QUIT_GRACE_MS
+                while (!childExited && System.currentTimeMillis() < deadline) {
+                    runCatching { Thread.sleep(25) }
+                }
+            }
             runCatching { pfd?.close() }
-            if (pid > 0) runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+            if (child > 0 && !childExited) {
+                runCatching { android.system.Os.kill(child, android.system.OsConstants.SIGKILL) }
+            }
         }
         writeExec.shutdown()
         // 控制连接与回收线程独立于 PTY，必须一并收掉，否则会话关掉了 TCP 还挂着。
@@ -340,6 +358,12 @@ class MoshTransport(
          * 滚动绑定 ≈ 10 秒）以及用户在面板上的连续操作，又不至于长期占着一条 TCP。
          */
         private const val CONTROL_IDLE_MS = 45_000L
+
+        /** mosh 自身的退出序列：转义键 Ctrl-^ (0x1E) 后跟 `.`，让 mosh-client 通知远端 server 结束。 */
+        internal val MOSH_QUIT_SEQUENCE = byteArrayOf(0x1E, '.'.code.toByte())
+
+        /** 等 mosh-client 完成退出握手的上限；到点仍在就 SIGKILL 兜底。 */
+        private const val QUIT_GRACE_MS = 1_200L
     }
 
     /** 递归复制 asset 路径 [path] 到 [destParent]/[path]。目录靠 assets.list 判断（文件返回空）。 */
