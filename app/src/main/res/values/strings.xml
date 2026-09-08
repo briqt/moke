@@ -405,6 +405,7 @@
     <!-- 0.1.20-rc.2: session status lines + font errors (issue #1) -->
     <string name="term_connect_failed">[connect failed: %1$s]</string>
     <string name="term_session_ended">[session ended]</string>
+    <string name="term_left_tmux">[left tmux]</string>
     <string name="term_session_ended_code">[session ended (code %1$d)]</string>
     <string name="term_session_ended_signal">[session ended (signal %1$d)]</string>
     <string name="font_no_url">This font has no download URL</string>

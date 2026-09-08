@@ -39,6 +39,15 @@ public class TerminalSession extends TerminalOutput {
         String sessionEnded(int exitCode);
     }
 
+    /**
+     * 本会话专用的结束文案（可空）。
+     *
+     * 全局 {@link #statusText} 说的是"会话结束"这件事本身；但同一件事在不同会话里含义不同——
+     * 附加在 tmux 上的会话正常 detach 后，远端程序仍在跑，说"会话结束"就与界面上「已离开 tmux，
+     * 远端会话仍在运行」自相矛盾。产品层按会话装一个覆盖实现即可，vendored 层不必知道 tmux。
+     */
+    public volatile StatusText sessionStatusText;
+
     /** 默认英文实现；app 层可替换（见 {@link #statusText}）。 */
     public static volatile StatusText statusText = new StatusText() {
         @Override public String connectFailed(String reason) {
@@ -269,7 +278,8 @@ public class TerminalSession extends TerminalOutput {
                 }
 
                 int exitCode = (msg.obj instanceof Integer) ? (Integer) msg.obj : 0;
-                String desc = "\r\n" + statusText.sessionEnded(exitCode) + "\r\n";
+                StatusText text = sessionStatusText != null ? sessionStatusText : statusText;
+                String desc = "\r\n" + text.sessionEnded(exitCode) + "\r\n";
                 byte[] b = desc.getBytes(StandardCharsets.UTF_8);
                 if (mEmulator != null) {
                     mEmulator.append(b, b.length);

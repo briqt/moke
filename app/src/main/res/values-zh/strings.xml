@@ -401,6 +401,7 @@
     <!-- 0.1.20-rc.2：会话状态行 + 字体错误（issue #1） -->
     <string name="term_connect_failed">[连接失败: %1$s]</string>
     <string name="term_session_ended">[会话结束]</string>
+    <string name="term_left_tmux">[已离开 tmux]</string>
     <string name="term_session_ended_code">[会话结束 (code %1$d)]</string>
     <string name="term_session_ended_signal">[会话结束 (signal %1$d)]</string>
     <string name="font_no_url">该字体没有下载地址</string>

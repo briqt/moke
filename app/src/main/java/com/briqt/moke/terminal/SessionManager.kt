@@ -1,7 +1,9 @@
 package com.briqt.moke.terminal
 
 import android.content.Context
+import com.briqt.moke.R
 import com.briqt.moke.data.Host
+import com.briqt.moke.localized
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import kotlinx.coroutines.CoroutineScope
@@ -191,6 +193,19 @@ class SessionManager(context: Context) {
             remoteTmuxName = MutableStateFlow(remoteTmuxName),
             startedAt = System.currentTimeMillis(),
         )
+        // 结束文案按本会话的真实处境说：确认附加在 tmux 上、又是正常退出（detach 就是 code 0），
+        // 屏幕上写「会话结束」会和界面上「已离开 tmux，远端会话仍在运行」自相矛盾。
+        session.sessionStatusText = object : TerminalSession.StatusText {
+            override fun connectFailed(reason: String): String =
+                TerminalSession.statusText.connectFailed(reason)
+
+            override fun sessionEnded(exitCode: Int): String =
+                if (exitCode == 0 && ts.tmuxAttached.value == true) {
+                    appContext.localized(R.string.term_left_tmux)
+                } else {
+                    TerminalSession.statusText.sessionEnded(exitCode)
+                }
+        }
         // 有输出即刷新会话最后活动时间（供"更新时间"排序）。
         controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }

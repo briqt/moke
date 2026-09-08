@@ -683,7 +683,18 @@ private fun TerminalTopBar(
             // 角标只在有会话时显示会话数，避免挂一个「0」在那里。
             if (tmuxAvailable) {
                 IconButton(onClick = onOpenTmux) {
-                    BadgedBox(badge = { if (tmuxCount > 0) Badge { Text(tmuxCount.toString()) } }) {
+                    // 角标是"远端有几个 tmux 会话"这条信息，不是告警：Material 默认的 error 红
+                    // 看着像未读消息/出错了，用次要容器色表达"可点进去看"。
+                    BadgedBox(
+                        badge = {
+                            if (tmuxCount > 0) {
+                                Badge(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                ) { Text(tmuxCount.toString()) }
+                            }
+                        },
+                    ) {
                         Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                     }
                 }

@@ -461,7 +461,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 附加确认：发出 attach 命令 ≠ 附加成功。远端 tmux 缺失或启动失败时包装命令会回落成登录壳，
      * 此时若仍标成「当前 tmux 会话」，面板与顶栏就在撒谎。用源会话的侧通道数一下客户端：
-     * 明确为 0 且新终端仍存活 → 判定未附上，清除关联。数不出来（null）视为"无法确认"，不动状态。
+     * 明确为 0 **且此刻会话仍存活** → 判定未附上，清除关联。数不出来（null）或会话已结束都视为
+     * "无法确认"，不动状态。
      */
     private fun confirmTmuxAttach(session: TermSession, name: String) =
         viewModelScope.launch(Dispatchers.IO) {
@@ -473,6 +474,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 val count = Tmux.parseClientCount(
                     runCatching { session.transport.exec(Tmux.clientsCmd(name)) }.getOrNull()
                 ) ?: return@repeat
+                // 命令是在会话还活着时发出的，结果却可能在它结束之后才回来。这种时候"0 个客户端"
+                // 说明不了任何事——detach 本身就会让计数归零——按它清关联会把「已离开 tmux，远端
+                // 会话仍在运行」退化成「会话已结束」（实测：detach 恰好撞上确认往返时就会这样）。
+                if (!session.alive.value) return@launch
                 if (count > 0) {
                     session.tmuxAttached.value = true
                     // 附上了才下发滚动绑定：让 tmux 现场判定翻页器/命令行（客户端侧判不了，见
