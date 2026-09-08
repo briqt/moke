@@ -461,14 +461,14 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 附加确认：发出 attach 命令 ≠ 附加成功。远端 tmux 缺失或启动失败时包装命令会回落成登录壳，
      * 此时若仍标成「当前 tmux 会话」，面板与顶栏就在撒谎。用源会话的侧通道数一下客户端：
-     * 明确为 0 **且此刻会话仍存活** → 判定未附上，清除关联。数不出来（null）或会话已结束都视为
-     * "无法确认"，不动状态。
+     * **持续**为 0（一直数到窗口最后一轮）且此刻会话仍存活 → 判定未附上，清除关联。数不出来（null）、
+     * 会话已结束、以及窗口内的中间态 0 都视为"无法确认"，不动状态。
      */
     private fun confirmTmuxAttach(session: TermSession, name: String) =
         viewModelScope.launch(Dispatchers.IO) {
             // 用**该会话自己**的侧通道：源会话（临时登录壳）在选定后就被关掉了，拿它去问必然失败。
             // 传输要等 View 测量后才 start，所以给若干次重试；数不出来一律当"无法确认"，不动状态。
-            repeat(8) {
+            repeat(ATTACH_CONFIRM_ROUNDS) { round ->
                 delay(1000)
                 if (!session.alive.value) return@launch
                 val count = Tmux.parseClientCount(
@@ -485,12 +485,17 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                     if (tmuxScrollSetup.value) {
                         runCatching { session.transport.exec(Tmux.scrollSetupCmd(name)) }
                     }
-                } else {
+                    return@launch
+                }
+                // 数到 0 **不等于**没附上：mosh 要先引导 mosh-server、再由包装命令里的 tmux 去附加，
+                // 这中间有几秒；第一轮就把 0 当结论，会把一个其实附加成功的会话永久标成"没附上"
+                // ——面板于此给出「加入」（再开一个客户端）、detach 退化成「会话已结束」、滚动绑定
+                // 也不会下发。所以只有窗口最后一轮的 0 才算数。
+                if (round == ATTACH_CONFIRM_ROUNDS - 1) {
                     session.tmuxAttached.value = false
                     session.remoteTmuxId.value = null
                     session.remoteTmuxName.value = null
                 }
-                return@launch
             }
         }
 
@@ -818,5 +823,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     init {
         repairLegacyTmuxLoginCommands()
         checkUpdateSilently()
+    }
+
+    private companion object {
+        /**
+         * 附加确认的轮数（每轮间隔 1s）：要盖住"mosh 引导 + tmux 附加"的那几秒，又不至于让真的
+         * 没附上的会话长时间挂着错误标注。
+         */
+        const val ATTACH_CONFIRM_ROUNDS = 8
     }
 }
