@@ -156,8 +156,13 @@ fun TerminalScreen(
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
     var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
-    // 进入会话后探测远端 tmux；SSH 复用现有连接，mosh 按需走独立 SSH 控制连接。
-    LaunchedEffect(ts.id) { onTmuxRefresh() }
+    // 进入会话后探测远端 tmux；SSH 复用现有连接，mosh 走独立 SSH 控制连接。
+    // 已有确定结论（装了 / 没装）就不再重探：从文件页返回、来回切会话都会重跑这个 effect，
+    // 而 mosh 上一次探测就是一次完整 SSH 登录。列表在打开面板与每次管理动作后仍会实时刷新。
+    LaunchedEffect(ts.id) {
+        val phase = ts.tmuxState.value.phase
+        if (phase == TmuxPhase.IDLE || phase == TmuxPhase.ERROR) onTmuxRefresh()
+    }
     // 修饰键三态（一次性/锁定/关）：附加键与面板共用一份状态，并同步给 controller 供 IME 输入使用。
     var mods by remember(ts.id) { mutableStateOf(Modifiers()) }
     // 全键盘面板是否展开（浮在终端之上，不挤压终端 → 不触发远端 resize）。
@@ -290,7 +295,7 @@ fun TerminalScreen(
             TerminalTopBar(
                 title = title,
                 // 副标题第 2 行的身份：连接名（设备名），未命名则回落 user@host。
-                deviceName = ts.host.displayName,
+                deviceName = ts.host.displayName.ifBlank { stringResource(R.string.unnamed) },
                 useMosh = ts.host.useMosh,
                 alive = alive,
                 tmuxDetached = remoteTmuxName != null && tmuxAttached == true,

@@ -220,9 +220,14 @@ private fun FontCard(
                 }
             }
 
-            // 字体说明仅中文目录内有，英文界面不显示（避免英文里夹中文）。
-            if (zh && spec.note.isNotBlank()) {
-                Text(spec.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 字体说明走资源，两种语言都看得到（此前只有中文目录内联，英文界面整段消失——
+            // Maple Mono 那句「整包大，建议 WiFi」尤其要紧，155MB 的下载不能没有提示）。
+            if (spec.noteRes != 0) {
+                Text(
+                    stringResource(spec.noteRes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             // 状态 / 下载

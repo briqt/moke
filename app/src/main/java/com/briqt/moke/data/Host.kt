@@ -46,7 +46,19 @@ data class Host(
      */
     val tmuxSessionName: String = "",
 ) {
-    val displayName: String get() = label.ifBlank { if (host.isBlank()) "未命名" else "$username@$host" }
+    /**
+     * 展示名：连接名优先，否则 `user@host`。
+     *
+     * 三者全空只可能来自损坏/手工构造的数据（编辑页要求主机与用户名非空），此时返回空串，
+     * 由 UI 用本地化的「未命名」兜底——数据层不该硬编码某种语言的文案。
+     */
+    val displayName: String get() = label.ifBlank {
+        when {
+            host.isNotBlank() && username.isNotBlank() -> "$username@$host"
+            host.isNotBlank() -> host
+            else -> username
+        }
+    }
 
     /**
      * 本次连接实际要用的协议级启动命令（空=默认 login shell）。

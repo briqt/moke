@@ -52,8 +52,23 @@ class SshTransport(
                     val b = ("\r\n" + msg + "\r\n").toByteArray(StandardCharsets.UTF_8)
                     session.processToEmulator(b, b.size)
                 }
+                // 建连要花几秒（DNS + TCP + 认证），主机不可达时还要等满超时。此前这段时间里
+                // 屏幕上一个字都没有，用户分不清「正在连」和「已经卡死」——mosh 侧一直有引导提示，
+                // SSH 这边补齐。
+                val target = buildString {
+                    if (host.username.isNotBlank()) {
+                        append(host.username)
+                        append('@')
+                    }
+                    append(host.host)
+                    if (host.port != 22) {
+                        append(':')
+                        append(host.port)
+                    }
+                }
+                feed(session, "\r\n" + appContext.getString(R.string.ssh_connecting, target) + "\r\n")
                 if (jumpHost != null) {
-                    feed(session, "\r\n" + appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
+                    feed(session, appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
                 }
                 // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
                 val conn = connector.connect(host, jumpHost, heartbeat = true)

@@ -14,8 +14,11 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * mosh 传输（总纲 §5.5 的落地）：
@@ -71,7 +74,9 @@ class MoshTransport(
                 feed(session, "\r\n" + appContext.getString(R.string.mosh_bootstrapping) + "\r\n")
                 val bootstrap = sshBootstrap()
                 val connect = MoshBootstrap.parse(bootstrap)
-                    ?: throw IllegalStateException("未从 mosh-server 输出解析到 MOSH CONNECT：\n$bootstrap")
+                    ?: throw IllegalStateException(
+                        appContext.getString(R.string.mosh_bootstrap_unparsed, bootstrap.trim())
+                    )
                 feed(session, appContext.getString(R.string.mosh_client_starting, connect.port) + "\r\n")
 
                 // 2) 独立子进程 + PTY 运行 native mosh-client
@@ -176,8 +181,9 @@ class MoshTransport(
         }, "moke-mosh-${host.host}").start()
     }
 
+    /** 引导只跑一次，用完即弃的短连接（此时控制连接还没有存在的理由）。 */
     private fun sshBootstrap(): String {
-        return withSshClient { client ->
+        return SshConnector(appContext).use(host, jumpHost) { client ->
             client.startSession().use { s ->
                 val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = effectiveStartup))
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
@@ -188,19 +194,18 @@ class MoshTransport(
     }
 
     /**
-     * mosh 数据面虽是 UDP，管理 tmux 仍可按需建立一条短生命周期 SSH 控制连接。
-     * 每次独立连接，不与 mosh 漫游生命周期耦合；失败返回 null，由 UI 明确显示并允许重试。
+     * mosh 数据面虽是 UDP，管理 tmux 仍需一条 SSH 控制连接。失败返回 null，由 UI 明确显示并允许重试。
      */
     override fun exec(command: String): String? {
         if (closed) return null
         return runCatching {
-            withSshClient { client ->
+            withControlClient { client ->
                 client.startSession().use { s ->
                     val cmd = s.exec(command)
                     cmd.join(10, TimeUnit.SECONDS)
                     if (cmd.isOpen) {
                         runCatching { cmd.close() }
-                        return@withSshClient null
+                        return@withControlClient null
                     }
                     cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
                 }
@@ -208,9 +213,71 @@ class MoshTransport(
         }.getOrNull()
     }
 
-    /** 短生命周期控制连接（mosh 数据面是 UDP，管理动作仍需一条 SSH）。 */
-    private fun <T> withSshClient(block: (SSHClient) -> T): T =
-        SshConnector(appContext).use(host, jumpHost, block)
+    // ---------- tmux 侧通道：空闲即回收的可复用控制连接 ----------
+
+    private val controlLock = ReentrantLock()
+    private var control: SshConnector.Connected? = null
+    private var controlIdleSince = 0L
+    private var reaper: ScheduledExecutorService? = null
+
+    /**
+     * 在控制连接上跑一段，**空闲窗口内复用同一条连接**。
+     *
+     * 每次进终端页就会连着触发「探测 tmux + 附加确认（最多 8 轮）+ 下发滚动绑定」，逐条新建
+     * 意味着一次进页面打出十来次完整 SSH 登录：auth.log 难看，有 fail2ban / MaxStartups 的主机
+     * 还可能把自己封掉。反过来也不能长期挂着 TCP —— 那会抵消 mosh「关屏/换网不断线」的意义。
+     * 折中就是这里：忙的时候复用，空闲 [CONTROL_IDLE_MS] 后自动断开。
+     *
+     * 复用的连接可能在两次调用之间被中间设备掐断，所以失败重连一次再试（与 SftpSession 同口径）。
+     */
+    private fun <T> withControlClient(block: (SSHClient) -> T): T = controlLock.withLock {
+        check(!closed) { "transport closed" }
+        try {
+            block(controlClient())
+        } catch (t: Throwable) {
+            if (closed) throw t
+            closeControl()
+            block(controlClient())
+        } finally {
+            controlIdleSince = System.currentTimeMillis()
+            scheduleReap()
+        }
+    }
+
+    private fun controlClient(): SSHClient {
+        control?.takeIf { it.client.isConnected && it.client.isAuthenticated }?.let { return it.client }
+        closeControl()
+        val c = SshConnector(appContext).connect(host, jumpHost, heartbeat = true)
+        runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
+        control = c
+        return c.client
+    }
+
+    private fun closeControl() {
+        runCatching { control?.close() }
+        control = null
+    }
+
+    /** 空闲回收：拿不到锁说明正在用，改期再看，绝不打断进行中的命令。 */
+    private fun scheduleReap() {
+        val exec = reaper ?: Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "moke-mosh-ctl-reaper").apply { isDaemon = true }
+        }.also { reaper = it }
+        runCatching {
+            exec.schedule({
+                if (controlLock.tryLock()) {
+                    try {
+                        if (closed || System.currentTimeMillis() - controlIdleSince >= CONTROL_IDLE_MS) closeControl()
+                        else scheduleReap()
+                    } finally {
+                        controlLock.unlock()
+                    }
+                } else {
+                    scheduleReap()
+                }
+            }, CONTROL_IDLE_MS, TimeUnit.MILLISECONDS)
+        }
+    }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (closed) return
@@ -233,6 +300,15 @@ class MoshTransport(
             if (pid > 0) runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
         }
         writeExec.shutdown()
+        // 控制连接与回收线程独立于 PTY，必须一并收掉，否则会话关掉了 TCP 还挂着。
+        runCatching { reaper?.shutdownNow() }
+        reaper = null
+        if (controlLock.tryLock()) {
+            try { closeControl() } finally { controlLock.unlock() }
+        } else {
+            // 正在跑一条命令：由 withControlClient 的 closed 判定收尾。
+            Thread({ controlLock.withLock { closeControl() } }, "moke-mosh-ctl-close").start()
+        }
     }
 
     private fun feed(session: TerminalSession, msg: String) {
@@ -255,6 +331,14 @@ class MoshTransport(
             marker.writeText("1")
         }
         return dir
+    }
+
+    companion object {
+        /**
+         * 控制连接的空闲寿命。要盖住「进终端页」那一串连续动作（探测 → 最多 8 轮附加确认 →
+         * 滚动绑定 ≈ 10 秒）以及用户在面板上的连续操作，又不至于长期占着一条 TCP。
+         */
+        private const val CONTROL_IDLE_MS = 45_000L
     }
 
     /** 递归复制 asset 路径 [path] 到 [destParent]/[path]。目录靠 assets.list 判断（文件返回空）。 */

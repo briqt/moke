@@ -367,4 +367,26 @@
     <string name="include_prerelease">包含预览版</string>
     <string name="include_prerelease_sub">检查更新时也算上 rc 预览版。预览版用于抢先验证新功能，可能不稳定。</string>
     <string name="github_repo">GitHub 仓库</string>
+
+    <!-- 0.1.20：凭据存储 / 连接反馈 / 字体说明 -->
+    <string name="hosts_unreadable_title">保存的连接无法解密</string>
+    <string name="hosts_unreadable_hint">连接凭据由本机密钥库里的密钥加密，而那个密钥已经不在了——通常发生在把备份恢复到新设备之后。原数据保持原样，不会被任何新写入覆盖。要重新开始，请清除应用数据。</string>
+    <string name="ssh_connecting">[moke] 正在连接 %1$s…</string>
+    <string name="mosh_bootstrap_unparsed">未从 mosh-server 输出里解析到 MOSH CONNECT：\n%1$s</string>
+    <string name="font_note_jetbrains_mono">内置默认 · 精致清晰，中文走回退字体</string>
+    <string name="font_note_noto_sans_sc">内置中文回退 · 思源黑体子集（常用汉字），开箱中文好看</string>
+    <string name="font_note_fira_code">最流行的连字编程字体 · 体积小</string>
+    <string name="font_note_maple_mono">圆角等宽 · 含中文(2:1)+Nerd图标 · 高分屏 unhinted · 整包大，建议 WiFi</string>
+    <string name="font_note_hack">经典编程等宽 · 英文，无连字，体积小</string>
+    <string name="font_note_ibm_plex_mono">IBM 出品 · 沉稳清晰</string>
+    <string name="font_note_source_code_pro">Adobe 经典编程等宽</string>
+    <string name="font_note_roboto_mono">Roboto 家族等宽版</string>
+    <string name="font_note_ubuntu_mono">Ubuntu 系统等宽</string>
+    <string name="font_note_inconsolata">清晰细长的等宽</string>
+    <string name="font_note_space_mono">复古几何风等宽</string>
+    <string name="font_note_anonymous_pro">为编程设计的等宽</string>
+    <string name="font_note_cascadia_code">微软终端字体 · 连字</string>
+    <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd 图标</string>
+    <string name="font_note_victor_mono">连字 + 草书斜体</string>
+    <string name="font_note_dejavu_sans_mono">字形覆盖广 · 兼容性好</string>
 </resources>

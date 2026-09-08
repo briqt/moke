@@ -371,4 +371,26 @@
     <string name="include_prerelease">Include pre-releases</string>
     <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
     <string name="github_repo">GitHub repository</string>
+
+    <!-- 0.1.20: credential store / connect feedback / font notes -->
+    <string name="hosts_unreadable_title">Saved connections cannot be decrypted</string>
+    <string name="hosts_unreadable_hint">They are encrypted with a key held in this device\'s keystore, and that key is gone — usually after restoring a backup onto a new device. The old data is kept untouched and nothing new will be written over it. Clear the app\'s data to start fresh.</string>
+    <string name="ssh_connecting">[moke] Connecting to %1$s…</string>
+    <string name="mosh_bootstrap_unparsed">No MOSH CONNECT line in the mosh-server output:\n%1$s</string>
+    <string name="font_note_jetbrains_mono">Bundled default · crisp and refined; CJK falls back to the fallback font</string>
+    <string name="font_note_noto_sans_sc">Bundled CJK fallback · Noto Sans SC subset (common Han characters)</string>
+    <string name="font_note_fira_code">The most popular ligature coding font · small</string>
+    <string name="font_note_maple_mono">Rounded monospace · CJK (2:1) + Nerd icons · unhinted for hi-dpi · large download, use Wi-Fi</string>
+    <string name="font_note_hack">Classic coding monospace · Latin only, no ligatures, small</string>
+    <string name="font_note_ibm_plex_mono">By IBM · calm and legible</string>
+    <string name="font_note_source_code_pro">Adobe\'s classic coding monospace</string>
+    <string name="font_note_roboto_mono">The monospace member of the Roboto family</string>
+    <string name="font_note_ubuntu_mono">Ubuntu\'s system monospace</string>
+    <string name="font_note_inconsolata">Crisp and narrow monospace</string>
+    <string name="font_note_space_mono">Retro geometric monospace</string>
+    <string name="font_note_anonymous_pro">Monospace designed for coding</string>
+    <string name="font_note_cascadia_code">Microsoft\'s terminal font · ligatures</string>
+    <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd icons</string>
+    <string name="font_note_victor_mono">Ligatures + cursive italics</string>
+    <string name="font_note_dejavu_sans_mono">Broad glyph coverage · very compatible</string>
 </resources>

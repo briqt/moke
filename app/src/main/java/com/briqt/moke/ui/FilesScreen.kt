@@ -129,7 +129,8 @@ fun FilesScreen(
                 title = {
                     Column {
                         Text(
-                            state.host?.displayName ?: stringResource(R.string.files_title),
+                            state.host?.displayName?.ifBlank { stringResource(R.string.unnamed) }
+                                ?: stringResource(R.string.files_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,

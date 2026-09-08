@@ -114,6 +114,8 @@ fun HomeScreen(
     tab: HomeTab,
     onTab: (HomeTab) -> Unit,
     hosts: List<Host>,
+    /** 存量凭据解不开（Keystore 密钥失效）：连接页要说明原因，而不是显示成空列表。 */
+    credentialsUnreadable: Boolean,
     sessions: List<TermSession>,
     hostGroupOrder: List<String>,
     hostCollapsedGroups: Set<String>,
@@ -207,7 +209,7 @@ fun HomeScreen(
         },
     ) { padding ->
         when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
+            HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
             HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions)
             HomeTab.Settings -> SettingsMenuContent(
                 padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
@@ -220,7 +222,9 @@ fun HomeScreen(
         val name = pendingSession?.displayTitle?.value.orEmpty()
         ConfirmDialog(
             title = stringResource(R.string.session_close),
-            message = if (pendingSession?.remoteTmuxId?.value != null) {
+            // 按**名称**判定，与终端页一致：从选择器「新建」出来的会话在第一次刷新前
+            // remoteTmuxId 还是 null，只看 ID 会漏掉它，弹出的确认里就不会说明「远端 tmux 仍在跑」。
+            message = if (pendingSession?.remoteTmuxName?.value != null) {
                 stringResource(R.string.close_tmux_connection_confirm, name)
             } else {
                 stringResource(R.string.close_connection_confirm, name)
@@ -271,6 +275,7 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
 private fun ConnectionsContent(
     padding: PaddingValues,
     hosts: List<Host>,
+    credentialsUnreadable: Boolean,
     groupOrder: List<String>,
     collapsed: Set<String>,
     onToggleCollapse: (String) -> Unit,
@@ -282,6 +287,18 @@ private fun ConnectionsContent(
     onDelete: (Host) -> Unit,
     onConnect: (Host) -> Unit,
 ) {
+    // 「读不出来」不能伪装成「一台都没有」——那会让用户以为数据没了，
+    // 转头新建一条连接就把还在磁盘上的密文覆盖掉（写入已在 HostStore 侧挡住，这里负责说清楚）。
+    if (credentialsUnreadable) {
+        EmptyState(
+            padding = padding,
+            icon = Icons.Filled.Shield,
+            title = stringResource(R.string.hosts_unreadable_title),
+            hint = stringResource(R.string.hosts_unreadable_hint),
+            error = true,
+        )
+        return
+    }
     if (hosts.isEmpty()) {
         EmptyState(
             padding = padding,
@@ -527,7 +544,11 @@ private fun HostCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(host.displayName, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(
+                        host.displayName.ifBlank { stringResource(R.string.unnamed) },
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
                     ProtocolBadge(host.useMosh)
                 }
                 Text(
@@ -891,12 +912,33 @@ private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
 // ---------- 通用空态 ----------
 
 @Composable
-private fun EmptyState(padding: PaddingValues, icon: ImageVector, title: String, hint: String) {
-    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+private fun EmptyState(
+    padding: PaddingValues,
+    icon: ImageVector,
+    title: String,
+    hint: String,
+    // 出错态（如凭据解不开）用错误色，把「没有内容」和「读不出来」在视觉上分开。
+    error: Boolean = false,
+) {
+    Box(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp))
-            Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(44.dp),
+            )
+            Text(
+                title,
+                fontWeight = FontWeight.SemiBold,
+                color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
         }
     }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 6~11 的自动备份规则（API 31+ 见 data_extraction_rules.xml）。
+
+  连接凭据用 Android Keystore 里的密钥加密后存放，而 Keystore 密钥**不随备份迁移**。
+  把密文备份到新设备只会得到一份永远解不开的数据，界面上表现为「一台主机都没有」。
+  与其如此，不如干脆不备份它：用户在新机上重新添加连接，语义清晰。
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore/moke_hosts.preferences_pb" />
+</full-backup-content>

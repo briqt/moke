@@ -67,6 +67,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val hosts: StateFlow<List<Host>> = store.hosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * 存量凭据解不开（Keystore 密钥失效，典型是整机备份恢复到新机）。
+     * 连接页据此说清原因——否则用户只看到一个空列表，会以为数据自己没了。
+     */
+    val credentialsUnreadable: StateFlow<Boolean> = store.unreadable
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** 用户选的配色：关闭联动时即最终生效者；开启联动后是「深色模式用」那一套。 */
     val colorSchemeId: StateFlow<String> = settings.colorSchemeId
         .stateIn(viewModelScope, SharingStarted.Eagerly, TerminalThemes.DEFAULT_ID)
@@ -212,7 +219,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 FontSpec(
                     id = uf.id, name = uf.name, nameZh = uf.name, license = str(R.string.license_local),
                     cjk = false, bundled = false, url = null, archive = false,
-                    entryHint = "", approxBytes = 0, userUploaded = true, note = str(R.string.note_local_import),
+                    entryHint = "", approxBytes = 0, userUploaded = true, noteRes = R.string.note_local_import,
                 )
             }
         }
@@ -316,13 +323,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             message = null,
         )
 
+        // 重试是给「传输还没 start 完」留的窗口，不是给不可达主机用的压测。
+        // 固定 1.5s 间隔在 20s 内会打满 13 次；mosh 主机上每一次都是一条完整 SSH 登录，
+        // 对带 fail2ban / MaxStartups 的远端等于自我封禁。改成指数退避：0/1/3/7/15s 共 5 次。
         val deadline = System.currentTimeMillis() + if (retryUntilReady) 20_000L else 0L
         var out: String?
-        do {
+        var backoff = 1_000L
+        while (true) {
             out = runCatching { ts.transport.exec(Tmux.DISCOVER_CMD) }.getOrNull()
             if (out != null || !retryUntilReady || !currentCoroutineContext().isActive) break
-            delay(1500)
-        } while (System.currentTimeMillis() < deadline)
+            if (System.currentTimeMillis() + backoff >= deadline) break
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(8_000L)
+        }
 
         if (out == null) {
             ts.tmuxState.value = previous.copy(
@@ -475,6 +488,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             startupCommand = source.startupCommand,
         )
         ensureSessionService()
+        // 重连同样要核对是否真的附上了。漏掉这一步，新会话的 tmuxAttached 恒为 null：
+        // detach 后提示会退化成「会话已结束」，而 tmux 真的没附上时顶栏还继续标着 tmux ——
+        // 正是首次附加时特意用侧通道消灭掉的那种「UI 撒谎」。
+        source.remoteTmuxName.value?.let { confirmTmuxAttach(session, it) }
         return session.id
     }
 

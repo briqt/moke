@@ -44,6 +44,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     var homeTab by remember { mutableStateOf(HomeTab.Connections) }
 
     val hosts by vm.hosts.collectAsState()
+    val credentialsUnreadable by vm.credentialsUnreadable.collectAsState()
     val sessions by vm.sessions.sessions.collectAsState()
     val hostGroupOrder by vm.hostGroupOrder.collectAsState()
     val hostCollapsedGroups by vm.hostCollapsedGroups.collectAsState()
@@ -108,6 +109,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             tab = homeTab,
             onTab = { homeTab = it },
             hosts = hosts,
+            credentialsUnreadable = credentialsUnreadable,
             sessions = sessions,
             hostGroupOrder = hostGroupOrder,
             hostCollapsedGroups = hostCollapsedGroups,

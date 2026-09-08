@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ 的备份 / 换机迁移规则。理由同 backup_rules.xml：
+  连接凭据由 Keystore 密钥加密，密钥不跟着走，搬过去的密文解不开。
+  云备份与设备直传都排除，避免在新机上出现「列表空了」这种无法自解释的状态。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/moke_hosts.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/moke_hosts.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

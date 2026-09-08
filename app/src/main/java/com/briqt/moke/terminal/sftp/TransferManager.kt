@@ -152,13 +152,35 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         }
     }
 
+    /**
+     * `pump` 的清空必须走 finally。
+     *
+     * [runOne] 里取主机、置 RUNNING、建 SftpSession 都在它自己的 try 之外，任何一处抛出
+     * （DataStore 读失败之类）都会让这个协程直接结束，而 `pump` 还留着一个已死的 Job ——
+     * 之后 [start] 永远早退，队列里的任务就卡在「排队中」直到进程重启。
+     */
     private suspend fun pumpLoop() {
-        while (true) {
-            val task = synchronized(pumpLock) {
-                _tasks.value.firstOrNull { it.state == TransferState.QUEUED }
-                    ?: run { pump = null; null }
-            } ?: return
-            runOne(task)
+        val self = kotlin.coroutines.coroutineContext[Job]
+        try {
+            while (true) {
+                val task = synchronized(pumpLock) {
+                    _tasks.value.firstOrNull { it.state == TransferState.QUEUED }
+                        ?: run { pump = null; null }
+                } ?: return
+                // [runOne] 里取主机、置 RUNNING、建 SftpSession 都在它自己的 try 之外，
+                // 任何一处抛出（DataStore 读失败之类）都会掀掉整个工作协程。以前那样的话
+                // `pump` 会留着一个已死的 Job，[start] 从此永远早退，队列里的文件卡在
+                // 「排队中」直到进程重启。这里兜住：这条任务算失败，队列继续往下走。
+                runCatching { runOne(task) }.onFailure { t ->
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    update(task.id) { it.copy(state = TransferState.FAILED, error = describe(t, null)) }
+                    persist()
+                }
+            }
+        } finally {
+            // 只在 `pump` 仍然是「我」时清空。正常收尾已经在上面的临界区里原子地置空了，
+            // 那之后它可能已经指向新起的工作协程，顺手抹掉会让两个 pump 并行跑。
+            synchronized(pumpLock) { if (pump === self) pump = null }
         }
     }
 

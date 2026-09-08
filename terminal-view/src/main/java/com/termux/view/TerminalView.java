@@ -608,37 +608,40 @@ public final class TerminalView extends View {
         if (mokeOnScrollUnavailable != null) mokeOnScrollUnavailable.run();
     }
 
-    /** Perform a scroll, either from dragging the screen or by scrolling a mouse wheel. */
+    /**
+     * Perform a scroll, either from dragging the screen or by scrolling a mouse wheel.
+     *
+     * <p>moke: 决策本身抽到 {@link MokeScroll#decide}（纯函数、有单测）。这里只负责把结论
+     * 落到具体动作上。关键边界是「全屏程序内滑动」那三档**只在备用屏内生效**——主屏幕永远滚
+     * 本地历史，否则在 shell 提示符上滑动会翻命令历史（方向键）或把 {@code \033[M…} 打进
+     * 命令行（滚轮），而那里恰恰有真正可滚的 scrollback。
+     */
     void doScroll(MotionEvent event, int rowsDown) {
         boolean up = rowsDown < 0;
         int amount = Math.abs(rowsDown);
         for (int i = 0; i < amount; i++) {
-            if (mokeScrollMode == 2) {
-                // moke: 用户显式选定的模式优先。此前鼠标跟踪写在第一个条件里，远端一开鼠标就把
-                // 「始终发方向键」短路掉，设置形同虚设。
-                handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
-            } else if (mEmulator.isMouseTrackingActive() || mokeScrollMode == 1) {
-                sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
-            } else if (mEmulator.isAlternateBufferActive()) {
-                // Send up and down key events for scrolling, which is what some terminals do to make scroll work in
-                // e.g. less, which shifts to the alt screen without mouse handling.
-                //
-                // moke: skip this in smart mode when the program enabled bracketed paste — that marks a line
-                // editor / REPL TUI (Ink-based CLIs, readline), where arrow keys walk the command history
-                // instead of scrolling. The alternate buffer has no scrollback, so there is nothing else to
-                // scroll; doing nothing beats destroying the user's prompt.
-                //
-                // 到这里只可能是智能模式（模式 1/2 已在上面分流）。两种情况都判不出方向键是否安全，
-                // 一律不发并提示：①mosh 会话（备用屏是 mosh 自己的，见 mokeMoshSession）；
-                // ②远端开了括号粘贴模式（行编辑型程序）。真要发方向键可显式选「始终发方向键」。
-                if (mokeMoshSession || mEmulator.isBracketedPasteMode()) {
+            int action = MokeScroll.decide(
+                mokeScrollMode,
+                mEmulator.isAlternateBufferActive(),
+                mEmulator.isMouseTrackingActive(),
+                mokeMoshSession,
+                mEmulator.isBracketedPasteMode()
+            );
+            switch (action) {
+                case MokeScroll.ACTION_ARROWS:
+                    handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
+                    break;
+                case MokeScroll.ACTION_WHEEL:
+                    sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
+                    break;
+                case MokeScroll.ACTION_NONE:
                     mokeNotifyScrollUnavailable();
                     return;
-                }
-                handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
-            } else {
-                mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));
-                if (!awakenScrollBars()) invalidate();
+                case MokeScroll.ACTION_LOCAL:
+                default:
+                    mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));
+                    if (!awakenScrollBars()) invalidate();
+                    break;
             }
         }
     }
