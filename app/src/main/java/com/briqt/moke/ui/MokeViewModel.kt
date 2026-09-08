@@ -9,6 +9,7 @@ import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.data.Host
+import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.MokeTransferService
@@ -138,6 +139,20 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /**
+     * 首连是否自动信任主机密钥（默认关=先问一次）。
+     *
+     * 值的镜像（[HostKeyPrompt.autoTrust]）由 `MokeApplication` 在进程作用域维护：校验发生在
+     * 连接线程上、必须同步返回，不能在那儿读 DataStore；也不能只依赖 ViewModel 活着。
+     */
+    val autoTrustNewHostKey: StateFlow<Boolean> = settings.autoTrustNewHostKey
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** 待确认的首连指纹（非空=显示确认弹窗）。 */
+    val hostKeyRequest: StateFlow<HostKeyPrompt.Request?> = HostKeyPrompt.pending
+
+    fun resolveHostKey(id: String, trusted: Boolean) = HostKeyPrompt.resolve(id, trusted)
     /** 检查更新是否包含预发布版（关于页开关）。 */
     val includePrerelease: StateFlow<Boolean> = settings.includePrerelease
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -738,6 +753,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setTmuxScrollSetup(on: Boolean) = viewModelScope.launch { settings.setTmuxScrollSetup(on) }
 
     fun setConfirmCloseSession(on: Boolean) = viewModelScope.launch { settings.setConfirmCloseSession(on) }
+
+    fun setAutoTrustNewHostKey(on: Boolean) = viewModelScope.launch { settings.setAutoTrustNewHostKey(on) }
 
     fun setKeepScreenOn(on: Boolean) = viewModelScope.launch { settings.setKeepScreenOn(on) }
 

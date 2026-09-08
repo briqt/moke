@@ -88,7 +88,7 @@
     <!-- 会话 -->
     <string name="empty_sessions_title">No sessions</string>
     <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
-    <string name="sessions_clear_ended">Clear %1$d ended</string>
+    <string name="sessions_clear_ended">Clear ended (%1$d)</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
     <string name="duplicate_session">Duplicate session</string>
@@ -302,6 +302,12 @@
     <string name="mosh_connect_failed">[mosh failed: %1$s]</string>
     <string name="hostkey_first_seen">First connection to %1$s; host fingerprint saved: %2$s</string>
     <string name="hostkey_changed">⚠️ Host key changed!\n  saved:   %1$s\n  current: %2$s\nThis may be a man-in-the-middle attack; connection rejected. If you are sure the server rotated its key, open this connection’s edit page and tap “Clear saved host fingerprint”, then reconnect (deleting and re-adding the connection does not clear it).</string>
+    <string name="hostkey_rejected">Host key for %1$s was not trusted; connection aborted.</string>
+    <string name="hostkey_confirm_title">Trust this host?</string>
+    <string name="hostkey_confirm_body">First connection to %1$s. Check this fingerprint against the server before trusting it — on the server, run:\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\nTrusting the wrong key means whoever holds it can read this session from now on.</string>
+    <string name="hostkey_confirm_trust">Trust</string>
+    <string name="menu_auto_trust_hostkey">Trust new hosts without asking</string>
+    <string name="menu_auto_trust_hostkey_sub">Off: the first connection to a new host shows its fingerprint for confirmation. On: the fingerprint is recorded silently, so an interception on that first connection goes unnoticed. Key changes are always rejected either way.</string>
     <string name="hostkey_clear">Clear saved host fingerprint</string>
     <string name="hostkey_clear_hint">Saved: %1$s</string>
     <string name="hostkey_none">No fingerprint saved for this host yet</string>

@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.SwipeVertical
@@ -46,11 +47,13 @@ fun TerminalSettingsScreen(
     tmuxScrollSetup: Boolean,
     keepScreenOn: Boolean,
     confirmClose: Boolean,
+    autoTrustNewHostKey: Boolean,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
     onTmuxScrollSetup: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onConfirmClose: (Boolean) -> Unit,
+    onAutoTrustNewHostKey: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     var kbDialog by remember { mutableStateOf(false) }
@@ -116,6 +119,13 @@ fun TerminalSettingsScreen(
                 subtitle = stringResource(R.string.menu_confirm_close_sub),
                 checked = confirmClose,
                 onCheckedChange = onConfirmClose,
+            )
+            SwitchRow(
+                icon = Icons.Filled.Key,
+                title = stringResource(R.string.menu_auto_trust_hostkey),
+                subtitle = stringResource(R.string.menu_auto_trust_hostkey_sub),
+                checked = autoTrustNewHostKey,
+                onCheckedChange = onAutoTrustNewHostKey,
             )
         }
     }

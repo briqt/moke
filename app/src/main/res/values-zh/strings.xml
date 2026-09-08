@@ -298,6 +298,12 @@
     <string name="mosh_connect_failed">[mosh 连接失败: %1$s]</string>
     <string name="hostkey_first_seen">首次连接 %1$s，已记录主机指纹 %2$s</string>
     <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确认服务器换过密钥，请到该连接的编辑页点「清除已保存的主机指纹」后重连（删除并重建连接不会清除指纹）。</string>
+    <string name="hostkey_rejected">未信任 %1$s 的主机密钥，已中止连接。</string>
+    <string name="hostkey_confirm_title">信任这台主机？</string>
+    <string name="hostkey_confirm_body">第一次连接 %1$s。信任之前请先和服务器上的指纹核对——在服务器上执行：\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n一旦信错，持有那把密钥的人从此就能看到这个会话里的一切。</string>
+    <string name="hostkey_confirm_trust">信任</string>
+    <string name="menu_auto_trust_hostkey">首次连接自动信任新主机</string>
+    <string name="menu_auto_trust_hostkey_sub">关闭时，第一次连接新主机会先把指纹摆出来让你确认；打开则静默记录指纹——首连若被中间人截住不会有任何提示。两种情况下，指纹变更都一律拒绝。</string>
     <string name="hostkey_clear">清除已保存的主机指纹</string>
     <string name="hostkey_clear_hint">当前记录：%1$s</string>
     <string name="hostkey_none">尚未记录该主机的指纹</string>

@@ -57,6 +57,8 @@ class SettingsStore(private val context: Context) {
     private val confirmCloseKey = booleanPreferencesKey("confirm_close_session")
     // 终端页是否保持屏幕常亮（看长任务输出方便，但耗电）。
     private val keepScreenOnKey = booleanPreferencesKey("keep_screen_on")
+    // 首次连接一台新主机时，是否直接信任它的主机密钥（不弹确认）。
+    private val autoTrustNewHostKeyKey = booleanPreferencesKey("auto_trust_new_host_key")
     // 静默检查更新：上次检查时间戳 + 已知的最新版本 tag 与其发布页地址（用于跨启动保留"有更新"小圆点与跳转目标）。
     private val lastUpdateCheckKey = androidx.datastore.preferences.core.longPreferencesKey("last_update_check_at")
     private val latestSeenTagKey = stringPreferencesKey("latest_seen_tag")
@@ -168,6 +170,17 @@ class SettingsStore(private val context: Context) {
     /** 终端页保持屏幕常亮（默认开——与历史行为一致；关掉更省电）。 */
     val keepScreenOn: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[keepScreenOnKey] ?: true
+    }
+
+    /**
+     * 首次连接新主机时是否直接信任其主机密钥（默认**关**=先问一次）。
+     *
+     * TOFU 的全部安全性都押在"第一次连的是真主机"上：这一刻若被中间人截住，指纹一入库，
+     * 后面每次校验都只会确认那把假密钥。所以默认要让用户看一眼指纹再点信任；打开这个开关
+     * 就回到静默记录（省事，但首连被劫持不会有任何提示）。
+     */
+    val autoTrustNewHostKey: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[autoTrustNewHostKeyKey] ?: false
     }
 
     /** 上次静默检查更新的时间（毫秒；0=从未）。 */
@@ -326,6 +339,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setKeepScreenOn(on: Boolean) {
         context.settingsDataStore.edit { it[keepScreenOnKey] = on }
+    }
+
+    suspend fun setAutoTrustNewHostKey(on: Boolean) {
+        context.settingsDataStore.edit { it[autoTrustNewHostKeyKey] = on }
     }
 
     /** 记录一次静默检查的结果（[tag] 为空表示已是最新）。 */

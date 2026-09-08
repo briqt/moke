@@ -26,16 +26,27 @@ class SshConnector(
     private val appContext = context.applicationContext
     private val cacheDir: File = appContext.cacheDir
 
-    /** 新建一个未连接的客户端（含 TOFU 校验器）。[heartbeat] 供长连接用，短连接不必。 */
-    fun newClient(heartbeat: Boolean = false): SSHClient {
+    /**
+     * 新建一个未连接的客户端（含 TOFU 校验器）。[heartbeat] 供长连接用，短连接不必。
+     *
+     * [awaitsTrust]=首连要弹指纹确认：主机密钥校验发生在握手中间、会同步等用户点按钮，而 sshj
+     * 的握手 promise 默认 30s 就超时——用户认真核对指纹的时间远比这长。这种连接把握手超时放宽到
+     * 略大于确认弹窗自身的超时，否则"仔细核对完再点信任"必然连不上。
+     */
+    fun newClient(heartbeat: Boolean = false, awaitsTrust: Boolean = false): SSHClient {
         val config = DefaultConfig().apply {
             if (heartbeat) keepAliveProvider = KeepAliveProvider.HEARTBEAT
         }
         return SSHClient(config).apply {
             connectTimeout = CONNECT_TIMEOUT_MS
+            if (awaitsTrust) transport.timeoutMs = TRUST_PROMPT_TIMEOUT_MS
             addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext, onNotice))
         }
     }
+
+    /** 这台主机的密钥还没被信任过，因而这次连接会停下来等用户确认。 */
+    private fun awaitsTrust(host: Host): Boolean =
+        !HostKeyPrompt.autoTrust && KnownHosts(appContext).stored(KnownHosts.idOf(host.host, host.port)) == null
 
     /**
      * 连上 [host] 并完成认证；[jumpHost] 非空时先连它、再经 direct-tcpip 到目标。
@@ -44,11 +55,11 @@ class SshConnector(
      * 载体，先关它目标连接立刻断。
      */
     fun connect(host: Host, jumpHost: Host?, heartbeat: Boolean = false): Connected {
-        val client = newClient(heartbeat)
+        val client = newClient(heartbeat, awaitsTrust(host))
         var jump: SSHClient? = null
         try {
             if (jumpHost != null) {
-                val j = newClient(heartbeat)
+                val j = newClient(heartbeat, awaitsTrust(jumpHost))
                 j.connect(jumpHost.host, jumpHost.port)
                 authenticate(j, jumpHost)
                 jump = j
@@ -109,5 +120,8 @@ class SshConnector(
 
     companion object {
         const val CONNECT_TIMEOUT_MS = 15000
+
+        /** 首连等用户确认指纹时的握手超时（略大于 HostKeyPrompt 自己的 120s）。 */
+        private const val TRUST_PROMPT_TIMEOUT_MS = 150_000
     }
 }

@@ -4,9 +4,15 @@ import android.app.Application
 import android.os.Debug
 import android.util.Log
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.SettingsStore
+import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.terminal.SessionManager
 import com.briqt.moke.terminal.sftp.TransferManager
 import com.termux.terminal.TerminalSession
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.File
 import java.security.Security
@@ -32,11 +38,26 @@ class MokeApplication : Application() {
         super.onCreate()
         installOomHprofDumper()
         installTerminalStatusText()
+        mirrorHostKeyPolicy()
         try {
             Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME) // "BC"
             Security.insertProviderAt(BouncyCastleProvider(), 1)
         } catch (t: Throwable) {
             // 极少数系统禁止替换；保底不崩，连接时再由 sshj 报错。
+        }
+    }
+
+    /**
+     * 把「首连自动信任主机密钥」镜像给 [HostKeyPrompt]。
+     *
+     * 主机密钥校验发生在连接线程上、必须同步返回 true/false，不能在那儿读一次 DataStore；
+     * 也不能挂在 ViewModel 上——后台传输/保活会话在没有界面时同样会建连接。所以在**进程作用域**
+     * 维护这个开关的镜像；默认 false（先问），拿不到值时的失败方向是"问"，而不是"静默信任"。
+     */
+    private fun mirrorHostKeyPolicy() {
+        val settings = SettingsStore(this)
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            settings.autoTrustNewHostKey.collect { HostKeyPrompt.autoTrust = it }
         }
     }
 

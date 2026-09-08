@@ -9,7 +9,19 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.briqt.moke.R
+import com.briqt.moke.terminal.HostKeyPrompt
+import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
@@ -74,6 +86,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val keyboardMode by vm.keyboardMode.collectAsState()
     val confirmClose by vm.confirmCloseSession.collectAsState()
     val keepScreenOn by vm.keepScreenOn.collectAsState()
+    val autoTrustNewHostKey by vm.autoTrustNewHostKey.collectAsState()
+    val hostKeyRequest by vm.hostKeyRequest.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
     val scrollMode by vm.scrollMode.collectAsState()
@@ -281,11 +295,13 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             tmuxScrollSetup = tmuxScrollSetup,
             keepScreenOn = keepScreenOn,
             confirmClose = confirmClose,
+            autoTrustNewHostKey = autoTrustNewHostKey,
             onKeyboardMode = { vm.setKeyboardMode(it) },
             onScrollMode = { vm.setScrollMode(it) },
             onTmuxScrollSetup = { vm.setTmuxScrollSetup(it) },
             onKeepScreenOn = { vm.setKeepScreenOn(it) },
             onConfirmClose = { vm.setConfirmCloseSession(it) },
+            onAutoTrustNewHostKey = { vm.setAutoTrustNewHostKey(it) },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
 
@@ -374,4 +390,54 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
     }
+
+    // 首连指纹确认：连接线程正卡在这上面等答案，所以放在导航之外的最外层——
+    // 不管当前在哪个页面（终端、文件页、设置）发起的连接，都要能弹出来。
+    hostKeyRequest?.let { req ->
+        HostKeyConfirmDialog(
+            request = req,
+            onTrust = { vm.resolveHostKey(req.id, true) },
+            onCancel = { vm.resolveHostKey(req.id, false) },
+        )
+    }
+}
+
+/** 首次连接新主机时的指纹确认弹窗（默认行为；可在设置里改为自动信任）。 */
+@Composable
+private fun HostKeyConfirmDialog(
+    request: HostKeyPrompt.Request,
+    onTrust: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.hostkey_confirm_title)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.hostkey_confirm_body, request.target),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                // 指纹用等宽字体单独一段：核对逐字符进行，混在正文里更容易看错。
+                Text(
+                    text = listOf(request.keyType, request.fingerprint)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = MokeMono,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onTrust) {
+                Text(stringResource(R.string.hostkey_confirm_trust))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
