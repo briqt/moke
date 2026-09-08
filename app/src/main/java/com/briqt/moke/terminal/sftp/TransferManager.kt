@@ -326,9 +326,17 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             update(id) { it.copy(state = TransferState.CANCELLED) }
         } else {
             update(id) { it.copy(state = TransferState.DONE, done = if (it.total >= 0) it.total else it.done) }
+            // 上传成功要通知上层：文件页看的是一次性拉取的列表快照，不刷新的话刚传上去的文件
+            // 根本不出现，用户看不到任何痕迹，只能理解成"传失败了"。
+            current(id)
+                ?.takeIf { it.direction == TransferDirection.UPLOAD }
+                ?.let { onUploadDone?.invoke(it.hostId, RemotePath.parent(it.remotePath)) }
         }
         persist()
     }
+
+    /** 上传成功回调（hostId, 远端目录）：上层据此刷新正在看的那个目录。 */
+    var onUploadDone: ((String, String) -> Unit)? = null
 
     // ---------- 小工具 ----------
 

@@ -138,6 +138,7 @@ fun HomeScreen(
     onReorderHosts: (List<Host>) -> Unit,
     onOpenSession: (String) -> Unit,
     onCloseSession: (String) -> Unit,
+    onCloseEndedSessions: () -> Unit,
     onDuplicateSession: (String) -> Unit,
     onReorderSessions: (List<String>) -> Unit,
     keyboardMode: KeyboardMode,
@@ -210,7 +211,7 @@ fun HomeScreen(
     ) { padding ->
         when (tab) {
             HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions)
+            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
             HomeTab.Settings -> SettingsMenuContent(
                 padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
             )
@@ -359,7 +360,7 @@ private fun ConnectionsContent(
 }
 
 // 未分组分桶的哨兵键（不直接展示，展示时本地化为 R.string.ungrouped）。
-private const val UNGROUPED_KEY = " __ungrouped__"
+private const val UNGROUPED_KEY = "\u0000__ungrouped__"
 
 /**
  * 分组 / 排序控制（标题栏右侧两个紧凑胶囊：[▤ 值 ▾] [↕ 值 ▾]），连接页与会话页共用。
@@ -646,6 +647,7 @@ private fun SessionsContent(
     onClose: (String) -> Unit,
     onDuplicate: (String) -> Unit,
     onReorder: (List<String>) -> Unit,
+    onCloseEnded: () -> Unit,
 ) {
     if (sessions.isEmpty()) {
         EmptyState(
@@ -665,7 +667,20 @@ private fun SessionsContent(
     val manual = sortBy == SortBy.MANUAL
     val cmp = sessionComparator(sortBy)
 
+    // 已结束的会话会一直留在列表里（保留是为了「重新连接」），但一条条 × 太笨：
+    // 攒到四五条时清理成本比逐条关闭还高，所以有一条就给一个一次清空的入口。
+    val endedCount = sessions.count { !it.alive.collectAsState().value }
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+        if (endedCount > 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onCloseEnded) {
+                    Text(stringResource(R.string.sessions_clear_ended, endedCount))
+                }
+            }
+        }
         if (groupBy == GroupBy.NONE) {
             if (manual) {
                 // 无分组 + 手动：整列长按拖动重排（仅内存顺序）。

@@ -53,6 +53,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -182,6 +183,9 @@ fun TerminalScreen(
     // 触发时间戳：每次滑动刷新它以续期；同时作为 LaunchedEffect 的 key 重置倒计时。
     var scrollHintAt by remember(ts.id) { mutableLongStateOf(0L) }
     var scrollHintHiddenAt by remember(ts.id) { mutableLongStateOf(0L) }
+    // 当前滚屏位置（0 = 底部）：翻进历史时给一个「跳到底部」入口。
+    // 此前回到底部只有两条路——反复滑，或随便敲个键（那会真的把字节发给远端）。
+    var topRow by remember(ts.id) { mutableIntStateOf(0) }
 
     val controller = ts.controller
     val scope = rememberCoroutineScope()
@@ -201,6 +205,7 @@ fun TerminalScreen(
         view.mokeScrollMode = scrollMode.ordinal
         // mosh 会话里的备用屏是 mosh-client 自己的，不能当作「远端在跑全屏程序」的判据。
         view.mokeMoshSession = ts.host.useMosh
+        view.mokeOnTopRowChanged = java.util.function.IntConsumer { row -> topRow = row }
         view.mokeOnScrollUnavailable = Runnable {
             val now = android.os.SystemClock.elapsedRealtime()
             // 静默窗口期：提示消失后 SCROLL_HINT_COOLDOWN_MS 内不再打扰；之后再滑仍会提示。
@@ -230,6 +235,7 @@ fun TerminalScreen(
                 controller.onModifiersConsumed = null
             }
             view.mokeOnScrollUnavailable = null
+            view.mokeOnTopRowChanged = null
         }
     }
 
@@ -373,6 +379,13 @@ fun TerminalScreen(
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 12.dp, end = 12.dp),
                     )
                 }
+                // 「跳到底部」：只在真的翻进历史时出现。翻到几百行深处后，回底部原本只能反复滑动，
+                // 或者随便敲个键——但敲键会把字节真发给远端，在别人的 shell 里不是无害动作。
+                JumpToBottomButton(
+                    visible = topRow < 0 && !panelOpen && !showComposer,
+                    onClick = { controller.scrollToBottom() },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
+                )
                 // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
                 // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
                 // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
@@ -776,6 +789,35 @@ fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     ms < 120 -> MaterialTheme.colorScheme.primary
     ms < 300 -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.error
+}
+
+/** 「跳到底部」浮动按钮：仅在滚屏离开底部时淡入。 */
+@Composable
+private fun JumpToBottomButton(visible: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    AnimatedVisibility(visible = visible, enter = fadeIn(tween(120)), exit = fadeOut(tween(120)), modifier = modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
+            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            shape = MokeShapes.floating,
+            onClick = onClick,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.KeyboardDoubleArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    stringResource(R.string.scroll_jump_bottom),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+    }
 }
 
 /**

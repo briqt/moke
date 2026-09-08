@@ -604,6 +604,37 @@ public final class TerminalView extends View {
     /** moke: 滑动落到「无处可滚」时的一次性提示回调（由应用层展示浮层）。 */
     public Runnable mokeOnScrollUnavailable;
 
+    /**
+     * moke: 滚屏位置变化回调（参数 = topRow，0 表示在底部）。
+     *
+     * 产品层据此显示「跳到底部」——翻到 300 行历史深处时，回到底部原本只能反复滑动或随便敲个键
+     * （敲键会把字节发给远端，不是无害操作）。在 onDraw 里比较、只在变化时 post 出去：所有改动
+     * mTopRow 的路径（滑动 / 惯性 / 新输出 / 附加会话）都会经过绘制，不必逐个埋点；post 出去是
+     * 为了不在绘制期间回写 Compose 状态。
+     */
+    public java.util.function.IntConsumer mokeOnTopRowChanged;
+
+    private int mokeNotifiedTopRow = 0;
+
+    private void mokeNotifyTopRow() {
+        if (mokeOnTopRowChanged == null || mTopRow == mokeNotifiedTopRow) return;
+        final int row = mTopRow;
+        mokeNotifiedTopRow = row;
+        post(new Runnable() {
+            @Override
+            public void run() {
+                if (mokeOnTopRowChanged != null) mokeOnTopRowChanged.accept(row);
+            }
+        });
+    }
+
+    /** moke: 跳回最新输出（等价于把滚屏位置归零）。 */
+    public void mokeScrollToBottom() {
+        if (mTopRow == 0) return;
+        mTopRow = 0;
+        invalidate();
+    }
+
     private void mokeNotifyScrollUnavailable() {
         if (mokeOnScrollUnavailable != null) mokeOnScrollUnavailable.run();
     }
@@ -1078,6 +1109,7 @@ public final class TerminalView extends View {
 
             // render the text selection handles
             renderTextSelection();
+            mokeNotifyTopRow();
         }
     }
 

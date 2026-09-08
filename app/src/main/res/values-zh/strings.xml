@@ -84,6 +84,7 @@
     <!-- 会话 -->
     <string name="empty_sessions_title">暂无会话</string>
     <string name="empty_sessions_hint">在「连接」里选择一台主机开始</string>
+    <string name="sessions_clear_ended">清理已结束 (%1$d)</string>
     <string name="session_ended_short">已结束</string>
     <string name="close_session">关闭会话</string>
     <string name="duplicate_session">复制会话</string>
@@ -359,6 +360,7 @@
     <string name="scroll_none_mosh">mosh 协议不传输滚动缓冲，这里没有可滚的历史。在远端用 tmux（或改用 SSH）即可滚屏。</string>
     <string name="scroll_none_alt">全屏程序正占用整个屏幕，没有可滚的历史。</string>
     <string name="scroll_use_arrows">改用方向键滚动</string>
+    <string name="scroll_jump_bottom">跳到底部</string>
     <string name="scroll_mode">全屏程序内滑动</string>
     <string name="scroll_mode_smart">智能</string>
     <string name="scroll_mode_wheel">始终发滚轮</string>

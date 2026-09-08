@@ -582,12 +582,25 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeSession(id: String) = sessions.close(id)
 
+    /** 一次清掉列表里所有已结束的会话（保留活着的）。 */
+    fun closeEndedSessions() {
+        sessions.sessions.value.filterNot { it.alive.value }.forEach { sessions.close(it.id) }
+    }
+
     // ---------- 文件（SFTP） ----------
 
     /** 传输队列：Application 作用域，退后台/关屏由 [MokeTransferService] 保活。 */
     val transfers = (app as MokeApplication).transfers.also { mgr ->
         // 记住的下载目录失效（被删/撤授权）时忘掉它，之后回到默认落点。
         mgr.onTreeUnusable = { viewModelScope.launch { settings.setDownloadTreeUri("") } }
+        // 上传成功后刷新正在看的那个目录：列表是一次性拉取的快照，不刷新就看不到刚传上去的文件，
+        // 只能理解成"传失败了"。只在同主机同目录时刷新，避免把用户已经翻走的位置拽回来。
+        mgr.onUploadDone = { hostId, dir ->
+            viewModelScope.launch {
+                val st = filesState.value
+                if (st.host?.id == hostId && st.path == dir) filesController.refresh()
+            }
+        }
     }
 
     private val filesController = FilesController(app, viewModelScope)

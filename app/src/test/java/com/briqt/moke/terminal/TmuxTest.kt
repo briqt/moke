@@ -123,10 +123,26 @@ class TmuxTest {
         // 已在 copy-mode 或程序自己要鼠标 → 原样转发。
         assertTrue(cmd.contains("#{||:#{pane_in_mode},#{mouse_any_flag}}"))
         // 备用屏（less/man/vim）→ 方向键翻页；否则进 copy-mode 滚历史。
-        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N3 Up' 'copy-mode -e; send -M'"))
-        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N3 Down' 'send -M'"))
+        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N1 Up' 'copy-mode -e; send -M'"))
+        assertTrue(cmd.contains("if -F '#{alternate_on}' 'send -N1 Down' 'send -M'"))
         assertTrue(cmd.contains("bind -n WheelUpPane"))
         assertTrue(cmd.contains("bind -n WheelDownPane"))
+    }
+
+    /**
+     * 一次滚轮事件必须只滚一行：客户端已按"手指走过几行"发等量事件，远端再乘一次就跟不上手
+     * （tmux 默认 copy-mode 是 -N 5，叠加滑动惯性实测一次滑动穿掉整段历史）。
+     */
+    @Test
+    fun `one wheel event scrolls exactly one line`() {
+        val cmd = Tmux.scrollSetupCmd("work")
+        for (table in listOf("copy-mode", "copy-mode-vi")) {
+            assertTrue(cmd.contains("bind -T $table WheelUpPane \"select-pane ; send -X -N 1 scroll-up\""))
+            assertTrue(cmd.contains("bind -T $table WheelDownPane \"select-pane ; send -X -N 1 scroll-down\""))
+        }
+        // 没有任何一处还在乘倍数。
+        assertEquals(false, cmd.contains("-N 5"))
+        assertEquals(false, cmd.contains("-N3"))
         // 侧通道命令失败不该把整条链路带崩。
         assertTrue(cmd.trimEnd().endsWith("true"))
     }

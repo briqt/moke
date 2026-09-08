@@ -88,6 +88,7 @@
     <!-- 会话 -->
     <string name="empty_sessions_title">No sessions</string>
     <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
+    <string name="sessions_clear_ended">Clear %1$d ended</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
     <string name="duplicate_session">Duplicate session</string>
@@ -363,6 +364,7 @@
     <string name="scroll_none_mosh">mosh does not carry a scrollback buffer, so there is no history to scroll here. Run tmux on the remote (or use SSH) to scroll.</string>
     <string name="scroll_none_alt">A full-screen program owns the screen; there is no history to scroll.</string>
     <string name="scroll_use_arrows">Send arrow keys instead</string>
+    <string name="scroll_jump_bottom">Jump to latest</string>
     <string name="scroll_mode">Swipe in full-screen programs</string>
     <string name="scroll_mode_smart">Smart</string>
     <string name="scroll_mode_wheel">Always send wheel</string>

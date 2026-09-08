@@ -102,6 +102,11 @@ class TerminalController(
         val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
     }
+    /** 跳回最新输出：翻到历史深处后不必反复滑动，也不必靠"随便敲个键"（那会真的发字节给远端）。 */
+    fun scrollToBottom() {
+        view?.mokeScrollToBottom()
+    }
+
     /**
      * 键盘模式变更后重新协商输入连接：不 restart 的话输入法仍按旧 EditorInfo 工作，
      * 要退出会话再进来才生效。

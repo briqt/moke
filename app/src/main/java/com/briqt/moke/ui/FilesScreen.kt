@@ -535,8 +535,11 @@ private fun SheetAction(
 
 @Composable
 private fun TransferBar(tasks: List<TransferTask>, activeCount: Int, onExpand: () -> Unit) {
+    // 没有进行中的任务时展示**最近**那一条，而不是列表里第一条（最早的）：
+    // 先下载再上传时，上传完成后条上还挂着刚才那次下载的「已完成」，看着像上传没发生。
     val running = tasks.firstOrNull { it.state == TransferState.RUNNING }
         ?: tasks.firstOrNull { it.active }
+        ?: tasks.maxByOrNull { it.createdAt }
         ?: tasks.first()
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,

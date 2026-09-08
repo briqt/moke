@@ -27,6 +27,26 @@ class MainActivity : ComponentActivity() {
     private val notifPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒绝也不影响会话，仅无常驻通知 */ }
 
+    private var notifPermissionAsked = false
+
+    /**
+     * Android 13+ 需授权才会显示后台保活通知（拒绝仅影响通知，不影响会话）。
+     *
+     * **等到真的开了第一个会话再问**：冷启动就弹权限窗时，用户还没连过任何主机，无从判断这个
+     * 权限是干什么用的；而这条通知只在有会话（前台服务）时才存在。
+     */
+    private fun requestNotifPermissionOnce() {
+        if (notifPermissionAsked) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        notifPermissionAsked = true
+        notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     // 应用内语言：按所选语言包裹 context（切换语言后 recreate() 重新走这里）。
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LocaleManager.wrap(newBase))
@@ -40,12 +60,6 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
-        // Android 13+ 需授权才会显示后台保活通知（拒绝仅影响通知，不影响会话）。
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         setContent {
             val vm: MokeViewModel = viewModel()
             val themeMode by vm.themeMode.collectAsState()
@@ -58,6 +72,11 @@ class MainActivity : ComponentActivity() {
             }
             // 把解析好的明暗回灌 VM：终端配色的「随明暗联动」据此选用哪一套。
             LaunchedEffect(dark) { vm.setAppIsDark(dark) }
+            // 开出第一个会话时才问后台通知权限（见 requestNotifPermissionOnce）。
+            val hasSession by vm.sessions.sessions.collectAsState()
+            LaunchedEffect(hasSession.isNotEmpty()) {
+                if (hasSession.isNotEmpty()) requestNotifPermissionOnce()
+            }
             // 系统栏图标明暗随主题：浅色主题下必须切 light 样式，否则白底上的白图标看不见。
             LaunchedEffect(dark) {
                 enableEdgeToEdge(
