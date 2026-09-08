@@ -2,6 +2,7 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -66,9 +67,9 @@ class SshTransport(
                         append(host.port)
                     }
                 }
-                feed(session, "\r\n" + appContext.getString(R.string.ssh_connecting, target) + "\r\n")
+                feed(session, "\r\n" + appContext.localized(R.string.ssh_connecting, target) + "\r\n")
                 if (jumpHost != null) {
-                    feed(session, appContext.getString(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
+                    feed(session, appContext.localized(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
                 }
                 // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
                 val conn = connector.connect(host, jumpHost, heartbeat = true)
@@ -132,14 +133,14 @@ class SshTransport(
                         sshSession?.exitStatus
                     }.getOrNull()
                     if (code != null && code != 0) {
-                        feed(session, "\r\n" + appContext.getString(
+                        feed(session, "\r\n" + appContext.localized(
                             R.string.startup_command_exited, effectiveStartup, code
                         ) + "\r\n")
                     }
                 }
                 session.onTransportFinished(0)
             } catch (e: Exception) {
-                val msg = ("\r\n" + appContext.getString(R.string.ssh_connect_failed, e.message ?: "") + "\r\n").toByteArray()
+                val msg = ("\r\n" + appContext.localized(R.string.ssh_connect_failed, e.message ?: "") + "\r\n").toByteArray()
                 session.processToEmulator(msg, msg.size)
                 session.onTransportFinished(1)
             }

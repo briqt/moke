@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.briqt.moke.MainActivity
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,7 +68,7 @@ class MokeSessionService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Moke")
-            .setContentText(getString(R.string.notif_sessions_active, count))
+            .setContentText(localized(R.string.notif_sessions_active, count))
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(
@@ -81,8 +82,8 @@ class MokeSessionService : Service() {
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
-                description = getString(R.string.notif_channel_desc)
+            val ch = NotificationChannel(CHANNEL_ID, localized(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                description = localized(R.string.notif_channel_desc)
                 setShowBadge(false)
             }
             notificationManager().createNotificationChannel(ch)

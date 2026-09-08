@@ -389,4 +389,15 @@
     <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd 图标</string>
     <string name="font_note_victor_mono">连字 + 草书斜体</string>
     <string name="font_note_dejavu_sans_mono">字形覆盖广 · 兼容性好</string>
+
+    <!-- 0.1.20-rc.2：会话状态行 + 字体错误（issue #1） -->
+    <string name="term_connect_failed">[连接失败: %1$s]</string>
+    <string name="term_session_ended">[会话结束]</string>
+    <string name="term_session_ended_code">[会话结束 (code %1$d)]</string>
+    <string name="term_session_ended_signal">[会话结束 (signal %1$d)]</string>
+    <string name="font_no_url">该字体没有下载地址</string>
+    <string name="font_checksum_failed">校验失败（sha256 不匹配）</string>
+    <string name="font_zip_entry_missing">压缩包内未找到匹配 \'%1$s\' 的 ttf</string>
+    <string name="font_read_failed">无法读取所选文件</string>
+    <string name="font_invalid">不是有效的字体文件（需 TTF / OTF）</string>
 </resources>

@@ -2,6 +2,7 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
 import java.security.PublicKey
 
@@ -24,13 +25,13 @@ class MokeHostKeyVerifier(
         return when (val saved = known.stored(id)) {
             null -> {
                 known.store(id, fp)
-                onMessage(context.getString(R.string.hostkey_first_seen, id, fp))
+                onMessage(context.localized(R.string.hostkey_first_seen, id, fp))
                 true
             }
             fp -> true
             else -> {
                 // 资源里用 \n 断行，喂终端需 \r\n。
-                onMessage(context.getString(R.string.hostkey_changed, saved, fp).replace("\n", "\r\n"))
+                onMessage(context.localized(R.string.hostkey_changed, saved, fp).replace("\n", "\r\n"))
                 false
             }
         }

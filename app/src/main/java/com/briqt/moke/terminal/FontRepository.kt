@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.core.content.res.ResourcesCompat
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -35,7 +36,7 @@ class FontRepository(private val context: Context) {
     suspend fun download(spec: FontSpec, onProgress: (Float) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val url = spec.url ?: error("字体无下载地址")
+                val url = spec.url ?: error(context.localized(R.string.font_no_url))
                 fontsDir.mkdirs()
                 val tmp = File(context.cacheDir, "${spec.id}.dl")
                 var conn = URL(url).openConnection() as HttpURLConnection
@@ -76,7 +77,7 @@ class FontRepository(private val context: Context) {
                     val actual = sha256Of(tmp)
                     if (!actual.equals(expected, ignoreCase = true)) {
                         tmp.delete()
-                        error("校验失败（sha256 不匹配）")
+                        error(context.localized(R.string.font_checksum_failed))
                     }
                 }
                 if (spec.archive) {
@@ -121,7 +122,7 @@ class FontRepository(private val context: Context) {
                 zin.closeEntry()
             }
         }
-        error("压缩包内未找到匹配 '${spec.entryHint}' 的 ttf")
+        error(context.localized(R.string.font_zip_entry_missing, spec.entryHint))
     }
 
     /**
@@ -203,9 +204,9 @@ class FontRepository(private val context: Context) {
             val out = fileFor(id)
             context.contentResolver.openInputStream(uri)?.use { input ->
                 out.outputStream().use { input.copyTo(it) }
-            } ?: error("无法读取所选文件")
+            } ?: error(context.localized(R.string.font_read_failed))
             if (runCatching { Typeface.createFromFile(out) }.getOrNull() == null) {
-                out.delete(); error("不是有效的字体文件（需 TTF / OTF）")
+                out.delete(); error(context.localized(R.string.font_invalid))
             }
             id
         }

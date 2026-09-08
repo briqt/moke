@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.briqt.moke.MainActivity
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.terminal.sftp.RemotePath
 import com.briqt.moke.terminal.sftp.TransferTask
 import kotlinx.coroutines.CoroutineScope
@@ -70,13 +71,13 @@ class MokeTransferService : Service() {
         val running = active.firstOrNull { it.state == com.briqt.moke.terminal.sftp.TransferState.RUNNING }
             ?: active.first()
         val text = if (active.size > 1) {
-            getString(R.string.notif_transfer_multi, running.name, active.size)
+            localized(R.string.notif_transfer_multi, running.name, active.size)
         } else {
             running.name
         }
         val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(getString(R.string.notif_transfer_title))
+            .setContentTitle(localized(R.string.notif_transfer_title))
             .setContentText(text)
             .setSubText(RemotePath.formatSize(running.done) + (if (running.total > 0) " / " + RemotePath.formatSize(running.total) else ""))
             .setOngoing(true)
@@ -97,10 +98,10 @@ class MokeTransferService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
                 CHANNEL_ID,
-                getString(R.string.notif_transfer_channel_name),
+                localized(R.string.notif_transfer_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = getString(R.string.notif_transfer_channel_desc)
+                description = localized(R.string.notif_transfer_channel_desc)
                 setShowBadge(false)
             }
             notificationManager().createNotificationChannel(ch)

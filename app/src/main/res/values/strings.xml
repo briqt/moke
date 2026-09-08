@@ -393,4 +393,15 @@
     <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd icons</string>
     <string name="font_note_victor_mono">Ligatures + cursive italics</string>
     <string name="font_note_dejavu_sans_mono">Broad glyph coverage · very compatible</string>
+
+    <!-- 0.1.20-rc.2: session status lines + font errors (issue #1) -->
+    <string name="term_connect_failed">[connect failed: %1$s]</string>
+    <string name="term_session_ended">[session ended]</string>
+    <string name="term_session_ended_code">[session ended (code %1$d)]</string>
+    <string name="term_session_ended_signal">[session ended (signal %1$d)]</string>
+    <string name="font_no_url">This font has no download URL</string>
+    <string name="font_checksum_failed">Checksum mismatch (sha256)</string>
+    <string name="font_zip_entry_missing">No ttf matching \'%1$s\' inside the archive</string>
+    <string name="font_read_failed">Cannot read the selected file</string>
+    <string name="font_invalid">Not a valid font file (TTF / OTF required)</string>
 </resources>

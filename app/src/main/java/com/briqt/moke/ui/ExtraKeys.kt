@@ -62,8 +62,15 @@ sealed interface ExtraKey {
     data class Key(override val label: String, val key: KeyId) : ExtraKey
     /** 修饰键（三态：一次性 / 锁定 / 关）。 */
     data class Mod(override val label: String, val kind: ModKind) : ExtraKey
-    /** 动作键（[id] 交给上层处理）。 */
-    data class Action(override val label: String, val id: String) : ExtraKey
+    /**
+     * 动作键（[id] 交给上层处理）。
+     *
+     * 没有 label：这两个键的文案一定要本地化，渲染时按 [id] 取资源（见 KeyRow）。
+     * 早先这里写着中文字面量，虽然从没被渲染过，但看着像是"文案在这里定"，容易被照抄。
+     */
+    data class Action(val id: String) : ExtraKey {
+        override val label: String get() = ""
+    }
 }
 
 /** 动作键 id：文本段入口、展开全键盘面板。 */
@@ -96,7 +103,7 @@ val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
         ExtraKey.Key("↑", KeyId.Up),
         ExtraKey.Key("HOME", KeyId.Home),
         ExtraKey.Key("END", KeyId.End),
-        ExtraKey.Action("更多", ACTION_PANEL),
+        ExtraKey.Action(ACTION_PANEL),
     ),
     listOf(
         ExtraKey.Key("TAB", KeyId.Tab),
@@ -105,7 +112,7 @@ val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
         ExtraKey.Key("↓", KeyId.Down),
         ExtraKey.Key("→", KeyId.Right),
         ExtraKey.Key("^C", KeyId.Macro(ctrlOf('c'))),
-        ExtraKey.Action("文本", ACTION_COMPOSER),
+        ExtraKey.Action(ACTION_COMPOSER),
     ),
 )
 

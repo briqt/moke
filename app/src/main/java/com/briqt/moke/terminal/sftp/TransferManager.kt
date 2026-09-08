@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostStore
 import kotlinx.coroutines.CoroutineScope
@@ -54,7 +55,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             // 恢复上次的任务表：上次还在跑的（RUNNING/QUEUED）说明进程被杀了，标成「已中断」等用户决定，
             // 不自动重开——自动重传可能在计费网络上偷跑流量。
             val restored = store.load().map {
-                if (it.active) it.copy(state = TransferState.FAILED, error = appContext.getString(R.string.transfer_interrupted))
+                if (it.active) it.copy(state = TransferState.FAILED, error = appContext.localized(R.string.transfer_interrupted))
                 else it
             }
             _tasks.value = restored
@@ -189,7 +190,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         val host = hosts.firstOrNull { it.id == task.hostId }
         if (host == null) {
             update(task.id) {
-                it.copy(state = TransferState.FAILED, error = appContext.getString(R.string.transfer_host_gone))
+                it.copy(state = TransferState.FAILED, error = appContext.localized(R.string.transfer_host_gone))
             }
             return
         }
@@ -220,7 +221,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
 
     private fun runDownload(task: TransferTask, session: SftpSession) {
         val remote = session.stat(task.remotePath)
-            ?: throw IllegalStateException(appContext.getString(R.string.transfer_remote_missing))
+            ?: throw IllegalStateException(appContext.localized(R.string.transfer_remote_missing))
 
         var current = current(task.id) ?: return
         // 目标文档：第一次创建；续传时沿用上次那份。DocumentsProvider 负责重名不覆盖。
@@ -255,7 +256,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             } else {
                 runCatching { resolver.openOutputStream(target, "wt") }.getOrNull()
                     ?: resolver.openOutputStream(target)
-            } ?: throw IllegalStateException(appContext.getString(R.string.transfer_local_unwritable))
+            } ?: throw IllegalStateException(appContext.localized(R.string.transfer_local_unwritable))
         }
 
         update(task.id) {
@@ -284,7 +285,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
 
         update(task.id) { it.copy(done = offset, total = localSize) }
         val input = resolver.openInputStream(source)
-            ?: throw IllegalStateException(appContext.getString(R.string.transfer_local_unreadable))
+            ?: throw IllegalStateException(appContext.localized(R.string.transfer_local_unreadable))
         val pos = input.use { stream ->
             if (offset > 0L) skipExactly(stream, offset)
             session.upload(
@@ -315,7 +316,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                 continue
             }
             val n = stream.read(scratch, 0, minOf(scratch.size.toLong(), left).toInt())
-            if (n <= 0) throw IllegalStateException(appContext.getString(R.string.transfer_local_seek_failed))
+            if (n <= 0) throw IllegalStateException(appContext.localized(R.string.transfer_local_seek_failed))
             left -= n
         }
     }
@@ -380,7 +381,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     private fun createInTree(tree: Uri, name: String): Uri {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         return DocumentsContract.createDocument(resolver, parent, RemotePath.guessMime(name), name)
-            ?: throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
+            ?: throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
     }
 
     /**
@@ -400,10 +401,10 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             runCatching { resolver.delete(uri, null, null) }
         }
         val fallback = insertDownload(name, Environment.DIRECTORY_DOWNLOADS)
-            ?: throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
+            ?: throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
         if (!touchable(fallback)) {
             runCatching { resolver.delete(fallback, null, null) }
-            throw IllegalStateException(appContext.getString(R.string.transfer_create_failed))
+            throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
         }
         return fallback
     }

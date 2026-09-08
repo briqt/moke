@@ -6,6 +6,7 @@ import android.util.Log
 import com.briqt.moke.data.HostStore
 import com.briqt.moke.terminal.SessionManager
 import com.briqt.moke.terminal.sftp.TransferManager
+import com.termux.terminal.TerminalSession
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.File
 import java.security.Security
@@ -30,11 +31,30 @@ class MokeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         installOomHprofDumper()
+        installTerminalStatusText()
         try {
             Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME) // "BC"
             Security.insertProviderAt(BouncyCastleProvider(), 1)
         } catch (t: Throwable) {
             // 极少数系统禁止替换；保底不崩，连接时再由 sshj 报错。
+        }
+    }
+
+    /**
+     * 会话状态行（「连接失败」「会话结束」）直接写进终端画面，属于用户可见文案，但产生它们的
+     * `TerminalSession` 在 vendored 模块里、拿不到 Android 资源，默认只能是英文。这里换成
+     * 按**应用内语言**取资源的实现——每次调用现取，切语言即时生效（issue #1）。
+     */
+    private fun installTerminalStatusText() {
+        TerminalSession.statusText = object : TerminalSession.StatusText {
+            override fun connectFailed(reason: String): String =
+                localized(R.string.term_connect_failed, reason)
+
+            override fun sessionEnded(exitCode: Int): String = when {
+                exitCode > 0 -> localized(R.string.term_session_ended_code, exitCode)
+                exitCode < 0 -> localized(R.string.term_session_ended_signal, -exitCode)
+                else -> localized(R.string.term_session_ended)
+            }
         }
     }
 

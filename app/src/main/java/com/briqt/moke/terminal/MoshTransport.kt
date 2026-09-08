@@ -2,6 +2,7 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import android.os.ParcelFileDescriptor
 import com.briqt.moke.data.Host
 import com.termux.terminal.JNI
@@ -65,19 +66,19 @@ class MoshTransport(
                 val moshBin = File("$nativeLibDir/libmosh-client.so")
                 val termuxBin = File("$nativeLibDir/libtermux.so")
                 if (!moshBin.exists() || !termuxBin.exists()) {
-                    feed(session, "\r\n" + appContext.getString(R.string.mosh_unavailable) + "\r\n")
+                    feed(session, "\r\n" + appContext.localized(R.string.mosh_unavailable) + "\r\n")
                     finish(session, 1)
                     return@Thread
                 }
 
                 // 1) SSH 引导：执行 mosh-server new，解析 MOSH CONNECT
-                feed(session, "\r\n" + appContext.getString(R.string.mosh_bootstrapping) + "\r\n")
+                feed(session, "\r\n" + appContext.localized(R.string.mosh_bootstrapping) + "\r\n")
                 val bootstrap = sshBootstrap()
                 val connect = MoshBootstrap.parse(bootstrap)
                     ?: throw IllegalStateException(
-                        appContext.getString(R.string.mosh_bootstrap_unparsed, bootstrap.trim())
+                        appContext.localized(R.string.mosh_bootstrap_unparsed, bootstrap.trim())
                     )
-                feed(session, appContext.getString(R.string.mosh_client_starting, connect.port) + "\r\n")
+                feed(session, appContext.localized(R.string.mosh_client_starting, connect.port) + "\r\n")
 
                 // 2) 独立子进程 + PTY 运行 native mosh-client
                 val bin = "$nativeLibDir/libmosh-client.so"
@@ -149,7 +150,7 @@ class MoshTransport(
                     if (!closed && !childExited && !MoshPty.isClosed(e)) {
                         feed(
                             session,
-                            "\r\n" + appContext.getString(
+                            "\r\n" + appContext.localized(
                                 R.string.mosh_connect_failed,
                                 e.message ?: e.javaClass.simpleName,
                             ) + "\r\n",
@@ -165,7 +166,7 @@ class MoshTransport(
                 if (!closed && !childExited) {
                     feed(
                         session,
-                        "\r\n" + appContext.getString(
+                        "\r\n" + appContext.localized(
                             R.string.mosh_connect_failed,
                             e.message ?: e.javaClass.simpleName,
                         ) + "\r\n",

@@ -2,6 +2,7 @@ package com.briqt.moke
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.annotation.StringRes
 import java.util.Locale
 
 /**
@@ -29,10 +30,33 @@ object LocaleManager {
     fun wrap(context: Context): Context {
         val tag = currentTag(context)
         if (tag.isBlank()) return context
-        val locale = Locale.forLanguageTag(tag)
-        Locale.setDefault(locale)
+        Locale.setDefault(Locale.forLanguageTag(tag))
+        return localizedContext(context)
+    }
+
+    /**
+     * 只按应用内语言换一层 Configuration，**不动 JVM 默认 Locale**。
+     * 供后台路径按需取字符串用——那里每条消息都调一次，不该反复改全局状态。
+     */
+    fun localizedContext(context: Context): Context {
+        val tag = currentTag(context)
+        if (tag.isBlank()) return context
         val config = Configuration(context.resources.configuration)
-        config.setLocale(locale)
+        config.setLocale(Locale.forLanguageTag(tag))
         return context.createConfigurationContext(config)
     }
 }
+
+/**
+ * 按**应用内选择的语言**取字符串。
+ *
+ * 界面本身没问题：Compose 用的是 Activity context，`attachBaseContext` 里已被 [LocaleManager.wrap]
+ * 包过。但传输层、前台服务、传输队列手里只有 Application / Service context，它们的 Configuration
+ * 跟随的是**系统**语言——于是「系统中文 + 应用内选英文」时，界面是英文，而终端里的连接提示、
+ * 通知、传输错误仍然是中文（issue #1）。
+ *
+ * 每次调用都重新解析而不是缓存一个 context：应用内语言可以随时切换，缓存会留下旧语言的串。
+ * 这些都是低频调用（连接提示、错误、通知），这点开销可以忽略。
+ */
+fun Context.localized(@StringRes id: Int, vararg args: Any): String =
+    LocaleManager.localizedContext(this).getString(id, *args)

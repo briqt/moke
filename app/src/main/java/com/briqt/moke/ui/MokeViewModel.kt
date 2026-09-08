@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
@@ -58,8 +59,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsStore(app)
     val fonts = FontRepository(app)
 
-    /** 取本地化字符串（随应用语言）。 */
-    private fun str(id: Int, vararg args: Any): String = getApplication<Application>().getString(id, *args)
+    /** 取本地化字符串（随**应用内**语言，而非系统语言——ViewModel 手里只有 Application context）。 */
+    private fun str(id: Int, vararg args: Any): String = getApplication<Application>().localized(id, *args)
 
     /** 多会话管理器：Application 作用域单例，跨导航/Activity 存活，配合前台服务后台保活。 */
     val sessions = (app as MokeApplication).sessions

@@ -22,6 +22,36 @@ import java.util.UUID;
  */
 public class TerminalSession extends TerminalOutput {
 
+    /**
+     * [moke] 会话状态行的文案。
+     *
+     * <p>「连接失败」「会话结束」这两句是 moke 加的（上游只写死一句 {@code [Process completed]}），
+     * 而它们会**直接写进终端画面**，属于用户可见文案。这个模块是 vendored 的、拿不到 Android
+     * 资源，所以做成注入点：默认英文，app 层在启动时换成按应用内语言取资源的实现。
+     *
+     * <p>做成 provider 而不是缓存两个字符串，是因为应用内可以随时切语言，缓存会留下旧语言的串。
+     */
+    public interface StatusText {
+        /** 传输启动失败。[reason] 为底层异常消息。 */
+        String connectFailed(String reason);
+
+        /** 会话结束。[exitCode] &gt;0=退出码，&lt;0=信号（取负），0=正常结束。 */
+        String sessionEnded(int exitCode);
+    }
+
+    /** 默认英文实现；app 层可替换（见 {@link #statusText}）。 */
+    public static volatile StatusText statusText = new StatusText() {
+        @Override public String connectFailed(String reason) {
+            return "[connect failed: " + reason + "]";
+        }
+
+        @Override public String sessionEnded(int exitCode) {
+            if (exitCode > 0) return "[session ended (code " + exitCode + ")]";
+            if (exitCode < 0) return "[session ended (signal " + (-exitCode) + ")]";
+            return "[session ended]";
+        }
+    };
+
     private static final int MSG_NEW_INPUT = 1;
     private static final int MSG_TRANSPORT_FINISHED = 4;
 
@@ -90,7 +120,7 @@ public class TerminalSession extends TerminalOutput {
             mTransport.start(this, columns, rows, cellWidthPixels, cellHeightPixels);
         } catch (Exception e) {
             Logger.logStackTraceWithMessage(mClient, LOG_TAG, "transport start failed", e);
-            String msg = "\r\n[连接失败: " + e.getMessage() + "]\r\n";
+            String msg = "\r\n" + statusText.connectFailed(String.valueOf(e.getMessage())) + "\r\n";
             byte[] b = msg.getBytes(StandardCharsets.UTF_8);
             processToEmulator(b, b.length);
             onTransportFinished(1);
@@ -239,13 +269,7 @@ public class TerminalSession extends TerminalOutput {
                 }
 
                 int exitCode = (msg.obj instanceof Integer) ? (Integer) msg.obj : 0;
-                String desc = "\r\n[会话结束";
-                if (exitCode > 0) {
-                    desc += " (code " + exitCode + ")";
-                } else if (exitCode < 0) {
-                    desc += " (signal " + (-exitCode) + ")";
-                }
-                desc += "]\r\n";
+                String desc = "\r\n" + statusText.sessionEnded(exitCode) + "\r\n";
                 byte[] b = desc.getBytes(StandardCharsets.UTF_8);
                 if (mEmulator != null) {
                     mEmulator.append(b, b.length);

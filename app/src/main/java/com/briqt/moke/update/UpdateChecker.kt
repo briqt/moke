@@ -2,6 +2,7 @@ package com.briqt.moke.update
 
 import android.content.Context
 import com.briqt.moke.R
+import com.briqt.moke.localized
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -55,12 +56,12 @@ object UpdateChecker {
                 }
                 val code = conn.responseCode
                 // 404 = 仓库私有或尚无 Release（公开 REST API 不可见）——给出可读提示而非裸 HTTP 码。
-                if (code == 404) return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_none))
+                if (code == 404) return@withTimeoutOrNull UpdateStatus.Failed(context.localized(R.string.update_none))
                 if (code !in 200..299) return@withTimeoutOrNull UpdateStatus.Failed("HTTP $code")
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val entries = if (includePrerelease) parseList(body) else listOf(parseOne(JSONObject(body)))
                 val picked = pickLatest(entries, includePrerelease)
-                    ?: return@withTimeoutOrNull UpdateStatus.Failed(context.getString(R.string.update_parse_failed))
+                    ?: return@withTimeoutOrNull UpdateStatus.Failed(context.localized(R.string.update_parse_failed))
                 val latest = picked.tag.removePrefix("v").removePrefix("V")
                 if (isNewer(latest, current)) UpdateStatus.Available(picked.tag, picked.url)
                 else UpdateStatus.UpToDate(current)
@@ -70,7 +71,7 @@ object UpdateChecker {
             } finally {
                 runCatching { conn?.disconnect() }
             }
-        } ?: UpdateStatus.Failed(context.getString(R.string.update_timeout))
+        } ?: UpdateStatus.Failed(context.localized(R.string.update_timeout))
     }
 
     private fun parseOne(o: JSONObject) = ReleaseEntry(
