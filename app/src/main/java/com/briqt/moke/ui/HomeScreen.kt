@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -75,11 +77,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,10 +107,11 @@ import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.briqt.moke.update.UpdateInfo
+import kotlin.math.abs
 
 /**
- * 主界面：底部导航「连接 · 会话 · 设置」三分区。终端本体是独立全屏页（不带底栏），
- * 由 MokeApp 在此之上导航打开。会话对象常驻 ViewModel，切分区不销毁。
+ * 主界面：底部导航「连接 · 会话 · 设置」三分区，内容区可左右滑动切换（顺序同底栏）。
+ * 终端本体是独立全屏页（不带底栏），由 MokeApp 在此之上导航打开。会话对象常驻 ViewModel，切分区不销毁。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,6 +156,26 @@ fun HomeScreen(
     // 会话列表里点「关闭」也走二次确认（与终端页 ⋮ 一致），避免误触断掉正在跑的活。
     var pendingClose by remember { mutableStateOf<String?>(null) }
     val closeRequest: (String) -> Unit = { id -> if (confirmClose) pendingClose = id else onCloseSession(id) }
+
+    // 左右滑动切分区：页序即底栏顺序，pager 与外部 [tab] 双向同步。
+    val tabs = remember { HomeTab.entries.toList() }
+    val pagerState = rememberPagerState(initialPage = tab.ordinal) { tabs.size }
+    // 外部改分区（底栏点击 / 返回键 / 从二级页带着分区回来）→ 翻页跟上。
+    LaunchedEffect(tab) {
+        val target = tab.ordinal
+        if (pagerState.currentPage == target) return@LaunchedEffect
+        // 相邻分区带动画滑过去；跨一页（连接↔设置）直接落位——动画会途经中间页，
+        // 那一瞬的 currentPage 会被下面的回写当成"用户选了中间页"，把切换半路截停。
+        if (abs(pagerState.currentPage - target) == 1) pagerState.animateScrollToPage(target)
+        else pagerState.scrollToPage(target)
+    }
+    // 滑过半即认页（currentPage 而非 settledPage）→ 顶栏标题 / 底栏高亮 / FAB 当场跟手，不等回弹结束。
+    // 回写同值不会触发重组，所以这里不必再判 `!= tab`（那还会读到启动时的旧值）。
+    LaunchedEffect(pagerState, tabs) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            tabs.getOrNull(page)?.let(onTab)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -209,12 +234,15 @@ fun HomeScreen(
             }
         },
     ) { padding ->
-        when (tab) {
-            HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
-            HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
-            HomeTab.Settings -> SettingsMenuContent(
-                padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
-            )
+        // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            when (tabs[page]) {
+                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
+                HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
+                HomeTab.Settings -> SettingsMenuContent(
+                    padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
+                )
+            }
         }
     }
 
@@ -764,12 +792,13 @@ private fun SessionCard(
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latencyMs by ts.latency.collectAsState()
-    // 长按普通区域直接打开「修改标题」（长按拖动手柄由手柄自身处理，是拖动而非改名）。
     var showTitleDialog by remember { mutableStateOf(false) }
     Box {
         Card(
-            // 单击进入会话；长按普通区域打开「修改标题」。
-            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { showTitleDialog = true }),
+            // 单击卡片任意处进入会话。「修改标题」的长按只挂在下面的文字列上，
+            // **不能挂整张卡**：那样会连拖动手柄一起盖住，而手柄的 detectDragGesturesAfterLongPress
+            // 不消费 down，两个长按检测会同时命中——长按手柄重排的同时弹出改名框。
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
             colors = CardDefaults.cardColors(
                 containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
             ),
@@ -790,7 +819,13 @@ private fun SessionCard(
                     }
                 }
                 // 双行布局：第1行动态标题，第2行 设备名 · 协议徽标 · 延迟/状态（不再单列 user@host）。
-                Column(modifier = Modifier.weight(1f).padding(start = if (dragHandle != null) 4.dp else 0.dp)) {
+                // 长按这一列（不含手柄）打开「修改标题」；单击与卡片一致，进入会话。
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .combinedClickable(onClick = onOpen, onLongClick = { showTitleDialog = true })
+                        .padding(start = if (dragHandle != null) 4.dp else 0.dp),
+                ) {
                     Text(
                         title,
                         style = MaterialTheme.typography.titleSmall,
