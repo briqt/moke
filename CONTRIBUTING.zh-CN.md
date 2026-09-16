@@ -27,3 +27,7 @@
 - 带 SemVer 后缀的 tag 发布为 GitHub Pre-release，绝不占用 Latest。应用内检查更新只跟随 GitHub 最新正式版，因此不会提示预发布。
 - Standard 与 Maple APK 共用 `com.briqt.moke` 和同一稳定发布签名；只要新包的 `versionCode` 更大，两种变体可以互相覆盖升级。
 - 打 tag 前须更新 `CHANGELOG.md`，运行单元测试、Standard Debug 构建和 Android Lint。发布工作流会校验 tag 与 `versionName` 一致，构建两个稳定签名的 release 变体，并检查必需的 native 库。
+
+## 许可
+
+提交贡献即表示同意你的改动以 **GPL-3.0-or-later** 授权（与本项目一致，见 [LICENSE](LICENSE)）。

@@ -45,7 +45,7 @@ Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接连接远�
 
 | 模块 | 说明 | 许可 |
 |---|---|---|
-| `app` | 产品层（Compose UI / 会话编排 / 传输实现） | 见 [LICENSE](LICENSE) |
+| `app` | 产品层（Compose UI / 会话编排 / 传输实现） | GPL-3.0-or-later |
 | `terminal-emulator` | 终端解析 / 状态内核（vendored；`TerminalSession` 改为传输无关） | Apache-2.0 |
 | `terminal-view` | 终端渲染 View（vendored；仅为行距 / 字间距做向后兼容小改动） | Apache-2.0 |
 
@@ -75,4 +75,4 @@ mosh native 产物由 [`scripts/build-mosh-native.sh`](scripts/build-mosh-native
 
 ## 许可
 
-见 [LICENSE](LICENSE)。vendored 的 `terminal-*` 模块为 Apache-2.0；mosh native 组件为 GPLv3（独立可执行、边界隔离）。
+moke 产品层（`app/`）以 **GNU General Public License v3.0 或更高版本**发布，见 [LICENSE](LICENSE) 与 [COPYRIGHT.md](COPYRIGHT.md)。vendored 的 `terminal-*` 模块为 Apache-2.0（与 GPLv3 兼容）；mosh native 组件为 GPLv3，以独立可执行文件分发。

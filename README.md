@@ -45,7 +45,7 @@ Allow "install from unknown sources" and install. Release builds use a stable si
 
 | Module | Description | License |
 |---|---|---|
-| `app` | Product layer (Compose UI / session orchestration / transport implementations) | see [LICENSE](LICENSE) |
+| `app` | Product layer (Compose UI / session orchestration / transport implementations) | GPL-3.0-or-later |
 | `terminal-emulator` | Terminal parsing / state core (vendored; `TerminalSession` made transport-agnostic) | Apache-2.0 |
 | `terminal-view` | Terminal rendering View (vendored; only small backward-compatible tweaks for line / letter spacing) | Apache-2.0 |
 
@@ -76,4 +76,4 @@ The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/term
 
 ## License
 
-See [LICENSE](LICENSE). The vendored `terminal-*` modules are Apache-2.0; the mosh native component is GPLv3 (a standalone executable, isolated at the boundary).
+The moke product layer (`app/`) is released under the **GNU General Public License v3.0 or later**; see [LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md). The vendored `terminal-*` modules are Apache-2.0 (GPLv3-compatible); the mosh native component is GPLv3 and ships as a standalone executable.

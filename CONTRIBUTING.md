@@ -27,3 +27,7 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 - Tags with a SemVer suffix are published as GitHub Pre-releases and never become Latest. The in-app update check follows GitHub's latest stable release and therefore does not offer pre-releases.
 - Standard and Maple APKs share `com.briqt.moke` and the same stable release signature. Either variant can upgrade the other when its `versionCode` is higher.
 - Before tagging, update `CHANGELOG.md`, run unit tests, assemble the Standard debug APK, and run Android Lint. The release workflow validates that the tag and `versionName` match, builds both signed release variants, and verifies their required native libraries.
+
+## License
+
+By contributing, you agree that your changes are licensed under **GPL-3.0-or-later**, the same license as this project (see [LICENSE](LICENSE)).
