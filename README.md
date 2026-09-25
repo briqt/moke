@@ -18,18 +18,20 @@ Moke is a native SSH / mosh terminal for Android. It connects to remote servers 
 
 ## Features
 
-- **SSH**: password / private-key (PEM) auth; TOFU host-key verification; jump host (ProxyJump); run-on-login command; window resize; keep-alive heartbeat.
-- **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (reconnect on screen-off / network switch).
-- **Sessions & hosts**: multiple sessions stay resident and switch across screens, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; protocol badges; copy connect command.
-- **Terminal**: two-row extra keys + text-block input; copy & paste; pinch-to-zoom; swipe-to-scroll in full-screen TUIs (Claude Code, vim, … — over both SSH and mosh); a top status bar (protocol / host / latency); a tmux panel to attach / create / rename / kill remote sessions.
-- **Appearance**: live preview; multiple dark color schemes; adjustable font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback — a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple Mono / Hack and more).
-- **Security & languages**: connection credentials are encrypted with the Android Keystore (AES-GCM) before being stored; bilingual English / 中文 (i18n), following the system language by default and switchable in Settings.
+- **SSH**: password / private-key (PEM) auth; TOFU host-key verification with fingerprint confirmation on first connection; jump host (ProxyJump); per-host startup command (e.g. pick cmd, PowerShell or WSL on a Windows host); run-on-login command; keep-alive heartbeat.
+- **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (survives screen-off and network switches); closing a session also shuts down the remote `mosh-server`.
+- **tmux**: a panel to attach / create / rename / detach / kill remote sessions; optionally attach automatically on connect; optionally let tmux handle swipe scrolling.
+- **Files**: browse remote folders over SFTP (SSH and mosh hosts); upload / download with resume; transfers keep running in the background; send a file's path to the terminal.
+- **Sessions & hosts**: multiple sessions stay resident, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; clear ended sessions; copy connect command.
+- **Terminal**: two-row extra keys plus an expandable full keyboard (editing keys, F1–F12, Ctrl shortcuts) with lockable modifiers; text-block input; three keyboard modes (character / standard / IME first) for comfortable CJK input; copy & paste, including remote clipboard writes (OSC 52); pinch-to-zoom; swipe-to-scroll in full-screen TUIs with a selectable mode, plus jump-to-latest; a top status bar (protocol / host / latency).
+- **Appearance**: live preview; light / dark / follow-system theme with separate terminal color schemes for each; font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback — a bundled Noto Sans SC subset, plus downloadable Fira Code / Maple Mono / Hack and more, or import your own).
+- **Security, languages & updates**: credentials are encrypted with the Android Keystore (AES-GCM) before being stored and are excluded from system backups; bilingual English / 中文, following the system language by default and switchable in Settings; in-app update check (optionally including pre-releases).
 
 ## Screenshots
 
 <div align="center">
-<img src="docs/screenshot-connections.png" alt="Host management" width="200"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code over SSH" width="200"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance settings" width="200"/>&nbsp;<img src="docs/screenshot-sessions.png" alt="Multiple sessions" width="200"/>
-<br/><sub>Host management · Terminal (SSH running Claude Code) · Appearance · Multiple sessions</sub>
+<img src="docs/screenshot-connections.png" alt="Hosts" width="160"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code over SSH" width="160"/>&nbsp;<img src="docs/screenshot-tmux.png" alt="tmux panel" width="160"/>&nbsp;<img src="docs/screenshot-files.png" alt="Remote files" width="160"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance (light theme)" width="160"/>
+<br/><sub>Hosts · Terminal (Claude Code over SSH) · tmux panel · Remote files · Appearance (light theme)</sub>
 </div>
 
 ## Install
@@ -46,8 +48,8 @@ Allow "install from unknown sources" and install. Release builds use a stable si
 | Module | Description | License |
 |---|---|---|
 | `app` | Product layer (Compose UI / session orchestration / transport implementations) | GPL-3.0-or-later |
-| `terminal-emulator` | Terminal parsing / state core (vendored; `TerminalSession` made transport-agnostic) | Apache-2.0 |
-| `terminal-view` | Terminal rendering View (vendored; only small backward-compatible tweaks for line / letter spacing) | Apache-2.0 |
+| `terminal-emulator` | Terminal parsing / state core (vendored; `TerminalSession` made transport-agnostic; the PTY JNI is kept for the mosh subprocess) | Apache-2.0 |
+| `terminal-view` | Terminal rendering View (vendored; additive changes for line / letter spacing and swipe scrolling) | Apache-2.0 |
 
 ## Build
 

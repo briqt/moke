@@ -18,18 +18,20 @@ Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接连接远�
 
 ## 功能
 
-- **SSH**：密码 / 私钥（PEM）认证；主机密钥 TOFU 校验；跳板机（ProxyJump）；登录后自动执行命令；窗口 resize；保活心跳。
-- **mosh**：随包 native `mosh-client`，独立子进程 + PTY 运行，UDP 漫游（关屏 / 切网重连）。
-- **会话与连接**：多会话常驻、跨页切换，前台服务在后台保持连接；分组 / 排序（含手动拖动）；创建副本；自定义会话标题；协议徽标；复制连接命令。
-- **终端**：双排附加键 + 文本段输入；复制粘贴；捏合缩放；全屏 TUI（Claude Code / vim 等）上下滑动滚屏（SSH / mosh 一致）；顶部状态条（协议 / 主机 / 延迟）；tmux 面板（附加 / 新建 / 重命名 / 关闭远端会话）。
-- **外观**：实时预览；多套暗色配色；字号 / 行距 / 字间距、光标样式可调；字体管理（主字体 + 中文回退——内置思源黑体子集，可下载 Fira Code / Maple Mono / Hack 等）。
-- **安全与多语言**：连接凭据经 Android Keystore（AES-GCM）加密后存储；中英双语（i18n），默认跟随系统语言，设置内可切换。
+- **SSH**：密码 / 私钥（PEM）认证；主机密钥 TOFU 校验，首次连接先确认指纹；跳板机（ProxyJump）；按主机指定启动命令（如在 Windows 主机上选择 cmd、PowerShell 或 WSL）；登录后自动执行命令；保活心跳。
+- **mosh**：随包 native `mosh-client`，独立子进程 + PTY 运行；UDP 漫游（关屏 / 切网不断线）；关闭会话时一并结束远端 `mosh-server`。
+- **tmux**：面板内附加 / 新建 / 重命名 / 离开 / 关闭远端会话；可设置连接即自动进入；可让 tmux 接管滑动滚屏。
+- **文件**：经 SFTP 浏览远端目录（SSH 与 mosh 主机均可）；上传 / 下载支持断点续传；传输在后台继续；可把文件路径发送到终端。
+- **会话与连接**：多会话常驻，前台服务在后台保持连接；分组 / 排序（含手动拖动）；创建副本；自定义会话标题；一键清理已结束会话；复制连接命令。
+- **终端**：双排附加键 + 可展开的全键盘（编辑键、F1–F12、Ctrl 组合键），修饰键可锁定；文本段输入；三种键盘模式（字符模式 / 标准 / 输入法优先），中文输入顺畅；复制粘贴，支持远端写入剪贴板（OSC 52）；捏合缩放；全屏 TUI 内滑动滚屏（模式可选）与「跳到底部」；顶部状态条（协议 / 主机 / 延迟）。
+- **外观**：实时预览；浅色 / 深色 / 跟随系统，两种模式可分别指定终端配色；字号 / 行距 / 字间距、光标样式可调；字体管理（主字体 + 中文回退——内置思源黑体子集，可下载 Fira Code / Maple Mono / Hack 等，也可导入本地字体）。
+- **安全、多语言与更新**：连接凭据经 Android Keystore（AES-GCM）加密后存储，且不进入系统备份；中英双语，默认跟随系统语言，设置内可切换；应用内检查更新（可选包含预览版）。
 
 ## 截图
 
 <div align="center">
-<img src="docs/screenshot-connections.png" alt="连接管理" width="200"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="终端 SSH 跑 Claude Code" width="200"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="外观设置" width="200"/>&nbsp;<img src="docs/screenshot-sessions.png" alt="多会话管理" width="200"/>
-<br/><sub>连接管理 · 终端（SSH 跑 Claude Code）· 外观设置 · 多会话</sub>
+<img src="docs/screenshot-connections.png" alt="连接" width="160"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="终端 SSH 跑 Claude Code" width="160"/>&nbsp;<img src="docs/screenshot-tmux.png" alt="tmux 面板" width="160"/>&nbsp;<img src="docs/screenshot-files.png" alt="远端文件" width="160"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="外观（浅色主题）" width="160"/>
+<br/><sub>连接 · 终端（SSH 跑 Claude Code）· tmux 面板 · 远端文件 · 外观（浅色主题）</sub>
 </div>
 
 ## 安装
@@ -46,8 +48,8 @@ Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接连接远�
 | 模块 | 说明 | 许可 |
 |---|---|---|
 | `app` | 产品层（Compose UI / 会话编排 / 传输实现） | GPL-3.0-or-later |
-| `terminal-emulator` | 终端解析 / 状态内核（vendored；`TerminalSession` 改为传输无关） | Apache-2.0 |
-| `terminal-view` | 终端渲染 View（vendored；仅为行距 / 字间距做向后兼容小改动） | Apache-2.0 |
+| `terminal-emulator` | 终端解析 / 状态内核（vendored；`TerminalSession` 改为传输无关；保留 PTY JNI 供 mosh 子进程使用） | Apache-2.0 |
+| `terminal-view` | 终端渲染 View（vendored；为行距 / 字间距与滑动滚屏做加法式改动） | Apache-2.0 |
 
 ## 构建
 

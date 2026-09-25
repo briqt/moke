@@ -8,11 +8,12 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 - 来源：[termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-emulator`、`terminal-view` 模块
 - 上游来源：[Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)（Jack Palevich 等）
 - 许可：**Apache License 2.0**
-- 修改说明：
-  - `terminal-view`：**极小改动**——`TerminalRenderer` 增加可选行距倍数 / 字间距（em）参数，`TerminalView` 增加 `setFontSpacing(...)`；均向后兼容，默认值等价上游。
-  - `terminal-emulator`：删除 `JNI.java` 与 `src/main/jni/`（本地 PTY 的 C 代码）；
-    将 `TerminalSession.java` 改写为传输无关（移除 `forkpty`/JNI，改为面向 `TerminalTransport`），
-    并新增 `TerminalTransport.java`。其余文件未修改。
+- 修改说明（均为加法式、向后兼容；逐项见各模块的 `README.md`）：
+  - `terminal-view`：`TerminalRenderer` 增加可选行距倍数 / 字间距（em）参数，`TerminalView` 增加 `setFontSpacing(...)`；
+    `TerminalView` 增加全屏程序内的滑动处理与滚屏回调，新增 `MokeScroll.java`（滑动决策）；文本选择工具条去掉无作用的 "More…" 项。
+  - `terminal-emulator`：将 `TerminalSession.java` 改写为传输无关（面向新增的 `TerminalTransport.java`，不再 fork 本地 shell）；
+    保留 `JNI.java` 与 `src/main/jni/termux.c`（PTY 子进程，`JNI` 改为 public），用于以独立子进程运行 `mosh-client`；
+    `TerminalEmulator.java` 识别 DECSET 1003 并新增 `isBracketedPasteMode()`。其余文件未修改。
 
 ### 字体（打包进 APK）
 - [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)（`res/font/jetbrains_mono.ttf`）——**OFL**，默认等宽主字体，未修改。

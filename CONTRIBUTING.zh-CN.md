@@ -12,7 +12,7 @@
 
 - JDK 17、Android SDK（compileSdk 35 / build-tools 35）
 - 在项目根创建 `local.properties`：`sdk.dir=/path/to/Android/sdk`
-- 构建：`./gradlew assembleDebug`；测试：`./gradlew testDebugUnitTest`
+- 构建：`./gradlew assembleStandardDebug`；测试：`./gradlew testDebugUnitTest`（maple 变体与 mosh native 的构建见 README「构建」一节）
 
 ## 约定
 
