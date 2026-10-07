@@ -44,6 +44,8 @@ class SettingsStore(private val context: Context) {
     private val letterSpacingKey = floatPreferencesKey("letter_spacing_mul")
     private val userFontsKey = stringPreferencesKey("user_fonts")
     private val extraKeysVisibleKey = booleanPreferencesKey("extra_keys_visible")
+    // 终端页全屏：藏起应用顶栏和状态栏。默认关。
+    private val terminalFullscreenKey = booleanPreferencesKey("terminal_fullscreen")
     // 外观（应用层，与终端配色相互独立）：明暗模式 + 是否取系统壁纸动态色（Android 12+）。
     private val themeModeKey = stringPreferencesKey("theme_mode")
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
@@ -136,6 +138,11 @@ class SettingsStore(private val context: Context) {
     /** 终端底部附加键是否显示（默认显示）。 */
     val extraKeysVisible: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[extraKeysVisibleKey] ?: true
+    }
+
+    /** 终端页是否全屏（藏起顶栏和状态栏）。默认关。 */
+    val terminalFullscreen: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[terminalFullscreenKey] ?: false
     }
 
     /** 应用明暗主题（默认跟随系统）。 */
@@ -312,6 +319,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setExtraKeysVisible(visible: Boolean) {
         context.settingsDataStore.edit { it[extraKeysVisibleKey] = visible }
+    }
+
+    suspend fun setTerminalFullscreen(fullscreen: Boolean) {
+        context.settingsDataStore.edit { it[terminalFullscreenKey] = fullscreen }
     }
 
     suspend fun setThemeMode(m: ThemeMode) {

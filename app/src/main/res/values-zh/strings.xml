@@ -156,6 +156,8 @@
     <string name="reset_font_size">恢复默认字号</string>
     <string name="hide_extra_keys">隐藏底部快捷键</string>
     <string name="show_extra_keys">显示底部快捷键</string>
+    <string name="terminal_fullscreen">全屏</string>
+    <string name="terminal_exit_fullscreen">退出全屏</string>
     <string name="show_keyboard">弹出键盘</string>
     <string name="close_connection">关闭连接</string>
     <string name="reset_default">恢复默认</string>

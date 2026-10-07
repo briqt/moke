@@ -1,8 +1,10 @@
 package com.briqt.moke.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -17,25 +19,33 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
@@ -74,7 +84,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -113,6 +129,7 @@ fun TerminalScreen(
     cursorBlink: Boolean,
     schemeId: String,
     extraKeysVisible: Boolean,
+    fullscreen: Boolean,
     keyboardMode: KeyboardMode,
     scrollMode: ScrollMode,
     confirmClose: Boolean,
@@ -126,6 +143,7 @@ fun TerminalScreen(
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
+    onToggleFullscreen: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
     onTmuxRename: (String, String) -> Unit,
@@ -325,14 +343,16 @@ fun TerminalScreen(
         }
     }
 
+    TerminalStatusBar(fullscreen)
     Scaffold(
         topBar = {
-            // 双行顶栏：主标题（会话名）+ 细小副标题（user@host · 协议 · 延迟）。
-            // 连接信息收进顶栏，不再单独占用终端区域。
+            if (fullscreen) {
+                // 全屏仍留一条把手：顶栏藏起来之后，退出全屏不能只靠已经装不下的 ⋮。
+                FullscreenExitHandle(onExit = onToggleFullscreen)
+            } else {
+            // 单行顶栏：会话名、协议、延迟排在同一行。状态栏保持可见。
             TerminalTopBar(
                 title = title,
-                // 副标题第 2 行的身份：连接名（设备名），未命名则回落 user@host。
-                deviceName = ts.host.displayName.ifBlank { stringResource(R.string.unnamed) },
                 useMosh = ts.host.useMosh,
                 alive = alive,
                 tmuxDetached = remoteTmuxName != null && tmuxAttached == true,
@@ -353,6 +373,7 @@ fun TerminalScreen(
                 onFontSize = onFontSize,
                 onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
+                onToggleFullscreen = onToggleFullscreen,
                 onSetTitle = { showTitleDialog = true },
                 onOpenFiles = { keyboard?.hide(); onOpenFiles() },
                 onShowKeyboard = { controller.showKeyboard() },
@@ -360,6 +381,7 @@ fun TerminalScreen(
                 onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
                 onBack = { keyboard?.hide(); onBack() },
             )
+            }
         },
     ) { padding ->
         Column(
@@ -670,13 +692,12 @@ fun fmtFontSize(sp: Float): String =
     if (sp % 1f == 0f) sp.toInt().toString() else String.format("%.1f", sp)
 
 /**
- * 终端双行顶栏：返回 · 第1行动态标题 + 第2行（设备名 · 协议 · 延迟/状态）· ⋮ 菜单。
- * 设备名即连接名（未命名回落 user@host）；不再单列 user@host。延迟仅 SSH 实时探测。
+ * 终端单行顶栏：返回 · 会话名 · 协议 · 延迟/状态 · 全屏 · ⋮。
+ * 高度仍是图标热区（49dp）加状态栏，不再为第二行身份信息加高。延迟仅 SSH 实时探测。
  */
 @Composable
 private fun TerminalTopBar(
     title: String,
-    deviceName: String,
     useMosh: Boolean,
     alive: Boolean,
     tmuxDetached: Boolean = false,
@@ -693,6 +714,7 @@ private fun TerminalTopBar(
     onFontSize: (Float) -> Unit,
     onPickKeyboardMode: () -> Unit,
     onToggleExtraKeys: () -> Unit,
+    onToggleFullscreen: () -> Unit,
     onSetTitle: () -> Unit,
     onOpenFiles: () -> Unit,
     onShowKeyboard: () -> Unit,
@@ -712,49 +734,49 @@ private fun TerminalTopBar(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
             }
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    // 第 2 行身份：设备名（连接名，未命名回落 user@host）；不再单列 user@host。
-                    Text(
-                        deviceName,
+                Box(Modifier.padding(start = 6.dp)) { ProtocolBadge(useMosh) }
+                when {
+                    !alive -> Text(
+                        "· " + stringResource(
+                            if (tmuxDetached) R.string.tmux_left_short else R.string.offline,
+                        ),
+                        fontFamily = MokeMono,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.padding(start = 4.dp),
                     )
-                    // 协议徽标：与连接列表一致，mosh 用强调色高亮标识。
-                    ProtocolBadge(useMosh)
-                    when {
-                        !alive -> Text(
-                            "· " + stringResource(
-                                if (tmuxDetached) R.string.tmux_left_short else R.string.offline,
-                            ),
-                            fontFamily = MokeMono,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                        latencyMs != null -> Text(
-                            "· $latencyMs ms",
-                            fontFamily = MokeMono,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = latencyColor(latencyMs),
-                            maxLines = 1,
-                        )
-                        showLatency -> Text("· …", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                        else -> {}
-                    }
+                    latencyMs != null -> Text(
+                        "· $latencyMs ms",
+                        fontFamily = MokeMono,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = latencyColor(latencyMs),
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                    showLatency -> Text(
+                        "· …",
+                        fontFamily = MokeMono,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                    else -> {}
                 }
             }
             // 端口转发：只在有转发时出现（交互原则 P1），角标 = 转发条数；点开即转发面板。
@@ -791,6 +813,9 @@ private fun TerminalTopBar(
                         Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
+            }
+            IconButton(onClick = onToggleFullscreen) {
+                Icon(Icons.Filled.Fullscreen, contentDescription = stringResource(R.string.terminal_fullscreen), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // 右上角折叠菜单：底部快捷键显隐 · 字号 ±0.5 · 恢复默认字号。
             var menuOpen by remember { mutableStateOf(false) }
@@ -1052,4 +1077,59 @@ private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier =
             }
         }
     }
+}
+
+/**
+ * 全屏时藏起状态栏。导航栏留着，系统返回手势还在。
+ * 离开终端页时恢复，避免主界面也没了状态栏。
+ * 轻扫屏幕上沿会短暂把状态栏唤出来，盖在内容上，松手后自己收回。
+ */
+@Composable
+private fun TerminalStatusBar(fullscreen: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(fullscreen) {
+        val window = view.context.findActivity().window
+        val controller = WindowCompat.getInsetsController(window, view)
+        if (fullscreen) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+        onDispose { controller.show(WindowInsetsCompat.Type.statusBars()) }
+    }
+}
+
+/**
+ * 全屏时顶上的退出把手。竖屏刘海仍要躲开，所以把手画在挖孔下面，终端文字不会钻进摄像头。
+ */
+@Composable
+private fun FullscreenExitHandle(onExit: () -> Unit) {
+    val label = stringResource(R.string.terminal_exit_fullscreen)
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top))
+                .height(22.dp)
+                .clickable(onClick = onExit)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier.width(34.dp).height(4.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+            ) {}
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    error("TerminalScreen is not hosted by an Activity")
 }

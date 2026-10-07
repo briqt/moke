@@ -136,6 +136,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val terminalFullscreen: StateFlow<Boolean> = settings.terminalFullscreen
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     /** 应用明暗主题 / 动态取色 / 键盘模式 / 关闭会话二次确认。 */
     val themeMode: StateFlow<ThemeMode> = settings.themeMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
@@ -764,6 +767,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setLetterSpacing(v: Float) = viewModelScope.launch { settings.setLetterSpacing(v) }
 
     fun setExtraKeysVisible(visible: Boolean) = viewModelScope.launch { settings.setExtraKeysVisible(visible) }
+
+    fun setTerminalFullscreen(fullscreen: Boolean) = viewModelScope.launch { settings.setTerminalFullscreen(fullscreen) }
 
     fun setThemeMode(m: ThemeMode) = viewModelScope.launch { settings.setThemeMode(m) }
 
