@@ -7,7 +7,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.terminal.TerminalLinks
@@ -20,25 +26,22 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -66,6 +69,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -343,13 +347,14 @@ fun TerminalScreen(
         }
     }
 
-    TerminalStatusBar(fullscreen)
+    // 全屏时先退出全屏，再按一次才离开终端。弹窗和底部面板在组合里更晚注册，返回会先关掉它们。
+    BackHandler(enabled = fullscreen) { onToggleFullscreen() }
+    TerminalSystemBars(fullscreen)
     Scaffold(
+        // 全屏不给系统栏留白：状态栏和导航栏都已隐藏，留白会把终端又压回一条横杠的高度。
+        contentWindowInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         topBar = {
-            if (fullscreen) {
-                // 全屏仍留一条把手：顶栏藏起来之后，退出全屏不能只靠已经装不下的 ⋮。
-                FullscreenExitHandle(onExit = onToggleFullscreen)
-            } else {
+            if (!fullscreen) {
             // 单行顶栏：会话名、协议、延迟排在同一行。状态栏保持可见。
             TerminalTopBar(
                 title = title,
@@ -402,6 +407,10 @@ fun TerminalScreen(
                     factory = { view },
                     modifier = Modifier.fillMaxSize(),
                 )
+                // 不占布局：终端仍画到屏幕上沿，只有这一条接点击，用来退出全屏。
+                if (fullscreen) {
+                    FullscreenExitZone(onExit = onToggleFullscreen)
+                }
                 // 缩放提示浮层：字号 + 百分比，非默认给「恢复默认」。
                 zoomHintSp?.let { sp ->
                     ZoomHint(
@@ -553,7 +562,6 @@ fun TerminalScreen(
                         }
                     },
                 )
-                else -> ExtraKeysRestoreHandle(onRestore = onToggleExtraKeys)
             }
         }
     }
@@ -1080,49 +1088,75 @@ private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier =
 }
 
 /**
- * 全屏时藏起状态栏。导航栏留着，系统返回手势还在。
- * 离开终端页时恢复，避免主界面也没了状态栏。
- * 轻扫屏幕上沿会短暂把状态栏唤出来，盖在内容上，松手后自己收回。
+ * 全屏时藏起状态栏和导航栏，窗口延伸进挖孔，终端铺到物理边缘。
+ * 从边缘轻扫会短暂把系统栏盖在内容上，松手后自己收回；返回手势仍然有效。
+ * 离开终端页或关掉全屏时恢复，避免主界面也没了系统栏。
  */
 @Composable
-private fun TerminalStatusBar(fullscreen: Boolean) {
+private fun TerminalSystemBars(fullscreen: Boolean) {
     val view = LocalView.current
     DisposableEffect(fullscreen) {
-        val window = view.context.findActivity().window
+        val activity = view.context.findActivity()
+        val window = activity.window
         val controller = WindowCompat.getInsetsController(window, view)
-        if (fullscreen) {
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.statusBars())
+        val previousCutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode
         } else {
-            controller.show(WindowInsetsCompat.Type.statusBars())
+            null
         }
-        onDispose { controller.show(WindowInsetsCompat.Type.statusBars()) }
+        fun apply() {
+            if (!fullscreen) {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                return
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val attrs = window.attributes
+                attrs.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                window.attributes = attrs
+            }
+            // 临时露出、自动收回。常驻露出会把导航栏又占回去，全屏就不再是全屏。
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        apply()
+        val owner = activity as? LifecycleOwner
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) apply()
+        }
+        owner?.lifecycle?.addObserver(observer)
+        onDispose {
+            owner?.lifecycle?.removeObserver(observer)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            if (previousCutout != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val attrs = window.attributes
+                attrs.layoutInDisplayCutoutMode = previousCutout
+                window.attributes = attrs
+            }
+        }
     }
 }
 
 /**
- * 全屏时顶上的退出把手。竖屏刘海仍要躲开，所以把手画在挖孔下面，终端文字不会钻进摄像头。
+ * 全屏时贴在屏幕上沿的退出热区。不占高度，终端照常画到边缘；点这一条才退出。
+ * 高度取最小可点尺寸，避免把前几行的点击都变成退出。
  */
 @Composable
-private fun FullscreenExitHandle(onExit: () -> Unit) {
+private fun BoxScope.FullscreenExitZone(onExit: () -> Unit) {
     val label = stringResource(R.string.terminal_exit_fullscreen)
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top))
-                .height(22.dp)
-                .clickable(onClick = onExit)
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) {
-            Surface(
-                modifier = Modifier.width(34.dp).height(4.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-            ) {}
-        }
-    }
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .height(48.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onExit,
+            )
+            .semantics { contentDescription = label },
+    )
 }
 
 private fun Context.findActivity(): Activity {

@@ -411,29 +411,3 @@ fun TextBlockComposer(
     }
 }
 
-/**
- * 底部快捷键被隐藏后留下的把手：点一下恢复。
- *
- * 全键盘面板与文本段输入的入口都在快捷键行上，隐藏之后若什么都不留，这两个能力就只剩
- * 「回 ⋮ 菜单重新显示」一条隐蔽的出路。样式与全键盘面板顶部的收起把手一致。
- */
-@Composable
-fun ExtraKeysRestoreHandle(onRestore: () -> Unit) {
-    val label = stringResource(R.string.show_extra_keys)
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(22.dp)
-                .clickable(onClick = onRestore)
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) {
-            Surface(
-                modifier = Modifier.width(34.dp).height(4.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-            ) {}
-        }
-    }
-}
