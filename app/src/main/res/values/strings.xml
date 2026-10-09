@@ -160,8 +160,6 @@
     <string name="reset_font_size">Reset font size</string>
     <string name="hide_extra_keys">Hide shortcut keys</string>
     <string name="show_extra_keys">Show shortcut keys</string>
-    <string name="terminal_fullscreen">Full screen</string>
-    <string name="terminal_exit_fullscreen">Exit full screen</string>
     <string name="show_keyboard">Show keyboard</string>
     <string name="close_connection">Close connection</string>
     <string name="reset_default">Reset</string>

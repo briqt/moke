@@ -1,19 +1,11 @@
 package com.briqt.moke.ui
 
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.LifecycleOwner
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.terminal.TerminalLinks
@@ -25,14 +17,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,7 +36,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
@@ -69,7 +56,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -88,13 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -133,7 +113,6 @@ fun TerminalScreen(
     cursorBlink: Boolean,
     schemeId: String,
     extraKeysVisible: Boolean,
-    fullscreen: Boolean,
     keyboardMode: KeyboardMode,
     scrollMode: ScrollMode,
     confirmClose: Boolean,
@@ -147,7 +126,6 @@ fun TerminalScreen(
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
-    onToggleFullscreen: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
     onTmuxRename: (String, String) -> Unit,
@@ -347,14 +325,8 @@ fun TerminalScreen(
         }
     }
 
-    // 全屏时先退出全屏，再按一次才离开终端。弹窗和底部面板在组合里更晚注册，返回会先关掉它们。
-    BackHandler(enabled = fullscreen) { onToggleFullscreen() }
-    TerminalSystemBars(fullscreen)
     Scaffold(
-        // 全屏不给系统栏留白：状态栏和导航栏都已隐藏，留白会把终端又压回一条横杠的高度。
-        contentWindowInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         topBar = {
-            if (!fullscreen) {
             // 单行顶栏：会话名、协议、延迟排在同一行。状态栏保持可见。
             TerminalTopBar(
                 title = title,
@@ -378,7 +350,6 @@ fun TerminalScreen(
                 onFontSize = onFontSize,
                 onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
-                onToggleFullscreen = onToggleFullscreen,
                 onSetTitle = { showTitleDialog = true },
                 onOpenFiles = { keyboard?.hide(); onOpenFiles() },
                 onShowKeyboard = { controller.showKeyboard() },
@@ -386,7 +357,6 @@ fun TerminalScreen(
                 onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
                 onBack = { keyboard?.hide(); onBack() },
             )
-            }
         },
     ) { padding ->
         Column(
@@ -407,10 +377,6 @@ fun TerminalScreen(
                     factory = { view },
                     modifier = Modifier.fillMaxSize(),
                 )
-                // 不占布局：终端仍画到屏幕上沿，只有这一条接点击，用来退出全屏。
-                if (fullscreen) {
-                    FullscreenExitZone(onExit = onToggleFullscreen)
-                }
                 // 缩放提示浮层：字号 + 百分比，非默认给「恢复默认」。
                 zoomHintSp?.let { sp ->
                     ZoomHint(
@@ -700,7 +666,7 @@ fun fmtFontSize(sp: Float): String =
     if (sp % 1f == 0f) sp.toInt().toString() else String.format("%.1f", sp)
 
 /**
- * 终端单行顶栏：返回 · 会话名 · 协议 · 延迟/状态 · 全屏 · ⋮。
+ * 终端单行顶栏：返回 · 会话名 · 协议 · 延迟/状态 · ⋮。
  * 高度仍是图标热区（49dp）加状态栏，不再为第二行身份信息加高。延迟仅 SSH 实时探测。
  */
 @Composable
@@ -722,7 +688,6 @@ private fun TerminalTopBar(
     onFontSize: (Float) -> Unit,
     onPickKeyboardMode: () -> Unit,
     onToggleExtraKeys: () -> Unit,
-    onToggleFullscreen: () -> Unit,
     onSetTitle: () -> Unit,
     onOpenFiles: () -> Unit,
     onShowKeyboard: () -> Unit,
@@ -821,9 +786,6 @@ private fun TerminalTopBar(
                         Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
-            }
-            IconButton(onClick = onToggleFullscreen) {
-                Icon(Icons.Filled.Fullscreen, contentDescription = stringResource(R.string.terminal_fullscreen), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // 右上角折叠菜单：底部快捷键显隐 · 字号 ±0.5 · 恢复默认字号。
             var menuOpen by remember { mutableStateOf(false) }
@@ -1085,85 +1047,4 @@ private fun ZoomHint(sp: Float, onResetDefault: () -> Unit, modifier: Modifier =
             }
         }
     }
-}
-
-/**
- * 全屏时藏起状态栏和导航栏，窗口延伸进挖孔，终端铺到物理边缘。
- * 从边缘轻扫会短暂把系统栏盖在内容上，松手后自己收回；返回手势仍然有效。
- * 离开终端页或关掉全屏时恢复，避免主界面也没了系统栏。
- */
-@Composable
-private fun TerminalSystemBars(fullscreen: Boolean) {
-    val view = LocalView.current
-    DisposableEffect(fullscreen) {
-        val activity = view.context.findActivity()
-        val window = activity.window
-        val controller = WindowCompat.getInsetsController(window, view)
-        val previousCutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode
-        } else {
-            null
-        }
-        fun apply() {
-            if (!fullscreen) {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-                return
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val attrs = window.attributes
-                attrs.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                window.attributes = attrs
-            }
-            // 临时露出、自动收回。常驻露出会把导航栏又占回去，全屏就不再是全屏。
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-        }
-        apply()
-        val owner = activity as? LifecycleOwner
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) apply()
-        }
-        owner?.lifecycle?.addObserver(observer)
-        onDispose {
-            owner?.lifecycle?.removeObserver(observer)
-            controller.show(WindowInsetsCompat.Type.systemBars())
-            if (previousCutout != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val attrs = window.attributes
-                attrs.layoutInDisplayCutoutMode = previousCutout
-                window.attributes = attrs
-            }
-        }
-    }
-}
-
-/**
- * 全屏时贴在屏幕上沿的退出热区。不占高度，终端照常画到边缘；点这一条才退出。
- * 高度取最小可点尺寸，避免把前几行的点击都变成退出。
- */
-@Composable
-private fun BoxScope.FullscreenExitZone(onExit: () -> Unit) {
-    val label = stringResource(R.string.terminal_exit_fullscreen)
-    Box(
-        modifier = Modifier
-            .align(Alignment.TopCenter)
-            .fillMaxWidth()
-            .height(48.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onExit,
-            )
-            .semantics { contentDescription = label },
-    )
-}
-
-private fun Context.findActivity(): Activity {
-    var ctx = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    error("TerminalScreen is not hosted by an Activity")
 }

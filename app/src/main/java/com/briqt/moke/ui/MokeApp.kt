@@ -84,7 +84,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val cursorStyle by vm.cursorStyle.collectAsState()
     val cursorBlink by vm.cursorBlink.collectAsState()
     val extraKeysVisible by vm.extraKeysVisible.collectAsState()
-    val terminalFullscreen by vm.terminalFullscreen.collectAsState()
     val themeMode by vm.themeMode.collectAsState()
     val dynamicColor by vm.dynamicColor.collectAsState()
     val keyboardMode by vm.keyboardMode.collectAsState()
@@ -219,7 +218,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         cursorBlink = cursorBlink,
                         schemeId = effectiveSchemeId,
                         extraKeysVisible = extraKeysVisible,
-                        fullscreen = terminalFullscreen,
                         keyboardMode = keyboardMode,
                         scrollMode = scrollMode,
                         confirmClose = confirmClose,
@@ -246,7 +244,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onKeyboardMode = { vm.setKeyboardMode(it) },
                         onScrollMode = { vm.setScrollMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
-                        onToggleFullscreen = { vm.setTerminalFullscreen(!terminalFullscreen) },
                         onTmuxRefresh = { vm.refreshTmux(ts) },
                         onTmuxNew = { vm.tmuxNew(ts, it) },
                         onTmuxRename = { id, name -> vm.tmuxRename(ts, id, name) },
