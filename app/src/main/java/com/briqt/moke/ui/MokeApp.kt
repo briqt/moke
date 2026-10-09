@@ -84,6 +84,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val cursorStyle by vm.cursorStyle.collectAsState()
     val cursorBlink by vm.cursorBlink.collectAsState()
     val extraKeysVisible by vm.extraKeysVisible.collectAsState()
+    val extraKeysLayout by vm.extraKeysLayout.collectAsState()
     val themeMode by vm.themeMode.collectAsState()
     val dynamicColor by vm.dynamicColor.collectAsState()
     val keyboardMode by vm.keyboardMode.collectAsState()
@@ -218,6 +219,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         cursorBlink = cursorBlink,
                         schemeId = effectiveSchemeId,
                         extraKeysVisible = extraKeysVisible,
+                        extraKeysLayout = extraKeysLayout,
                         keyboardMode = keyboardMode,
                         scrollMode = scrollMode,
                         confirmClose = confirmClose,
@@ -340,6 +342,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onKeepScreenOn = { vm.setKeepScreenOn(it) },
             onConfirmClose = { vm.setConfirmCloseSession(it) },
             onAutoTrustNewHostKey = { vm.setAutoTrustNewHostKey(it) },
+            extraKeysLayout = extraKeysLayout,
+            onExtraKeysLayout = { vm.setExtraKeysLayout(it) },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
         )
 

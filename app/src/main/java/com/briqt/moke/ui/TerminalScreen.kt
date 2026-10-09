@@ -113,6 +113,7 @@ fun TerminalScreen(
     cursorBlink: Boolean,
     schemeId: String,
     extraKeysVisible: Boolean,
+    extraKeysLayout: String,
     keyboardMode: KeyboardMode,
     scrollMode: ScrollMode,
     confirmClose: Boolean,
@@ -447,7 +448,8 @@ fun TerminalScreen(
                     visible = panelOpen && extraKeysVisible && !showComposer,
                     mods = mods,
                     onKey = { key -> mods = sendKey(ts, controller, mods, key) },
-                    onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                    onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
+                    onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
                     onDismiss = { panelOpen = false },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -516,11 +518,12 @@ fun TerminalScreen(
                     },
                 )
                 extraKeysVisible -> ExtraKeys(
-                    rows = DEFAULT_EXTRA_KEYS,
+                    rows = ExtraKeyLayout.rows(extraKeysLayout),
                     mods = mods,
                     panelOpen = panelOpen,
                     onKey = { key -> mods = sendKey(ts, controller, mods, key) },
-                    onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                    onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
+                    onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
                     onAction = { id ->
                         when (id) {
                             ACTION_COMPOSER -> showComposer = true
@@ -607,6 +610,7 @@ private fun KeyboardPanelOverlay(
     mods: Modifiers,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
+    onHoldMod: (ModKind) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -621,6 +625,7 @@ private fun KeyboardPanelOverlay(
             mods = mods,
             onKey = onKey,
             onToggleMod = onToggleMod,
+            onHoldMod = onHoldMod,
             onDismiss = onDismiss,
         )
     }
@@ -637,9 +642,13 @@ private fun sendKey(ts: TermSession, controller: TerminalController, mods: Modif
     return mods.consumeOnce().also { syncMods(controller, it) }
 }
 
-/** 切换修饰键三态，并把 Ctrl/Alt 同步给 controller（输入法打字那条路要用）。 */
-private fun toggleMod(controller: TerminalController, mods: Modifiers, kind: ModKind): Modifiers =
-    mods.toggle(kind).also { syncMods(controller, it) }
+/** 点一下切换一次性/关，按住锁定。并把 Ctrl/Alt 同步给 controller（输入法打字那条路要用）。 */
+private fun applyMod(
+    controller: TerminalController,
+    mods: Modifiers,
+    kind: ModKind,
+    hold: Boolean,
+): Modifiers = (if (hold) mods.hold(kind) else mods.tap(kind)).also { syncMods(controller, it) }
 
 /**
  * 把修饰状态下发给 [TerminalController]（TerminalView 在处理输入法/硬件按键时读它）。

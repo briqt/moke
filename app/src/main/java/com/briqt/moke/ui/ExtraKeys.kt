@@ -1,6 +1,8 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,8 +87,7 @@ const val ACTION_PANEL = "panel"
  * Ctrl 组合、Shift+Tab。按这条线砍掉了 rc.2 的整页符号，以及散在导航行里的 `/` `-`。
  *
  * 分工：**常驻两排 = 给不了 ∩ 高频**；**面板 = 给不了的其余全部**（外加 Enter/⌫ 两个
- * "软键盘被隐藏时"的兜底键）。同一个键不在两处重复出现——面板就浮在常驻两排上方，
- * 重复只会让人分不清该按哪个，也是 rc.2 显得乱的主要来源。
+ * 同一个键可以同时出现在常驻排和面板上（用户把 Shift 放到常驻排时，面板里仍留着）。
  */
 
 /**
@@ -95,26 +96,7 @@ const val ACTION_PANEL = "panel"
  * 取舍：Enter/⌫ 让位给 ⇧TAB 与 ^C——前者输入法上永远都在，后者输入法永远给不了；
  * 而 ⇧TAB（切 agent 模式）与 ^C（打断）正是这类会话里按得最多的两个。
  */
-val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
-    listOf(
-        ExtraKey.Key("ESC", KeyId.Esc),
-        ExtraKey.Mod("CTRL", ModKind.Ctrl),
-        ExtraKey.Mod("ALT", ModKind.Alt),
-        ExtraKey.Key("↑", KeyId.Up),
-        ExtraKey.Key("HOME", KeyId.Home),
-        ExtraKey.Key("END", KeyId.End),
-        ExtraKey.Action(ACTION_PANEL),
-    ),
-    listOf(
-        ExtraKey.Key("TAB", KeyId.Tab),
-        ExtraKey.Key("⇧TAB", KeyId.Macro("\u001b[Z")),
-        ExtraKey.Key("←", KeyId.Left),
-        ExtraKey.Key("↓", KeyId.Down),
-        ExtraKey.Key("→", KeyId.Right),
-        ExtraKey.Key("^C", KeyId.Macro(ctrlOf('c'))),
-        ExtraKey.Action(ACTION_COMPOSER),
-    ),
-)
+val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = ExtraKeyLayout.rows(null)
 
 /** 全键盘面板的一个分组（面板是单页竖排，分组只作视觉分区，不再有分段切换）。 */
 data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>)
@@ -189,6 +171,7 @@ fun ExtraKeys(
     panelOpen: Boolean = false,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
+    onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
@@ -197,7 +180,7 @@ fun ExtraKeys(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             rows.forEach { row ->
-                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onAction)
+                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onHoldMod, onAction)
             }
         }
     }
@@ -210,6 +193,7 @@ private fun KeyRow(
     panelOpen: Boolean,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
+    onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -241,6 +225,11 @@ private fun KeyRow(
                         is ExtraKey.Action -> onAction(key.id)
                     }
                 },
+                onLongClick = if (key is ExtraKey.Mod) {
+                    { onHoldMod(key.kind) }
+                } else {
+                    null
+                },
             )
         }
     }
@@ -260,6 +249,7 @@ fun KeyboardPanel(
     mods: Modifiers,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
+    onHoldMod: (ModKind) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -309,7 +299,7 @@ fun KeyboardPanel(
                 val rows = if (perRow > 0) section.rows.flatten().chunked(perRow) else section.rows
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                     rows.forEach { row ->
-                        KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onAction = {})
+                        KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onHoldMod = onHoldMod, onAction = {})
                     }
                 }
             }
@@ -317,6 +307,7 @@ fun KeyboardPanel(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun KeyCap(
     label: String,
@@ -325,11 +316,20 @@ private fun KeyCap(
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val description = when {
+        locked -> stringResource(R.string.key_mod_locked, label)
+        active && onLongClick != null -> stringResource(R.string.key_mod_once, label)
+        else -> label
+    }
     // 近乎平直的键帽（微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
+    // 长按走系统「按住延迟」，不另写死秒数。只有修饰键传入 onLongClick。
     Surface(
-        onClick = onClick,
-        modifier = modifier.height(34.dp),
+        modifier = modifier
+            .height(34.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .semantics(mergeDescendants = true) { contentDescription = description },
         shape = MokeShapes.keycap,
         color = when {
             locked -> MaterialTheme.colorScheme.tertiary
@@ -345,7 +345,7 @@ private fun KeyCap(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (icon != null) {
                 // 图标键（文本段 / 更多）：label 作无障碍描述，视觉用图标。
-                Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
             } else {
                 // 方向键单字符符号（↑ ↓ ← →）本身偏小、看不清，放大到 17sp；其余文字标签（含 Enter）保持 13sp。
                 val glyph = label.length == 1 && label[0] in "↑↓←→"

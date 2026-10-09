@@ -160,6 +160,12 @@
     <string name="reset_font_size">Reset font size</string>
     <string name="hide_extra_keys">Hide shortcut keys</string>
     <string name="show_extra_keys">Show shortcut keys</string>
+    <string name="menu_extra_keys">Shortcut keys</string>
+    <string name="menu_extra_keys_sub">Change the keys on the two rows. Touch and hold Ctrl, Alt, or Shift to lock it.</string>
+    <string name="extra_keys_reset">Restore default</string>
+    <string name="extra_keys_pick">Choose a key</string>
+    <string name="key_mod_once">%1$s, next key</string>
+    <string name="key_mod_locked">%1$s, locked</string>
     <string name="show_keyboard">Show keyboard</string>
     <string name="close_connection">Close connection</string>
     <string name="reset_default">Reset</string>

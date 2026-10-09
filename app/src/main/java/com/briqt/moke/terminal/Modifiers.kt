@@ -4,19 +4,14 @@ package com.briqt.moke.terminal
 enum class ModKind { Ctrl, Alt, Shift }
 
 /**
- * 修饰键三态：点一下 = 只对下一个键生效；再点一下 = 锁定（连续生效）；第三下 = 关。
- * 连发 Ctrl+C、按住 Ctrl 连走光标这类操作没有锁定态就很难用。
+ * 修饰键三态。点一下进入 [Once]（只对下一个键生效），再点一下关掉；
+ * 按住（系统「按住延迟」）进入 [Locked]（连续生效，直到再点一下）。
+ * 连发 Ctrl+C、按住 Ctrl 连走光标靠锁定态。
  */
 enum class ModState {
     Off, Once, Locked;
 
     val active: Boolean get() = this != Off
-
-    fun next(): ModState = when (this) {
-        Off -> Once
-        Once -> Locked
-        Locked -> Off
-    }
 }
 
 /** 三个修饰键的当前状态。纯数据，供 UI 与编码器共用。 */
@@ -35,10 +30,19 @@ data class Modifiers(
         ModKind.Shift -> shift
     }
 
-    fun toggle(kind: ModKind): Modifiers = when (kind) {
-        ModKind.Ctrl -> copy(ctrl = ctrl.next())
-        ModKind.Alt -> copy(alt = alt.next())
-        ModKind.Shift -> copy(shift = shift.next())
+    /** 点一下：关 → 一次性；一次性或锁定 → 关。 */
+    fun tap(kind: ModKind): Modifiers = set(kind, when (state(kind)) {
+        ModState.Off -> ModState.Once
+        ModState.Once, ModState.Locked -> ModState.Off
+    })
+
+    /** 按住：进入锁定，已锁定则保持。 */
+    fun hold(kind: ModKind): Modifiers = set(kind, ModState.Locked)
+
+    private fun set(kind: ModKind, value: ModState): Modifiers = when (kind) {
+        ModKind.Ctrl -> copy(ctrl = value)
+        ModKind.Alt -> copy(alt = value)
+        ModKind.Shift -> copy(shift = value)
     }
 
     /** 一次性修饰被一个按键消费后复位；锁定态保持不变。 */

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.SwipeVertical
@@ -50,6 +51,8 @@ fun TerminalSettingsScreen(
     confirmClose: Boolean,
     autoTrustNewHostKey: Boolean,
     terminalAlerts: Boolean,
+    extraKeysLayout: String,
+    onExtraKeysLayout: (String) -> Unit,
     onTerminalAlerts: (Boolean) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
@@ -61,6 +64,7 @@ fun TerminalSettingsScreen(
 ) {
     var kbDialog by remember { mutableStateOf(false) }
     var scrollDialog by remember { mutableStateOf(false) }
+    var keysDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -95,6 +99,12 @@ fun TerminalSettingsScreen(
                 stringResource(R.string.keyboard_mode),
                 stringResource(keyboardModeLabel(keyboardMode)),
                 onClick = { kbDialog = true },
+            )
+            NavRow(
+                Icons.Filled.Keyboard,
+                stringResource(R.string.menu_extra_keys),
+                stringResource(R.string.menu_extra_keys_sub),
+                onClick = { keysDialog = true },
             )
             NavRow(
                 Icons.Filled.SwipeVertical,
@@ -138,6 +148,14 @@ fun TerminalSettingsScreen(
                 onCheckedChange = onAutoTrustNewHostKey,
             )
         }
+    }
+
+    if (keysDialog) {
+        ExtraKeysLayoutDialog(
+            stored = extraKeysLayout,
+            onChange = onExtraKeysLayout,
+            onDismiss = { keysDialog = false },
+        )
     }
 
     if (scrollDialog) {

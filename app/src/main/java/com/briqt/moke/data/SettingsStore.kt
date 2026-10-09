@@ -44,6 +44,8 @@ class SettingsStore(private val context: Context) {
     private val letterSpacingKey = floatPreferencesKey("letter_spacing_mul")
     private val userFontsKey = stringPreferencesKey("user_fonts")
     private val extraKeysVisibleKey = booleanPreferencesKey("extra_keys_visible")
+    // 底部两排可换的 6+6 格，见 ExtraKeyLayout。空 = 默认。
+    private val extraKeysLayoutKey = stringPreferencesKey("extra_keys_layout")
     // 外观（应用层，与终端配色相互独立）：明暗模式 + 是否取系统壁纸动态色（Android 12+）。
     private val themeModeKey = stringPreferencesKey("theme_mode")
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
@@ -136,6 +138,11 @@ class SettingsStore(private val context: Context) {
     /** 终端底部附加键是否显示（默认显示）。 */
     val extraKeysVisible: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[extraKeysVisibleKey] ?: true
+    }
+
+    /** 底部快捷键布局。空字符串表示默认两排。 */
+    val extraKeysLayout: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[extraKeysLayoutKey] ?: ""
     }
 
     /** 应用明暗主题（默认跟随系统）。 */
@@ -312,6 +319,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setExtraKeysVisible(visible: Boolean) {
         context.settingsDataStore.edit { it[extraKeysVisibleKey] = visible }
+    }
+
+    suspend fun setExtraKeysLayout(layout: String) {
+        context.settingsDataStore.edit { it[extraKeysLayoutKey] = layout }
     }
 
     suspend fun setThemeMode(m: ThemeMode) {
