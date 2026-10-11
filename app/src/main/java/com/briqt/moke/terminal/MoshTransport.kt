@@ -239,6 +239,11 @@ class MoshTransport(
     override fun releaseForwardClient() {
         controlLock.withLock {
             if (forwardHolds > 0) forwardHolds--
+            // 会话关了才归还（转发线程收尾慢于 close）：连接直接收掉，不再起回收线程。
+            if (closed) {
+                closeControl()
+                return
+            }
             controlIdleSince = System.currentTimeMillis()
             scheduleReap()
         }
@@ -285,6 +290,7 @@ class MoshTransport(
 
     /** 空闲回收：拿不到锁说明正在用，改期再看，绝不打断进行中的命令。 */
     private fun scheduleReap() {
+        if (closed) return
         val exec = reaper ?: Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "moke-mosh-ctl-reaper").apply { isDaemon = true }
         }.also { reaper = it }
@@ -346,12 +352,10 @@ class MoshTransport(
         // 控制连接与回收线程独立于 PTY，必须一并收掉，否则会话关掉了 TCP 还挂着。
         runCatching { reaper?.shutdownNow() }
         reaper = null
-        if (controlLock.tryLock()) {
-            try { closeControl() } finally { controlLock.unlock() }
-        } else {
-            // 正在跑一条命令：由 withControlClient 的 closed 判定收尾。
-            Thread({ controlLock.withLock { closeControl() } }, "moke-mosh-ctl-close").start()
-        }
+        // 不能就地断开：close 来自主线程，sshj 断开时要往 socket 写 DISCONNECT，主线程网络 I/O 会抛异常、
+        // 异常被吞掉、socket 没关而引用已清空——实测关掉会话后 TCP 一直挂在服务器上。
+        // 正在跑一条命令时，这个线程等它结束再收尾。
+        Thread({ controlLock.withLock { closeControl() } }, "moke-mosh-ctl-close").start()
     }
 
     private fun feed(session: TerminalSession, msg: String) {

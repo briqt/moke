@@ -151,7 +151,17 @@ class TerminalController(
      */
     override fun isTerminalViewSelected(): Boolean = keyboardMode != KeyboardMode.IME
     override fun copyModeChanged(copyMode: Boolean) {}
-    override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean = false
+    override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean {
+        // 退格、回车、方向这类键由 TerminalView 直接编码，不经过 onCodePoint，一次性修饰就不会被用掉：
+        // 按了 Ctrl 再退格，Ctrl 会一直亮着、作用到下一个字上。TerminalView 在本方法返回后同步读取修饰，
+        // 所以复位要排到这次按键处理完之后。
+        if (e != null && !e.isSystem && !KeyEvent.isModifierKey(keyCode) &&
+            ((ctrlActive && !ctrlLocked) || (altActive && !altLocked))
+        ) {
+            view?.post { consumeOnceModifiers() }
+        }
+        return false
+    }
     override fun onKeyUp(keyCode: Int, e: KeyEvent?): Boolean = false
     override fun onLongPress(event: MotionEvent?): Boolean = false
     override fun readControlKey(): Boolean = ctrlActive
@@ -162,13 +172,17 @@ class TerminalController(
         // one-shot 粘滞修饰：本次按键的 ctrl/alt 已在 TerminalView 内读入本地变量并会照常应用，
         // 这里把吸附状态复位（下次按键不再带修饰）并通知 UI 熄灭高亮。返回 false 不拦截本次输入。
         // 锁定态不复位——那正是"按住不放"的语义。
+        consumeOnceModifiers()
+        return false
+    }
+
+    private fun consumeOnceModifiers() {
         val consumable = (ctrlActive && !ctrlLocked) || (altActive && !altLocked)
         if (consumable) {
             if (!ctrlLocked) ctrlActive = false
             if (!altLocked) altActive = false
             onModifiersConsumed?.invoke()
         }
-        return false
     }
     override fun onEmulatorSet() { view?.setTerminalCursorBlinkerState(cursorBlink, true) }
 

@@ -244,7 +244,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         },
                         onFontSize = { vm.setFontSize(it) },
                         onKeyboardMode = { vm.setKeyboardMode(it) },
-                        onScrollMode = { vm.setScrollMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
                         onTmuxRefresh = { vm.refreshTmux(ts) },
                         onTmuxNew = { vm.tmuxNew(ts, it) },

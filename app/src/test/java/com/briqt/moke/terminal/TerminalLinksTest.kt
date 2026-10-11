@@ -77,6 +77,84 @@ class TerminalLinksTest {
     }
 
     @Test
+    fun `wrapped url at several widths stays whole and has no newline`() {
+        val url = "https://github.com/briqt/moke/releases/tag/v0.1.21-rc.5"
+        for (cols in listOf(20, 30, 40, 48, 55, 56, 80)) {
+            val emu = emulator(cols, 12, "see $url done\r\n")
+            val hit = TerminalLinks.urlAt(emu, 4, 0)
+            assertEquals("cols=$cols", url, hit)
+            assertFalse("cols=$cols", hit!!.contains('\n'))
+            // 点折行后的第一列，也要拿到整段。
+            if (url.length + 4 > cols) {
+                assertEquals("cols=$cols second row", url, TerminalLinks.urlAt(emu, 0, 1))
+            }
+        }
+    }
+
+    @Test
+    fun `resizing a wide line into a wrap still returns the whole url`() {
+        val url = "https://github.com/briqt/moke/releases/tag/v0.1.21-rc.5"
+        val emu = emulator(80, 8, "see $url done\r\n")
+        assertEquals(url, TerminalLinks.urlAt(emu, 4, 0))
+        emu.resize(36, 10, 10, 20)
+        assertEquals(url, TerminalLinks.urlAt(emu, 4, 0))
+        assertEquals(url, TerminalLinks.urlAt(emu, 0, 1))
+    }
+
+    @Test
+    fun `a full line followed by a real newline is not joined to the next line`() {
+        val url = "https://github.com/briqt/moke/releases/tag/v0.1.21-rc.5"
+        val cols = url.length
+        val emu = emulator(cols, 6, url + "\r\n" + "dev@1fce01469ebe:~$ next\r\n")
+        assertFalse(emu.screen.getLineWrap(0))
+        assertEquals(url, TerminalLinks.urlAt(emu, 0, 0))
+        assertNull(TerminalLinks.urlAt(emu, 0, 1))
+    }
+
+    @Test
+    fun `prompt continuing on the same logical line is swallowed up to the first space`() {
+        val url = "https://github.com/briqt/moke/releases/tag/v0.1.21-rc.5"
+        val prompt = "dev@1fce01469ebe:~$"
+        val emu = emulator(60, 8, url + prompt + " \r\n")
+        val hit = TerminalLinks.urlAt(emu, 0, 0)
+        // 没有分隔符时，提示符会被当成链接的一部分拼回来；折行本身不插入换行，也不重复折行处的字符。
+        assertEquals(url + prompt, hit)
+        assertFalse(hit!!.contains('\n'))
+        assertFalse(hit.contains("dev@1dev@1"))
+    }
+
+    @Test
+    fun `a long signed link spanning many rows stays whole from either end`() {
+        val url = "https://example.com/download?sig=" + "a".repeat(1400)
+        for (cols in listOf(30, 60, 80)) {
+            val rows = url.length / cols + 3
+            val emu = emulator(cols, rows, url + "\r\n")
+            val lastRow = (url.length - 1) / cols
+            assertEquals("cols=$cols first row", url, TerminalLinks.urlAt(emu, 0, 0))
+            assertEquals("cols=$cols last row", url, TerminalLinks.urlAt(emu, 0, lastRow))
+        }
+    }
+
+    @Test
+    fun `link bar text keeps head and tail of a very long link`() {
+        val short = "https://github.com/briqt/moke/releases/tag/v0.1.21"
+        assertEquals(short, TerminalLinks.displayOf(short))
+        val long = "https://example.com/download?sig=" + "a".repeat(400) + "&end=TAIL"
+        val shown = TerminalLinks.displayOf(long)
+        assertTrue(shown.startsWith("https://example.com/download?sig="))
+        assertTrue(shown.endsWith("&end=TAIL"))
+        assertTrue(shown.contains('…'))
+        assertTrue(shown.length < long.length)
+    }
+
+    @Test
+    fun `a real newline inside a url truncates at that newline`() {
+        val emu = emulator(80, 6, "https://github.com/briqt/moke/\r\nreleases/tag/v0.1.21-rc.5\r\n")
+        assertEquals("https://github.com/briqt/moke/", TerminalLinks.urlAt(emu, 4, 0))
+        assertNull(TerminalLinks.urlAt(emu, 0, 1))
+    }
+
+    @Test
     fun `wide CJK characters before the link do not shift the hit position`() {
         // "中文" 占 4 列：链接从第 5 列开始。按"一列一字符"算的实现会在这里错位。
         val emu = emulator(40, 3, "中文 http://localhost:5173/ ok")

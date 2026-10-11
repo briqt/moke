@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.common.SSHException
 import net.schmizz.sshj.connection.channel.direct.LocalPortForwarder
 import net.schmizz.sshj.connection.channel.direct.Parameters
 import java.net.InetSocketAddress
@@ -42,13 +43,20 @@ class PortForwards(private val transport: ForwardCapable) {
         val localUrl: String get() = "http://127.0.0.1:$localPort/"
     }
 
-    private class Running(val forwarder: LocalPortForwarder, val socket: ServerSocket, @Volatile var stopped: Boolean = false)
+    private class Running(
+        val forwarder: LocalPortForwarder,
+        val socket: ServerSocket,
+        val thread: Thread,
+        @Volatile var stopped: Boolean = false,
+    )
 
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     private val running = HashMap<Int, Running>()
     private val lock = Any()
+    /** 会话已关（[stopAll] 之后）：还在途中的 [start] 不得再登记新转发。受 [lock] 保护。 */
+    private var closed = false
 
     /**
      * 转发远端 [remotePort]（阻塞，勿在主线程调用）。已有同一远端端口的活动转发时直接复用。
@@ -56,6 +64,7 @@ class PortForwards(private val transport: ForwardCapable) {
      */
     fun start(remotePort: Int, localPort: Int? = null, remoteHost: String = DEFAULT_REMOTE_HOST): Int? {
         synchronized(lock) {
+            if (closed) return null
             _entries.value.firstOrNull { it.remotePort == remotePort && it.state == State.ACTIVE }?.let { return it.localPort }
         }
         val client = runCatching { transport.acquireForwardClient() }.getOrNull() ?: return fail(remotePort, remoteHost, localPort)
@@ -70,25 +79,43 @@ class PortForwards(private val transport: ForwardCapable) {
             transport.releaseForwardClient()
             return fail(remotePort, remoteHost, localPort)
         }
-        val r = Running(forwarder, socket)
-        synchronized(lock) {
-            running.put(remotePort, r)?.let { old -> stopRunning(old) }
-            upsert(Entry(remotePort, remoteHost, socket.localPort, State.ACTIVE))
-        }
-        Thread({
-            runCatching { forwarder.listen() }
+        lateinit var r: Running
+        val thread = Thread({
+            while (!r.stopped) {
+                val err = runCatching { forwarder.listen() }.exceptionOrNull()
+                // sshj 的 listen 遇到一次连接打不开（远端端口还没人监听）就整体抛出、不再 accept。
+                // 一次连接失败不该让整条转发失效：连接还在就接着监听。
+                if (err is SSHException && !r.stopped && !socket.isClosed && client.isConnected && client.isAuthenticated) continue
+                break
+            }
             // listen 返回 = 被停止或连接断了；前者由 stop 收尾，后者标记失败并归还连接。
-            if (!r.stopped) {
-                synchronized(lock) {
+            val owned = synchronized(lock) {
+                if (r.stopped) false else {
+                    r.stopped = true
                     if (running[remotePort] === r) {
                         running.remove(remotePort)
                         _entries.update { list -> list.map { if (it.remotePort == remotePort) it.copy(state = State.FAILED) else it } }
                     }
+                    true
                 }
+            }
+            if (owned) {
                 runCatching { socket.close() }
                 transport.releaseForwardClient()
             }
-        }, "moke-fwd-$remotePort").apply { isDaemon = true }.start()
+        }, "moke-fwd-$remotePort").apply { isDaemon = true }
+        r = Running(forwarder, socket, thread)
+        synchronized(lock) {
+            if (closed) {
+                r.stopped = true
+                runCatching { socket.close() }
+                transport.releaseForwardClient()
+                return null
+            }
+            running.put(remotePort, r)?.let { old -> stopRunning(old) }
+            upsert(Entry(remotePort, remoteHost, socket.localPort, State.ACTIVE))
+        }
+        thread.start()
         return socket.localPort
     }
 
@@ -103,6 +130,7 @@ class PortForwards(private val transport: ForwardCapable) {
     /** 会话关闭时收尾。 */
     fun stopAll() {
         synchronized(lock) {
+            closed = true
             running.values.forEach { stopRunning(it) }
             running.clear()
             _entries.value = emptyList()
@@ -112,6 +140,9 @@ class PortForwards(private val transport: ForwardCapable) {
     private fun stopRunning(r: Running) {
         if (r.stopped) return
         r.stopped = true
+        // listen 还没跑起来时 forwarder.close() 打断不了它，之后 accept 在已关的 socket 上会空转；
+        // 自己先打断监听线程，listen 一进去就退出。
+        r.thread.interrupt()
         runCatching { r.forwarder.close() }
         runCatching { r.socket.close() }
         transport.releaseForwardClient()
@@ -159,13 +190,17 @@ class PortForwards(private val transport: ForwardCapable) {
             return Parsed(ports.toList(), invalid)
         }
 
-        /** 本机回环链接要转发的远端端口；没写端口时按协议默认（http 80 / https 443）。非本机链接返回 null。 */
+        /**
+         * 本机回环链接要转发的远端端口；没写端口时按协议默认（http 80 / https 443）。
+         * 非本机链接、端口写得不对（非数字、越界）返回 null——不能猜一个端口去转发。
+         */
         fun remotePortOf(url: String): Int? {
             if (!TerminalLinks.isLocal(url)) return null
             val scheme = url.substringBefore("://").lowercase()
             val authority = url.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#')
             val portText = if (authority.startsWith("[")) authority.substringAfter(']', "").removePrefix(":") else authority.substringAfter(':', "")
-            return portText.toIntOrNull() ?: if (scheme == "https") 443 else 80
+            if (portText.isEmpty()) return if (scheme == "https") 443 else 80
+            return portText.toIntOrNull()?.takeIf { it in 1..65535 }
         }
 
         /**

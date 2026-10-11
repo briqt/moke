@@ -375,6 +375,8 @@ class SessionManager(context: Context) {
     fun close(id: String) {
         val ts = get(id) ?: return
         ts.forwards?.let { f -> scope.launch(Dispatchers.IO) { f.stopAll() } }
+        // 传输收尾时还可能吐出响铃；会话已关，这时的提醒点开也找不到会话。
+        ts.controller.onAlert = null
         TerminalAlerts.cancel(appContext, id)
         runCatching { ts.session.finishIfRunning() }
         _sessions.update { list -> list.filterNot { it.id == id } }

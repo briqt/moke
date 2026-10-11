@@ -99,7 +99,7 @@ const val ACTION_PANEL = "panel"
 val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = ExtraKeyLayout.rows(null)
 
 /** 全键盘面板的一个分组（面板是单页竖排，分组只作视觉分区，不再有分段切换）。 */
-data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>)
+data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>, val slots: Int = 0)
 
 private fun macro(label: String, bytes: String) = ExtraKey.Key(label, KeyId.Macro(bytes))
 
@@ -164,6 +164,18 @@ val KEY_SECTIONS: List<KeySection> = listOf(
     ),
 )
 
+/** 面板里最宽的一排（编辑、控制键各 7 个）。 */
+private const val PANEL_ROW_SLOTS = 7
+
+/** 面板内容：底部被换掉的默认键（有才显示）放最前面，其后是固定的三组。 */
+fun panelSections(storedLayout: String?): List<KeySection> {
+    val displaced = ExtraKeyLayout.displacedDefaults(storedLayout)
+    if (displaced.isEmpty()) return KEY_SECTIONS
+    return listOf(
+        KeySection(R.string.keys_section_displaced, displaced.map { ExtraKeyLayout.key(it) }.chunked(PANEL_ROW_SLOTS), PANEL_ROW_SLOTS),
+    ) + KEY_SECTIONS
+}
+
 @Composable
 fun ExtraKeys(
     rows: List<List<ExtraKey>>,
@@ -195,6 +207,7 @@ private fun KeyRow(
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
+    slots: Int = 0,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         row.forEach { key ->
@@ -232,6 +245,8 @@ private fun KeyRow(
                 },
             )
         }
+        // 键不足一排时用空位补齐，键宽与其它排一致，而不是一个键撑满整行。
+        repeat(slots - row.size) { Spacer(Modifier.weight(1f)) }
     }
 }
 
@@ -299,7 +314,7 @@ fun KeyboardPanel(
                 val rows = if (perRow > 0) section.rows.flatten().chunked(perRow) else section.rows
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                     rows.forEach { row ->
-                        KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onHoldMod = onHoldMod, onAction = {})
+                        KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onHoldMod = onHoldMod, onAction = {}, slots = if (perRow > 0) 0 else section.slots)
                     }
                 }
             }

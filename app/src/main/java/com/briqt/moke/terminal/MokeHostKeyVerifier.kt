@@ -28,7 +28,7 @@ class MokeHostKeyVerifier(
         val saved = known.stored(id)
         return when (HostKeyFingerprint.check(saved, key)) {
             HostKeyFingerprint.Result.UNKNOWN -> {
-                if (!HostKeyPrompt.autoTrust && !HostKeyPrompt.ask(id, fp, keyTypeOf(key))) {
+                if (!HostKeyPrompt.autoTrust && !HostKeyPrompt.ask(id, fp, keyTypeOf(HostKeyFingerprint.hostKeyOf(key)))) {
                     onMessage(context.localized(R.string.hostkey_rejected, id).replace("\n", "\r\n"))
                     return false
                 }

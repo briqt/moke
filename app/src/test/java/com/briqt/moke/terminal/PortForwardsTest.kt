@@ -32,6 +32,10 @@ class PortForwardsTest {
         assertEquals(80, PortForwards.remotePortOf("http://localhost/"))
         assertEquals(443, PortForwards.remotePortOf("https://localhost/"))
         assertNull(PortForwards.remotePortOf("https://example.com:8080/"))
+        // 端口写坏了不猜：既不退回 80，也不拿越界值去转发。
+        assertNull(PortForwards.remotePortOf("http://localhost:99999/"))
+        assertNull(PortForwards.remotePortOf("http://localhost:0/"))
+        assertNull(PortForwards.remotePortOf("http://localhost:abc/"))
     }
 
     @Test

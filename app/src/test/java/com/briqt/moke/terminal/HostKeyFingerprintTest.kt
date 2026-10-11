@@ -1,10 +1,12 @@
 package com.briqt.moke.terminal
 
+import com.hierynomus.sshj.userauth.certificate.Certificate
 import net.schmizz.sshj.common.Buffer
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.util.encoders.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.math.BigInteger
 import java.security.PublicKey
 import java.security.Security
 
@@ -54,5 +56,21 @@ class HostKeyFingerprintTest {
         // 换了一把密钥：新旧两种格式的记录都必须判为变更，迁移不能成为放行的后门。
         assertEquals(HostKeyFingerprint.Result.CHANGED, HostKeyFingerprint.check(HostKeyFingerprint.of(ed25519), rsa))
         assertEquals(HostKeyFingerprint.Result.CHANGED, HostKeyFingerprint.check(HostKeyFingerprint.legacyOf(ed25519), rsa))
+    }
+
+    @Test
+    fun `host certificate is fingerprinted by the key it certifies`() {
+        fun cert(serial: Long) = Certificate.getBuilder<PublicKey>()
+            .publicKey(ed25519)
+            .serial(BigInteger.valueOf(serial))
+            .nonce(ByteArray(32) { serial.toByte() })
+            .build()
+        assertEquals(HostKeyFingerprint.of(ed25519), HostKeyFingerprint.of(cert(1)))
+        // 证书重签（序列号、nonce 都变了）不算换密钥。
+        assertEquals(HostKeyFingerprint.Result.MATCH, HostKeyFingerprint.check(HostKeyFingerprint.of(cert(1)), cert(2)))
+        assertEquals(
+            HostKeyFingerprint.Result.LEGACY_MATCH,
+            HostKeyFingerprint.check(HostKeyFingerprint.legacyOf(ed25519), cert(1)),
+        )
     }
 }

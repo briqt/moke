@@ -80,4 +80,26 @@ class ExtraKeyLayoutTest {
         assertEquals("\u001b\r", (ExtraKeyLayout.key("altenter") as ExtraKey.Key).key.let { (it as KeyId.Macro).bytes })
         assertEquals((1..12).map { "F$it" }, (1..12).map { ExtraKeyLayout.label("f$it") })
     }
+
+    @Test
+    fun `底部换掉的默认键补进面板 没换就不多出一组`() {
+        assertEquals(emptyList<String>(), ExtraKeyLayout.displacedDefaults(null))
+        assertEquals(KEY_SECTIONS, panelSections(null))
+
+        val slots = ExtraKeyLayout.slots(null).map { it.toMutableList() }
+        slots[0][0] = "f1"   // 换掉 ESC
+        slots[0][1] = "f2"   // 换掉 CTRL
+        slots[1][5] = "f3"   // 换掉 ^C
+        val stored = ExtraKeyLayout.encode(slots.map { it.toList() })
+        assertEquals(listOf("esc", "ctrl", "cc"), ExtraKeyLayout.displacedDefaults(stored))
+        val sections = panelSections(stored)
+        assertEquals(KEY_SECTIONS.size + 1, sections.size)
+        assertEquals(listOf("ESC", "CTRL", "^C"), sections.first().rows.flatten().map { it.label })
+        assertEquals(KEY_SECTIONS, sections.drop(1))
+
+        // 只是挪了位置（ESC 换到第二排）不算移走。
+        val moved = ExtraKeyLayout.slots(null).map { it.toMutableList() }
+        moved[0][0] = "tab"; moved[1][0] = "esc"
+        assertEquals(emptyList<String>(), ExtraKeyLayout.displacedDefaults(ExtraKeyLayout.encode(moved)))
+    }
 }

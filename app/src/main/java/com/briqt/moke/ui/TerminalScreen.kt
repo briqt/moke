@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.terminal.TerminalLinks
@@ -125,7 +126,6 @@ fun TerminalScreen(
     onEditHost: () -> Unit,
     onFontSize: (Float) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
-    onScrollMode: (ScrollMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: (String) -> Unit,
@@ -206,7 +206,9 @@ fun TerminalScreen(
     var topRow by remember(ts.id) { mutableIntStateOf(0) }
     // 单击命中的链接：非空即显示底部操作条（打开 / 复制），一段时间不操作自动收起。
     var tappedLink by remember(ts.id) { mutableStateOf<String?>(null) }
-    LaunchedEffect(tappedLink) {
+    // 再点同一个链接也要重新计时。
+    var linkTapAt by remember(ts.id) { mutableLongStateOf(0L) }
+    LaunchedEffect(tappedLink, linkTapAt) {
         if (tappedLink != null) { delay(LINK_BAR_VISIBLE_MS); tappedLink = null }
     }
 
@@ -240,7 +242,10 @@ fun TerminalScreen(
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
         controller.onModifiersConsumed = { mods = mods.consumeOnce() }
-        controller.onLinkTapped = { url -> tappedLink = url }
+        // controller 比这个页面活得久：离开时亮着的 Ctrl/Alt 会留在 controller 里，而回来时 mods 是新的，
+        // 键上不亮、下一次输入却被加上修饰。进页面时以界面状态为准。
+        syncMods(controller, mods)
+        controller.onLinkTapped = { url -> tappedLink = url; linkTapAt = android.os.SystemClock.elapsedRealtime() }
         // 终端底色必须由 View 自己铺：vendored TerminalRenderer 只在"单元格背景 ≠ 调色板默认背景"时
         // 才画矩形，默认背景那片区域完全不画 → 露出的是 View/窗口背景。此前应用恒深色才碰巧看着对，
         // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
@@ -325,6 +330,20 @@ fun TerminalScreen(
             scrollHintHiddenAt = android.os.SystemClock.elapsedRealtime()
         }
     }
+    // 附加键收起后修饰键就看不见了，不能让它继续作用在输入法打的字上。
+    LaunchedEffect(ts.id, extraKeysVisible) {
+        if (!extraKeysVisible) {
+            panelOpen = false
+            if (mods != Modifiers()) {
+                mods = Modifiers()
+                syncMods(controller, mods)
+            }
+        }
+    }
+    // 返回键先收起浮在终端上的东西，再离开终端页。
+    BackHandler(enabled = tappedLink != null || panelOpen) {
+        if (tappedLink != null) tappedLink = null else panelOpen = false
+    }
 
     Scaffold(
         topBar = {
@@ -387,19 +406,13 @@ fun TerminalScreen(
                     )
                 }
                 // 「无处可滚」提示：说明原因（mosh 不传滚动历史 / 全屏程序自己占着屏幕），
-                // 而不是让滑动看起来像坏了。
+                // 而不是让滑动看起来像坏了。不在这里给"改用方向键"：那是全局设置，在 mosh 的 shell
+                // 提示符下会变成滑一下翻一条命令历史，而提示从此不再出现，用户找不到改回去的路。
                 if (scrollHint) {
                     ScrollUnavailableHint(
                         text = stringResource(
                             if (ts.host.useMosh) R.string.scroll_none_mosh else R.string.scroll_none_alt
                         ),
-                        // 直接给出可执行的出路：翻页器（less/vim）用方向键就能滚。已经是方向键模式
-                        // 却还走到这里是不可能的（那条分支不经过提示），故仅在非方向键模式下提供。
-                        onUseArrows = if (scrollMode != ScrollMode.ARROWS) {
-                            { onScrollMode(ScrollMode.ARROWS); scrollHint = false }
-                        } else {
-                            null
-                        },
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 12.dp, end = 12.dp),
                     )
                 }
@@ -410,7 +423,22 @@ fun TerminalScreen(
                     onClick = { controller.scrollToBottom() },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
                 )
+                // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
+                // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
+                // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
+                // 因此不会出现 rc.2 那种边框与内容各走各的。
+                KeyboardPanelOverlay(
+                    visible = panelOpen && extraKeysVisible && !showComposer,
+                    sections = remember(extraKeysLayout) { panelSections(extraKeysLayout) },
+                    mods = mods,
+                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                    onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
+                    onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
+                    onDismiss = { panelOpen = false },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
                 // 单击命中链接后的操作条：一步可达，但不直接跳走（误触一下就离开终端太粗暴）。
+                // 画在面板之后：面板开着时点链接，操作条不能被盖住。
                 tappedLink?.let { url ->
                     LinkActionBar(
                         url = url,
@@ -440,19 +468,6 @@ fun TerminalScreen(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     )
                 }
-                // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
-                // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
-                // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
-                // 因此不会出现 rc.2 那种边框与内容各走各的。
-                KeyboardPanelOverlay(
-                    visible = panelOpen && extraKeysVisible && !showComposer,
-                    mods = mods,
-                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
-                    onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
-                    onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
-                    onDismiss = { panelOpen = false },
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
             }
 
             if (!alive) {
@@ -607,6 +622,7 @@ fun TerminalScreen(
 @Composable
 private fun KeyboardPanelOverlay(
     visible: Boolean,
+    sections: List<KeySection>,
     mods: Modifiers,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
@@ -621,7 +637,7 @@ private fun KeyboardPanelOverlay(
         modifier = modifier,
     ) {
         KeyboardPanel(
-            sections = KEY_SECTIONS,
+            sections = sections,
             mods = mods,
             onKey = onKey,
             onToggleMod = onToggleMod,
@@ -936,28 +952,35 @@ private fun LinkActionBar(
         shape = MokeShapes.floating,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 12.dp, end = 2.dp),
-        ) {
-            Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(
-                url,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
-            val action = MaterialTheme.colorScheme.inversePrimary
-            if (onOpen != null) {
-                TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open), color = action) }
+        // 链接单独占一段、最多三行：挤在按钮旁边只剩一行时，长链接的尾巴被省略号盖住，
+        // 看上去像只识别到了一半。
+        Column(modifier = Modifier.padding(start = 12.dp, end = 2.dp, top = 8.dp)) {
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(end = 10.dp)) {
+                Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    TerminalLinks.displayOf(url),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                )
             }
-            if (onForwardOpen != null) {
-                TextButton(onClick = onForwardOpen) { Text(stringResource(R.string.link_forward_open), color = action) }
-            }
-            TextButton(onClick = onCopy) { Text(stringResource(R.string.copy_text), color = action) }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), modifier = Modifier.size(18.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                val action = MaterialTheme.colorScheme.inversePrimary
+                if (onOpen != null) {
+                    TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open), color = action) }
+                }
+                if (onForwardOpen != null) {
+                    TextButton(onClick = onForwardOpen) { Text(stringResource(R.string.link_forward_open), color = action) }
+                }
+                TextButton(onClick = onCopy) { Text(stringResource(R.string.copy_text), color = action) }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), modifier = Modifier.size(18.dp))
+                }
             }
         }
     }
@@ -1010,7 +1033,6 @@ private fun JumpToBottomButton(visible: Boolean, onClick: () -> Unit, modifier: 
 @Composable
 private fun ScrollUnavailableHint(
     text: String,
-    onUseArrows: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1019,17 +1041,11 @@ private fun ScrollUnavailableHint(
         shape = MokeShapes.floating,
         modifier = modifier,
     ) {
-        Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 4.dp)) {
-            Text(text, style = MaterialTheme.typography.bodySmall)
-            if (onUseArrows != null) {
-                TextButton(onClick = onUseArrows, modifier = Modifier.align(Alignment.End)) {
-                    Text(
-                        stringResource(R.string.scroll_use_arrows),
-                        color = MaterialTheme.colorScheme.inversePrimary,
-                    )
-                }
-            }
-        }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        )
     }
 }
 

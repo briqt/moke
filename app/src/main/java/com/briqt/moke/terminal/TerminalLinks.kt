@@ -15,8 +15,20 @@ object TerminalLinks {
     /** 结尾常见的句读，不属于链接本身。 */
     private const val TRAILING = ".,;:!?'\""
 
-    /** 向上 / 向下最多拼接的软换行行数：够容纳长链接，又不至于在超长输出上逐行扫描。 */
-    private const val MAX_WRAP_ROWS = 8
+    /**
+     * 向上 / 向下各最多拼接这么多字符的软换行：带签名参数的下载链接、OAuth 回调常有上千字符，
+     * 按固定行数拼会在窄屏上截掉尾巴；又不至于在超长输出上无限扫描。
+     */
+    private const val MAX_LINK_CHARS = 2048
+
+    /** 操作条上显示的链接超过这个长度就省略中段，首尾都留着（尾部常是区分链接的那部分）。 */
+    private const val DISPLAY_MAX = 140
+    private const val DISPLAY_HEAD = 88
+    private const val DISPLAY_TAIL = 50
+
+    /** 给操作条显示用的链接文本；复制、打开仍用完整链接。 */
+    fun displayOf(url: String): String =
+        if (url.length <= DISPLAY_MAX) url else url.take(DISPLAY_HEAD) + "…" + url.takeLast(DISPLAY_TAIL)
 
     /** [text] 中覆盖下标 [index] 的链接；没有则 null。 */
     fun urlAt(text: String, index: Int): String? {
@@ -54,10 +66,11 @@ object TerminalLinks {
         // 当续行，但恰好写满一行的链接后面若是一次真换行，下一行就会被错拼进来。代价是 tmux 这类
         // 按光标定位重绘的程序（不留软换行标记）里，跨行的长链接拼不回来。
         fun joined(r: Int) = buf.getLineWrap(r)
+        val maxRows = (MAX_LINK_CHARS + cols - 1) / cols
         var start = row
-        while (start > top && row - start < MAX_WRAP_ROWS && joined(start - 1)) start--
+        while (start > top && row - start < maxRows && joined(start - 1)) start--
         var end = row
-        while (end < bottom && end - row < MAX_WRAP_ROWS && joined(end)) end++
+        while (end < bottom && end - row < maxRows && joined(end)) end++
 
         // 点中的那一格本身必须是非空白字符（getSelectedText 会裁掉行尾空格，不能靠截断后的末字符判断）。
         if (buf.getSelectedText(column, row, column, row, true, false).isBlank()) return null

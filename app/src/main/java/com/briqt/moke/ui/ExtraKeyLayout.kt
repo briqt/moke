@@ -50,6 +50,15 @@ object ExtraKeyLayout {
         return parsed
     }
 
+    /**
+     * 默认底部键里被换掉的那些 id（保序）。它们不在「更多」面板里，换掉之后就没有别处可按，
+     * 由面板补回来。
+     */
+    fun displacedDefaults(stored: String?): List<String> {
+        val current = slots(stored).flatten().toSet()
+        return slots(DEFAULT).flatten().filter { it !in current }
+    }
+
     fun encode(slots: List<List<String>>): String =
         slots.joinToString("|") { it.joinToString(",") }
 

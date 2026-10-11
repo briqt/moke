@@ -1,5 +1,6 @@
 package com.briqt.moke.terminal
 
+import com.hierynomus.sshj.userauth.certificate.Certificate
 import net.schmizz.sshj.common.Buffer
 import org.bouncycastle.util.encoders.Base64
 import java.security.MessageDigest
@@ -19,10 +20,16 @@ object HostKeyFingerprint {
 
     /** 与 `ssh-keygen -lf` 一致的 `SHA256:…` 指纹。 */
     fun of(key: PublicKey): String =
-        format(Buffer.PlainBuffer().putPublicKey(key).compactData)
+        format(Buffer.PlainBuffer().putPublicKey(hostKeyOf(key)).compactData)
 
     /** 旧版（≤ v0.1.20）存下的格式。只用于识别与迁移旧记录，不再展示给用户。 */
-    fun legacyOf(key: PublicKey): String = format(key.encoded)
+    fun legacyOf(key: PublicKey): String = format(hostKeyOf(key).encoded)
+
+    /**
+     * 服务器出示主机证书时 sshj 交来的是证书本身；`ssh-keygen -lf` 对着服务器上的主机公钥核对，
+     * 证书每次重签也不该被当成"密钥变了"，所以一律对证书里的那把公钥取指纹。
+     */
+    fun hostKeyOf(key: PublicKey): PublicKey = if (key is Certificate<*>) key.key else key
 
     enum class Result {
         /** 没有记录：首次连接。 */
