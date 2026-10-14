@@ -51,12 +51,6 @@ fun TmuxPickerDialog(
         title = { Text(stringResource(R.string.tmux_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    stringResource(R.string.tmux_picker_prompt),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
                 // 列表可滚，但下面的会话名输入框必须始终可见——否则会话多时「新建会话」旁边
                 // 看不到要输入的名字。
                 Column(

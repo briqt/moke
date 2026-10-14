@@ -85,13 +85,6 @@ fun ForwardPanel(
                 }
             }
             HorizontalDivider()
-            // 说明常驻（不只在空态出现）：这是个不常用、一用就要弄明白"到底转到了哪"的能力。
-            Text(
-                stringResource(R.string.fwd_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp, end = 8.dp),
-            )
             if (entries.isEmpty() && pending.isEmpty()) {
                 Text(
                     stringResource(R.string.fwd_empty),

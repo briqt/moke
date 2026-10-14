@@ -43,8 +43,9 @@ class MokeHostKeyVerifier(
                 true
             }
             HostKeyFingerprint.Result.CHANGED -> {
-                // 资源里用 \n 断行，喂终端需 \r\n。
-                onMessage(context.localized(R.string.hostkey_changed, saved.orEmpty(), fp).replace("\n", "\r\n"))
+                val savedFp = saved.orEmpty()
+                onMessage(context.localized(R.string.hostkey_changed, savedFp, fp).replace("\n", "\r\n"))
+                HostKeyChangePrompt.offer(id, savedFp, fp)
                 false
             }
         }

@@ -271,7 +271,6 @@ fun AppearanceScreen(
                     SwitchRow(
                         icon = Icons.Filled.Colorize,
                         title = stringResource(R.string.menu_dynamic_color),
-                        subtitle = stringResource(R.string.menu_dynamic_color_sub),
                         checked = dynamicColor,
                         onCheckedChange = onDynamicColor,
                     )
@@ -301,7 +300,6 @@ fun AppearanceScreen(
                 NavRow(
                     icon = Icons.Filled.FontDownload,
                     title = stringResource(R.string.font_manage_title),
-                    subtitle = stringResource(R.string.font_manage_sub),
                     onClick = onOpenFonts,
                 )
 
@@ -347,11 +345,6 @@ fun AppearanceScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(stringResource(R.string.scheme_follows_theme), color = MaterialTheme.colorScheme.onSurface)
-                        Text(
-                            stringResource(R.string.scheme_follows_theme_sub),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                     Switch(checked = schemeFollowsTheme, onCheckedChange = onSchemeFollowsTheme)
                 }

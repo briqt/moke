@@ -597,12 +597,9 @@ public final class TerminalView extends View {
      * <p>mosh-client 自己就是全屏程序，连上即切到备用屏，而它**不转发**远端程序的备用屏切换
      * （1049）与应用光标键（1）。所以在 mosh 会话里「当前处于备用屏」恒为真、不含任何信息：
      * 既不能据此断定远端在跑翻页器（发方向键在 shell 提示符上就是翻命令历史），本地也确实没有
-     * 历史可滚（滚动缓冲根本不在 mosh 协议里）。唯一诚实的做法是什么都不发，并告诉用户原因。
+     * 历史可滚（滚动缓冲根本不在 mosh 协议里）。这种滑动什么都不发。
      */
     public boolean mokeMoshSession = false;
-
-    /** moke: 滑动落到「无处可滚」时的一次性提示回调（由应用层展示浮层）。 */
-    public Runnable mokeOnScrollUnavailable;
 
     /**
      * moke: 滚屏位置变化回调（参数 = topRow，0 表示在底部）。
@@ -635,10 +632,6 @@ public final class TerminalView extends View {
         invalidate();
     }
 
-    private void mokeNotifyScrollUnavailable() {
-        if (mokeOnScrollUnavailable != null) mokeOnScrollUnavailable.run();
-    }
-
     /**
      * Perform a scroll, either from dragging the screen or by scrolling a mouse wheel.
      *
@@ -666,7 +659,6 @@ public final class TerminalView extends View {
                     sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
                     break;
                 case MokeScroll.ACTION_NONE:
-                    mokeNotifyScrollUnavailable();
                     return;
                 case MokeScroll.ACTION_LOCAL:
                 default:

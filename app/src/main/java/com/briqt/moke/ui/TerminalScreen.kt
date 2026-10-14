@@ -194,13 +194,6 @@ fun TerminalScreen(
     var composerText by remember(ts.id) { mutableStateOf("") }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
     var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
-    // 「无处可滚」提示：滑动落到既没有历史、也判不出方向键是否安全的状态时说明原因。
-    // 不能只提示一次（之后就变回静默，用户以为坏了），也不能每次都弹（滑一下弹一次是噪音）：
-    // 显示期间随滑动续期，隐藏后有一段静默窗口期，过了窗口再滑又会提示。
-    var scrollHint by remember(ts.id) { mutableStateOf(false) }
-    // 触发时间戳：每次滑动刷新它以续期；同时作为 LaunchedEffect 的 key 重置倒计时。
-    var scrollHintAt by remember(ts.id) { mutableLongStateOf(0L) }
-    var scrollHintHiddenAt by remember(ts.id) { mutableLongStateOf(0L) }
     // 当前滚屏位置（0 = 底部）：翻进历史时给一个「跳到底部」入口。
     // 此前回到底部只有两条路——反复滑，或随便敲个键（那会真的把字节发给远端）。
     var topRow by remember(ts.id) { mutableIntStateOf(0) }
@@ -231,13 +224,6 @@ fun TerminalScreen(
         // mosh 会话里的备用屏是 mosh-client 自己的，不能当作「远端在跑全屏程序」的判据。
         view.mokeMoshSession = ts.host.useMosh
         view.mokeOnTopRowChanged = java.util.function.IntConsumer { row -> topRow = row }
-        view.mokeOnScrollUnavailable = Runnable {
-            val now = android.os.SystemClock.elapsedRealtime()
-            // 静默窗口期：提示消失后 SCROLL_HINT_COOLDOWN_MS 内不再打扰；之后再滑仍会提示。
-            if (!scrollHint && now - scrollHintHiddenAt < SCROLL_HINT_COOLDOWN_MS) return@Runnable
-            scrollHint = true
-            scrollHintAt = now
-        }
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
@@ -264,7 +250,6 @@ fun TerminalScreen(
                 controller.onModifiersConsumed = null
                 controller.onLinkTapped = null
             }
-            view.mokeOnScrollUnavailable = null
             view.mokeOnTopRowChanged = null
         }
     }
@@ -320,14 +305,6 @@ fun TerminalScreen(
         if (zoomHintSp != null) {
             delay(2000)
             zoomHintSp = null
-        }
-    }
-    // 「无处可滚」提示比缩放提示信息量大，留久一点；key 含时间戳，滑动期间每次触发都会续期。
-    LaunchedEffect(scrollHint, scrollHintAt) {
-        if (scrollHint) {
-            delay(SCROLL_HINT_VISIBLE_MS)
-            scrollHint = false
-            scrollHintHiddenAt = android.os.SystemClock.elapsedRealtime()
         }
     }
     // 附加键收起后修饰键就看不见了，不能让它继续作用在输入法打的字上。
@@ -403,17 +380,6 @@ fun TerminalScreen(
                         sp = sp,
                         onResetDefault = { onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
-                    )
-                }
-                // 「无处可滚」提示：说明原因（mosh 不传滚动历史 / 全屏程序自己占着屏幕），
-                // 而不是让滑动看起来像坏了。不在这里给"改用方向键"：那是全局设置，在 mosh 的 shell
-                // 提示符下会变成滑一下翻一条命令历史，而提示从此不再出现，用户找不到改回去的路。
-                if (scrollHint) {
-                    ScrollUnavailableHint(
-                        text = stringResource(
-                            if (ts.host.useMosh) R.string.scroll_none_mosh else R.string.scroll_none_alt
-                        ),
-                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 12.dp, end = 12.dp),
                     )
                 }
                 // 「跳到底部」：只在真的翻进历史时出现。翻到几百行深处后，回底部原本只能反复滑动，
@@ -986,10 +952,6 @@ private fun LinkActionBar(
     }
 }
 
-/** 「无处可滚」提示的可见时长与静默窗口期：滑动期间续期，隐藏后一段时间内不再打扰。 */
-private const val SCROLL_HINT_VISIBLE_MS = 3500L
-private const val SCROLL_HINT_COOLDOWN_MS = 8000L
-
 @Composable
 fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
     ms < 120 -> MaterialTheme.colorScheme.primary
@@ -1023,29 +985,6 @@ private fun JumpToBottomButton(visible: Boolean, onClick: () -> Unit, modifier: 
                 )
             }
         }
-    }
-}
-
-/**
- * 「无处可滚」提示。滑动在这些状态下什么都不发（发方向键会去翻用户的命令历史），
- * 静默会让人以为滑动坏了，所以把原因说清楚。
- */
-@Composable
-private fun ScrollUnavailableHint(
-    text: String,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
-        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-        shape = MokeShapes.floating,
-        modifier = modifier,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-        )
     }
 }
 

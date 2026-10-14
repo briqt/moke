@@ -281,24 +281,6 @@ fun HostEditScreen(
                 selectedId = persistence.name,
                 onSelect = { persistence = SessionPersistence.valueOf(it) },
             )
-            if (persistence == SessionPersistence.TMUX) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        Icons.Outlined.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.host_persistence_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
 
             // 启动命令：协议级 exec（SSH command channel / mosh-server --），空=远端默认 login shell。
             // 与「登录后自动执行」是两回事：那条是 shell 起来之后往 PTY 里敲的一行。
@@ -313,14 +295,13 @@ fun HostEditScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    stringResource(
-                        if (startupEnabled) R.string.startup_command_help
-                        else R.string.startup_command_tmux_note
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (!startupEnabled) {
+                    Text(
+                        stringResource(R.string.startup_command_tmux_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             // 登录后自动执行：支持多行（每行一条命令，按序执行）；传输层按 "命令+\n" 原样下发。
@@ -354,7 +335,7 @@ fun HostEditScreen(
                     val target = KnownHosts.idOf(host.trim(), port.toIntOrNull() ?: 22)
                     ConfirmDialog(
                         title = stringResource(R.string.hostkey_clear),
-                        message = stringResource(R.string.hostkey_clear_confirm, target),
+                        message = target,
                         confirmLabel = stringResource(R.string.action_clear_fingerprint),
                         destructive = true,
                         onConfirm = {

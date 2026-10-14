@@ -85,7 +85,6 @@ fun FilesScreen(
     tasks: List<TransferTask>,
     sort: FilesSort,
     showHidden: Boolean,
-    hasDownloadDir: Boolean,
     onNavigate: (String) -> Unit,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
@@ -275,7 +274,6 @@ fun FilesScreen(
     selected?.let { e ->
         EntryActions(
             entry = e,
-            hasDownloadDir = hasDownloadDir,
             canSendToTerminal = onSendToTerminal != null,
             onDismiss = { selected = null },
             onDownload = { selected = null; onDownload(e) },
@@ -468,7 +466,6 @@ private fun Modifier.combinedClickableCompat(onClick: () -> Unit, onLongClick: (
 @Composable
 private fun EntryActions(
     entry: RemoteEntry,
-    hasDownloadDir: Boolean,
     canSendToTerminal: Boolean,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
@@ -501,14 +498,6 @@ private fun EntryActions(
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             if (!entry.isDir) {
                 SheetAction(Icons.Filled.Download, stringResource(R.string.files_download), onDownload)
-                if (!hasDownloadDir) {
-                    Text(
-                        stringResource(R.string.files_pick_download_dir_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 56.dp, end = 20.dp, bottom = 8.dp),
-                    )
-                }
             }
             SheetAction(Icons.Filled.ContentCopy, stringResource(R.string.files_copy_path), onCopyPath)
             if (canSendToTerminal) {

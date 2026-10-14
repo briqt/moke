@@ -336,7 +336,6 @@ private fun ConnectionsContent(
             padding = padding,
             icon = Icons.Filled.Shield,
             title = stringResource(R.string.hosts_unreadable_title),
-            hint = stringResource(R.string.hosts_unreadable_hint),
             error = true,
         )
         return
@@ -924,14 +923,14 @@ private fun SettingsMenuContent(
     ) {
         // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
         // 而不是继续往这一屏平铺（那样很快就乱）。
-        NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), stringResource(R.string.menu_appearance_sub), onOpenAppearance)
-        NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), stringResource(R.string.menu_terminal_input_sub), onOpenTerminalSettings)
+        NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
+        NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
         NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
         // 有新版时在「关于」上点一个主题色小圆点（静默检查的唯一提示）。
         NavRow(
             Icons.Filled.Info,
             stringResource(R.string.menu_about),
-            updateInfo?.let { stringResource(R.string.update_found, it.tag) } ?: stringResource(R.string.menu_about_sub),
+            subtitle = updateInfo?.let { stringResource(R.string.update_found, it.tag) }.orEmpty(),
             onClick = onOpenAbout,
             showDot = updateInfo != null,
         )
@@ -990,7 +989,7 @@ private fun EmptyState(
     padding: PaddingValues,
     icon: ImageVector,
     title: String,
-    hint: String,
+    hint: String = "",
     // 出错态（如凭据解不开）用错误色，把「没有内容」和「读不出来」在视觉上分开。
     error: Boolean = false,
 ) {
@@ -1006,13 +1005,16 @@ private fun EmptyState(
                 title,
                 fontWeight = FontWeight.SemiBold,
                 color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
+            if (hint.isNotEmpty()) {
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
         }
     }
 }

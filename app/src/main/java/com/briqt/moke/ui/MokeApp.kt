@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.R
+import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.data.Host
@@ -93,6 +94,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val autoTrustNewHostKey by vm.autoTrustNewHostKey.collectAsState()
     val terminalAlerts by vm.terminalAlerts.collectAsState()
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
+    val hostKeyChange by vm.hostKeyChange.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
     val scrollMode by vm.scrollMode.collectAsState()
@@ -378,7 +380,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 tasks = tasks,
                 sort = sort,
                 showHidden = showHidden,
-                hasDownloadDir = treeUri.isNotBlank() || !needsDir,
                 onNavigate = { vm.filesNavigate(it) },
                 onUp = { vm.filesUp() },
                 onRefresh = { vm.filesRefresh() },
@@ -441,6 +442,13 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onCancel = { vm.resolveHostKey(req.id, false) },
         )
     }
+    hostKeyChange?.let { req ->
+        HostKeyChangedDialog(
+            request = req,
+            onClear = { vm.clearChangedFingerprint(req.target) },
+            onCancel = { vm.dismissHostKeyChange() },
+        )
+    }
 }
 
 /** 首次连接新主机时的指纹确认弹窗（默认行为；可在设置里改为自动信任）。 */
@@ -456,7 +464,7 @@ private fun HostKeyConfirmDialog(
         text = {
             Column {
                 Text(
-                    stringResource(R.string.hostkey_confirm_body, request.target),
+                    request.target,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 // 指纹用等宽字体单独一段：核对逐字符进行，混在正文里更容易看错。
@@ -473,6 +481,56 @@ private fun HostKeyConfirmDialog(
         confirmButton = {
             TextButton(onClick = onTrust) {
                 Text(stringResource(R.string.hostkey_confirm_trust))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+/** 主机密钥变更：说明发生了什么，并询问是否清除已保存的指纹。 */
+@Composable
+private fun HostKeyChangedDialog(
+    request: HostKeyChangePrompt.Request,
+    onClear: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.hostkey_changed_title)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.hostkey_changed_rejected),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    stringResource(R.string.hostkey_changed_saved),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                Text(request.saved, style = MaterialTheme.typography.bodySmall, fontFamily = MokeMono)
+                Text(
+                    stringResource(R.string.hostkey_changed_current),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                Text(request.current, style = MaterialTheme.typography.bodySmall, fontFamily = MokeMono)
+                Text(
+                    stringResource(R.string.hostkey_changed_ask),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onClear) {
+                Text(stringResource(R.string.action_clear_fingerprint))
             }
         },
         dismissButton = {

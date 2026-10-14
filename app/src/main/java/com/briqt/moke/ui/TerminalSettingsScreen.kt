@@ -103,7 +103,6 @@ fun TerminalSettingsScreen(
             NavRow(
                 Icons.Filled.Keyboard,
                 stringResource(R.string.menu_extra_keys),
-                stringResource(R.string.menu_extra_keys_sub),
                 onClick = { keysDialog = true },
             )
             NavRow(
@@ -115,35 +114,30 @@ fun TerminalSettingsScreen(
             SwitchRow(
                 icon = Icons.Filled.SwipeVertical,
                 title = stringResource(R.string.menu_tmux_scroll_setup),
-                subtitle = stringResource(R.string.menu_tmux_scroll_setup_sub),
                 checked = tmuxScrollSetup,
                 onCheckedChange = onTmuxScrollSetup,
             )
             SwitchRow(
                 icon = Icons.Filled.LightMode,
                 title = stringResource(R.string.menu_keep_screen_on),
-                subtitle = stringResource(R.string.menu_keep_screen_on_sub),
                 checked = keepScreenOn,
                 onCheckedChange = onKeepScreenOn,
             )
             SwitchRow(
                 icon = Icons.Filled.Shield,
                 title = stringResource(R.string.menu_confirm_close),
-                subtitle = stringResource(R.string.menu_confirm_close_sub),
                 checked = confirmClose,
                 onCheckedChange = onConfirmClose,
             )
             SwitchRow(
                 icon = Icons.Filled.NotificationsActive,
                 title = stringResource(R.string.menu_terminal_alerts),
-                subtitle = stringResource(R.string.menu_terminal_alerts_sub),
                 checked = terminalAlerts,
                 onCheckedChange = onTerminalAlerts,
             )
             SwitchRow(
                 icon = Icons.Filled.Key,
                 title = stringResource(R.string.menu_auto_trust_hostkey),
-                subtitle = stringResource(R.string.menu_auto_trust_hostkey_sub),
                 checked = autoTrustNewHostKey,
                 onCheckedChange = onAutoTrustNewHostKey,
             )

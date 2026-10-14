@@ -141,7 +141,6 @@ fun AboutScreen(
             SwitchRow(
                 icon = Icons.Filled.Science,
                 title = stringResource(R.string.include_prerelease),
-                subtitle = stringResource(R.string.include_prerelease_sub),
                 checked = includePrerelease,
                 onCheckedChange = {
                     onIncludePrerelease(it)

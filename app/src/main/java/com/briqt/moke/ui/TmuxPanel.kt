@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -73,7 +72,6 @@ fun TmuxPanel(
     var detachTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var takeOverTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var killTarget by remember { mutableStateOf<TmuxSession?>(null) }
-    var helpOpen by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 24.dp)) {
@@ -99,24 +97,12 @@ fun TmuxPanel(
                 }
             }
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.tmux_target, targetLabel),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { helpOpen = true }, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.HelpOutline,
-                        contentDescription = stringResource(R.string.tmux_help),
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
-            }
+            Text(
+                stringResource(R.string.tmux_target, targetLabel),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, end = 8.dp),
+            )
 
             state.message?.takeIf { state.phase == TmuxPhase.READY }?.let { message ->
                 Text(
@@ -176,28 +162,6 @@ fun TmuxPanel(
                 }
             }
         }
-    }
-
-    if (helpOpen) {
-        AlertDialog(
-            onDismissRequest = { helpOpen = false },
-            title = { Text(stringResource(R.string.tmux_help_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        stringResource(R.string.tmux_target, targetLabel),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    Text(stringResource(R.string.tmux_manual_hop_notice))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { helpOpen = false }) {
-                    Text(stringResource(R.string.action_close))
-                }
-            },
-        )
     }
 
     dialog?.let { (initial, submit) ->

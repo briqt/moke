@@ -15,14 +15,14 @@
     <string name="action_close">关闭</string>
 
     <!-- 底部导航 -->
-    <string name="nav_connections">连接</string>
+    <string name="nav_connections">主机</string>
     <string name="nav_sessions">会话</string>
     <string name="nav_settings">设置</string>
 
     <!-- 连接 / 主机列表 -->
     <string name="add_host">添加主机</string>
     <string name="empty_hosts_title">还没有主机</string>
-    <string name="empty_hosts_hint">点右下角 + 添加一台 SSH 服务器</string>
+    <string name="empty_hosts_hint">点 + 添加主机</string>
     <string name="sort_label">排序</string>
     <string name="ungrouped">未分组</string>
     <string name="drag_to_reorder">拖动排序</string>
@@ -52,14 +52,11 @@
     <string name="tmux_retry">重试</string>
     <string name="tmux_checking">正在检查 tmux…</string>
     <string name="tmux_not_installed">远端没有安装 tmux</string>
-    <string name="tmux_control_unavailable">无法连接 tmux 控制通道，请检查网络后重试</string>
+    <string name="tmux_control_unavailable">无法连接 tmux，请检查网络。</string>
     <string name="tmux_invalid_response">无法识别远端 tmux 的返回结果</string>
     <string name="tmux_action_failed">tmux 操作失败</string>
-    <string name="tmux_target">管理目标：%1$s</string>
+    <string name="tmux_target">当前主机：%1$s</string>
     <string name="tmux_via_jump">经 %1$s</string>
-    <string name="tmux_help">查看管理目标说明</string>
-    <string name="tmux_help_title">当前管理哪台机器？</string>
-    <string name="tmux_manual_hop_notice">在终端里手动 ssh / mosh 到其他机器后，本面板仍管理上方配置目标；请把内层机器保存为连接后再管理。</string>
     <string name="tmux_take_over_confirm_title">接管 tmux 会话？</string>
     <plurals name="tmux_take_over_confirm_message">
         <item quantity="other">将断开“%2$s”现有的 %1$d 个客户端，再由当前设备附加。会话中的程序不会终止。</item>
@@ -71,11 +68,10 @@
     </plurals>
     <string name="tmux_kill_confirm_title">关闭 tmux 会话？</string>
     <string name="tmux_kill_confirm_message">“%1$s”中的程序将被终止，此操作无法撤销。</string>
-    <string name="tmux_picker_prompt">选择要进入的会话，或新建一个。选择会被记住，下次连接直接进入。</string>
     <string name="tmux_plain_shell">打开纯 shell</string>
     <string name="tmux_left">已离开 tmux，远端会话仍在运行</string>
     <string name="tmux_left_short">已离开 tmux</string>
-    <string name="tmux_attach_unconfirmed">未能附加到 tmux，已回落到普通 shell（原因见上方输出）</string>
+    <string name="tmux_attach_unconfirmed">未能进入 tmux，已打开普通 shell。</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>
@@ -83,13 +79,13 @@
 
     <!-- 会话 -->
     <string name="empty_sessions_title">暂无会话</string>
-    <string name="empty_sessions_hint">在「连接」里选择一台主机开始</string>
+    <string name="empty_sessions_hint">选一台主机开始</string>
     <string name="sessions_clear_ended">清理已结束 (%1$d)</string>
     <string name="session_ended_short">已结束</string>
     <string name="close_session">关闭会话</string>
     <string name="duplicate_session">复制会话</string>
     <string name="session_set_title">修改标题</string>
-    <string name="session_title_hint">自定义标题（留空则恢复动态标题）</string>
+    <string name="session_title_hint">标题</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">分组</string>
@@ -99,12 +95,12 @@
     <string name="sort_updated">更新时间</string>
     <string name="sort_manual">手动</string>
     <!-- 分组/排序下拉顶部提示 -->
-    <string name="group_menu_hint">选择分组</string>
-    <string name="sort_menu_hint">选择排序</string>
+    <string name="group_menu_hint">分组</string>
+    <string name="sort_menu_hint">排序</string>
     <!-- 分组维度选项 -->
     <string name="group_none">无</string>
     <string name="group_project">项目</string>
-    <string name="group_host">连接</string>
+    <string name="group_host">主机</string>
     <string name="group_date">日期</string>
     <!-- 按日期分组的时间桶 -->
     <string name="date_today">今天</string>
@@ -113,9 +109,7 @@
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">外观</string>
-    <string name="menu_appearance_sub">字体 · 配色 · 字号 · 光标</string>
     <string name="menu_about">关于</string>
-    <string name="menu_about_sub">版本</string>
     <string name="menu_language">语言</string>
 
     <!-- 语言选择 -->
@@ -125,24 +119,23 @@
 
     <!-- 主机编辑 -->
     <string name="host_edit_title">编辑主机</string>
-    <string name="field_name">名称（可选）</string>
-    <string name="field_group">分组（可选）</string>
-    <string name="field_host">主机地址</string>
+    <string name="field_name">名称</string>
+    <string name="field_group">分组</string>
+    <string name="field_host">主机地址 *</string>
     <string name="field_port">端口</string>
-    <string name="field_username">用户名</string>
+    <string name="field_username">用户名 *</string>
     <string name="field_password">密码</string>
     <string name="auth_key">私钥</string>
-    <string name="field_private_key">私钥（PEM，粘贴内容）</string>
-    <string name="field_passphrase">私钥口令（可选）</string>
+    <string name="field_private_key">私钥</string>
+    <string name="field_passphrase">私钥口令</string>
     <string name="label_protocol">协议</string>
-    <string name="field_jump_host">跳板机（可选）</string>
-    <string name="jump_none">无（直连）</string>
-    <string name="mosh_jump_hint">说明：跳板机仅用于 mosh 引导（经 SSH 拉起 mosh-server）；会话数据走 UDP，需目标从本机可直达。若目标只能经跳板机到达，这台建议用 SSH。</string>
-    <string name="field_startup_command">启动命令（可选）</string>
+    <string name="field_jump_host">跳板机</string>
+    <string name="jump_none">直连</string>
+    <string name="mosh_jump_hint">跳板机只负责启动。这台机器若不能从手机直接连上，请改用 SSH。</string>
+    <string name="field_startup_command">启动命令</string>
     <string name="startup_command_hint">如 powershell.exe、wsl、zsh -l</string>
-    <string name="startup_command_help">直接启动这个程序，替代远端默认登录 shell（SSH exec / mosh-server）。Windows 主机可用它指定 cmd、PowerShell 或 WSL。留空即默认 shell。</string>
-    <string name="startup_command_tmux_note">会话持久化选 tmux 时不生效——启动位置已由 tmux 附加占用。</string>
-    <string name="field_login_command">登录后自动执行（可选）</string>
+    <string name="startup_command_tmux_note">终端复用为 tmux 时不可用</string>
+    <string name="field_login_command">登录后自动执行</string>
     <string name="login_command_hint">如 cd /var/www &amp;&amp; ls</string>
 
     <!-- 终端 -->
@@ -157,7 +150,6 @@
     <string name="hide_extra_keys">隐藏底部快捷键</string>
     <string name="show_extra_keys">显示底部快捷键</string>
     <string name="menu_extra_keys">底部快捷键</string>
-    <string name="menu_extra_keys_sub">更换这两排上的键。按住 Ctrl、Alt 或 Shift 锁定。</string>
     <string name="extra_keys_reset">恢复默认</string>
     <string name="extra_keys_pick">选择按键</string>
     <string name="key_mod_once">%1$s，下一次按键</string>
@@ -175,8 +167,7 @@
     <string name="keys_section_edit">编辑</string>
     <string name="keys_section_fn">功能键</string>
     <string name="keys_section_ctrl">控制键</string>
-    <string name="composer_title">文本段输入</string>
-    <string name="composer_field">要发送的内容</string>
+    <string name="composer_title">文本</string>
     <string name="composer_clear">清空</string>
     <string name="composer_send">发送</string>
     <string name="composer_send_enter">发送并回车</string>
@@ -189,7 +180,6 @@
     <string name="primary_font">主字体</string>
     <string name="fallback_font">中文 / 回退字体</string>
     <string name="font_manage_title">字体管理</string>
-    <string name="font_manage_sub">下载更多字体 · 设置主字体 / 回退</string>
     <string name="line_spacing">行距</string>
     <string name="letter_spacing">字间距</string>
     <string name="color_scheme">配色方案</string>
@@ -198,7 +188,7 @@
     <string name="cursor_bar">竖线</string>
     <string name="cursor_blink">光标闪烁</string>
     <string name="reset_done">已恢复默认</string>
-    <string name="fallback_none">无（系统兜底）</string>
+    <string name="fallback_none">无</string>
 
     <!-- 字体能力标签 -->
     <string name="tag_bundled">内置</string>
@@ -208,7 +198,6 @@
 
     <!-- 字体管理 -->
     <string name="fonts_title">字体</string>
-    <string name="fonts_desc">主字体决定 Latin 观感；回退字体补 Latin 缺失的字形（如中文）。选一款含中文的作回退，即可漂亮显示中文。</string>
     <string name="font_upload">上传本地字体（TTF / OTF）</string>
     <string name="font_importing">导入中…</string>
     <string name="font_imported">已导入「%1$s」</string>
@@ -277,7 +266,6 @@
     <string name="files_path_copied">已复制路径</string>
     <string name="files_link">链接</string>
     <string name="files_pick_download_dir">选择下载目录</string>
-    <string name="files_pick_download_dir_desc">之后下载都会存到这里，可在 ⋮ 菜单里改。</string>
     <string name="files_change_download_dir">更改下载目录</string>
     <string name="files_transfers">传输</string>
     <string name="files_transfer_resume">继续</string>
@@ -288,7 +276,7 @@
     <string name="files_transfer_cancelled">已取消</string>
     <string name="files_transfer_queued">排队中</string>
     <string name="transfer_interrupted">已中断——应用被系统停止</string>
-    <string name="transfer_host_gone">这个连接已经不存在了</string>
+    <string name="transfer_host_gone">这台主机已经不存在了</string>
     <string name="transfer_remote_missing">远端文件已不存在</string>
     <string name="transfer_local_unwritable">无法写入本地文件</string>
     <string name="transfer_local_unreadable">无法读取本地文件</string>
@@ -299,22 +287,25 @@
     <string name="ssh_via_jump">[moke] 经跳板机 %1$s 连接…</string>
     <string name="ssh_connection_lost">[SSH 连接中断: %1$s]</string>
     <string name="startup_command_exited">[moke] 启动命令 \"%1$s\" 已退出（%2$d）</string>
-    <string name="mosh_unavailable">[mosh 不可用] 此安装包未内置 mosh native 组件（当前仅 arm64-v8a）。请改用 SSH 协议，或安装含 mosh 的版本。</string>
-    <string name="mosh_bootstrapping">[moke] 正在通过 SSH 引导 mosh-server…</string>
-    <string name="mosh_client_starting">[moke] mosh-server UDP 端口 %1$d，启动 mosh-client…</string>
+    <string name="mosh_unavailable">这个安装包没有 mosh，请改用 SSH。</string>
+    <string name="mosh_bootstrapping">[moke] 正在连接…</string>
+    <string name="mosh_client_starting">[moke] 端口 %1$d</string>
     <string name="mosh_connect_failed">[mosh 连接失败: %1$s]</string>
     <string name="hostkey_first_seen">首次连接 %1$s，已记录主机指纹 %2$s</string>
-    <string name="hostkey_changed">⚠️ 主机密钥已变更！\n  记录: %1$s\n  当前: %2$s\n可能存在中间人攻击，已拒绝连接。若确认服务器换过密钥，请到该连接的编辑页点「清除已保存的主机指纹」后重连（删除并重建连接不会清除指纹）。</string>
+    <string name="hostkey_changed">主机密钥已变更，已拒绝连接。\n已保存 %1$s\n本次连接 %2$s</string>
+    <string name="hostkey_changed_title">主机密钥已变更</string>
+    <string name="hostkey_changed_rejected">已拒绝连接。</string>
+    <string name="hostkey_changed_saved">已保存</string>
+    <string name="hostkey_changed_current">本次连接</string>
+    <string name="hostkey_changed_ask">若服务器密钥已更换，是否清除已保存的主机指纹？</string>
     <string name="hostkey_rejected">未信任 %1$s 的主机密钥，已中止连接。</string>
     <string name="hostkey_confirm_title">信任这台主机？</string>
-    <string name="hostkey_confirm_body">第一次连接 %1$s。信任之前请先和服务器上的指纹核对——在服务器上执行：\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n一旦信错，持有那把密钥的人从此就能看到这个会话里的一切。</string>
     <string name="hostkey_confirm_trust">信任</string>
-    <string name="menu_auto_trust_hostkey">首次连接自动信任新主机</string>
-    <string name="menu_auto_trust_hostkey_sub">关闭时，第一次连接新主机会先把指纹摆出来让你确认；打开则静默记录指纹——首连若被中间人截住不会有任何提示。两种情况下，指纹变更都一律拒绝。</string>
+    <string name="menu_auto_trust_hostkey">自动信任新主机</string>
     <string name="hostkey_clear">清除已保存的主机指纹</string>
     <string name="hostkey_clear_hint">当前记录：%1$s</string>
     <string name="hostkey_none">尚未记录该主机的指纹</string>
-    <string name="hostkey_cleared">已清除，下次连接将重新记录指纹</string>
+    <string name="hostkey_cleared">已清除</string>
 
     <!-- 覆盖 vendored terminal-view 的选中菜单文案 -->
     <string name="copy_text">复制</string>
@@ -325,22 +316,20 @@
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
-    <string name="menu_dynamic_color">动态取色</string>
-    <string name="menu_dynamic_color_sub">界面配色取自壁纸（Android 12+）</string>
+    <string name="menu_dynamic_color">壁纸取色</string>
     <string name="tag_light_scheme">浅色</string>
 
     <!-- 终端软键盘模式 -->
     <string name="keyboard_mode">键盘模式</string>
     <string name="kbmode_secure">字符模式</string>
-    <string name="kbmode_secure_desc">逐字符提交，不学习不纠错。部分厂商键盘在此会切到自带安全键盘，可能导致中文候选不可用。</string>
+    <string name="kbmode_secure_desc">不联想、不纠错</string>
     <string name="kbmode_standard">标准</string>
-    <string name="kbmode_standard_desc">按键直通终端，兼容多数输入法。</string>
+    <string name="kbmode_standard_desc">适合多数输入法</string>
     <string name="kbmode_ime">输入法优先</string>
-    <string name="kbmode_ime_desc">按普通文本框处理：候选词、联想、纠错齐全，中文输入最顺。</string>
+    <string name="kbmode_ime_desc">适合中文</string>
 
     <!-- 关闭会话二次确认 -->
-    <string name="menu_confirm_close">关闭前二次确认</string>
-    <string name="menu_confirm_close_sub">结束会话前再问一次</string>
+    <string name="menu_confirm_close">关闭前询问</string>
     <string name="session_close">关闭会话</string>
     <string name="close_connection_confirm">结束「%1$s」？其中正在运行的内容会一并终止。</string>
 
@@ -351,65 +340,55 @@
 
     <!-- 终端配色随明暗联动 -->
     <string name="scheme_follows_theme">随主题自动切换</string>
-    <string name="scheme_follows_theme_sub">浅色与深色模式分别使用不同的终端配色</string>
     <string name="color_scheme_dark">配色方案 · 深色模式</string>
     <string name="color_scheme_light">配色方案 · 浅色模式</string>
 
 
     <!-- 设置分组 -->
     <string name="menu_terminal_input">终端与输入</string>
-    <string name="menu_terminal_input_sub">键盘模式 · 屏幕 · 会话提示</string>
     <string name="section_ui">界面</string>
-    <string name="menu_tmux_scroll_setup">让 tmux 接管滑动滚屏</string>
-    <string name="menu_tmux_scroll_setup_sub">附加后为该会话开启鼠标模式并绑定滚轮：翻页器翻页、命令行滚历史。会在远端 tmux server 上加一条 root 键表绑定。</string>
-    <string name="menu_keep_screen_on">终端内保持屏幕常亮</string>
-    <string name="menu_keep_screen_on_sub">打开终端时不自动息屏，较耗电</string>
+    <string name="menu_tmux_scroll_setup">tmux 滚屏</string>
+    <string name="menu_keep_screen_on">屏幕常亮</string>
     <string name="update_found">发现新版本 %1$s</string>
 
-    <string name="host_persistence">会话持久化</string>
+    <string name="host_persistence">终端复用</string>
     <string name="persistence_none">无</string>
-    <string name="persistence_tmux">tmux（连接即进入）</string>
-    <string name="host_persistence_hint">选 tmux：连接这台主机时自动进入 tmux 会话——已记住会话名就直接进入，否则先让你选一个。</string>
-    <string name="scroll_none_mosh">mosh 协议不传输滚动缓冲，这里没有可滚的历史。在远端用 tmux（或改用 SSH）即可滚屏。</string>
-    <string name="scroll_none_alt">全屏程序正占用整个屏幕，没有可滚的历史。</string>
+    <string name="persistence_tmux">tmux</string>
     <string name="scroll_jump_bottom">跳到底部</string>
     <string name="scroll_mode">全屏程序内滑动</string>
     <string name="scroll_mode_smart">智能</string>
     <string name="scroll_mode_wheel">始终发滚轮</string>
     <string name="scroll_mode_arrows">始终发方向键</string>
-    <string name="scroll_mode_hint">智能（推荐）：远端开了鼠标滚动就发滚轮；普通输出滚本地历史；判不出来时什么都不发，避免方向键去翻命令历史。\n始终发滚轮：远端支持鼠标但当前界面没开启跟踪时可试。\n始终发方向键：翻页器（less、man、vim）滚不动时用它——尤其是 mosh 会话，mosh 不传递前台程序信息，只能由你指定。</string>
     <string name="include_prerelease">包含预览版</string>
-    <string name="include_prerelease_sub">检查更新时也算上 rc 预览版。预览版用于抢先验证新功能，可能不稳定。</string>
     <string name="github_repo">GitHub 仓库</string>
 
     <!-- 0.1.20：凭据存储 / 连接反馈 / 字体说明 -->
-    <string name="hosts_unreadable_title">保存的连接无法解密</string>
-    <string name="hosts_unreadable_hint">连接凭据由本机密钥库里的密钥加密，而那个密钥已经不在了——通常发生在把备份恢复到新设备之后。原数据保持原样，不会被任何新写入覆盖。要重新开始，请清除应用数据。</string>
+    <string name="hosts_unreadable_title">无法打开已保存的主机，请清除应用数据</string>
     <string name="ssh_connecting">[moke] 正在连接 %1$s…</string>
-    <string name="mosh_bootstrap_unparsed">未从 mosh-server 输出里解析到 MOSH CONNECT：\n%1$s</string>
-    <string name="font_note_jetbrains_mono">内置默认 · 精致清晰，中文走回退字体</string>
-    <string name="font_note_noto_sans_sc">内置中文回退 · 思源黑体子集（常用汉字），开箱中文好看</string>
-    <string name="font_note_fira_code">最流行的连字编程字体 · 体积小</string>
-    <string name="font_note_maple_mono">圆角等宽 · 含中文(2:1)+Nerd图标 · 高分屏 unhinted · 整包大，建议 WiFi</string>
-    <string name="font_note_hack">经典编程等宽 · 英文，无连字，体积小</string>
-    <string name="font_note_ibm_plex_mono">IBM 出品 · 沉稳清晰</string>
-    <string name="font_note_source_code_pro">Adobe 经典编程等宽</string>
+    <string name="mosh_bootstrap_unparsed">无法启动 mosh\n%1$s</string>
+    <string name="font_note_jetbrains_mono">内置默认，中文走回退字体</string>
+    <string name="font_note_noto_sans_sc">内置中文回退 · 思源黑体子集（常用汉字）</string>
+    <string name="font_note_fira_code">连字</string>
+    <string name="font_note_maple_mono">圆角等宽 · 含中文(2:1)+Nerd图标 · 高分屏 unhinted</string>
+    <string name="font_note_hack">编程等宽 · 英文，无连字</string>
+    <string name="font_note_ibm_plex_mono">IBM 出品</string>
+    <string name="font_note_source_code_pro">Adobe 编程等宽</string>
     <string name="font_note_roboto_mono">Roboto 家族等宽版</string>
     <string name="font_note_ubuntu_mono">Ubuntu 系统等宽</string>
-    <string name="font_note_inconsolata">清晰细长的等宽</string>
+    <string name="font_note_inconsolata">细长等宽</string>
     <string name="font_note_space_mono">复古几何风等宽</string>
-    <string name="font_note_anonymous_pro">为编程设计的等宽</string>
+    <string name="font_note_anonymous_pro">编程等宽</string>
     <string name="font_note_cascadia_code">微软终端字体 · 连字</string>
     <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd 图标</string>
     <string name="font_note_victor_mono">连字 + 草书斜体</string>
-    <string name="font_note_dejavu_sans_mono">字形覆盖广 · 兼容性好</string>
+    <string name="font_note_dejavu_sans_mono">字形覆盖广</string>
 
     <!-- 0.1.20-rc.2：会话状态行 + 字体错误（issue #1） -->
     <string name="term_connect_failed">[连接失败: %1$s]</string>
     <string name="term_session_ended">[会话结束]</string>
     <string name="term_left_tmux">[已离开 tmux]</string>
-    <string name="term_session_ended_code">[会话结束 (code %1$d)]</string>
-    <string name="term_session_ended_signal">[会话结束 (signal %1$d)]</string>
+    <string name="term_session_ended_code">[会话结束，退出码 %1$d]</string>
+    <string name="term_session_ended_signal">[会话结束，信号 %1$d]</string>
     <string name="font_no_url">该字体没有下载地址</string>
     <string name="font_checksum_failed">校验失败（sha256 不匹配）</string>
     <string name="font_zip_entry_missing">压缩包内未找到匹配 \'%1$s\' 的 ttf</string>
@@ -424,7 +403,6 @@
     <string name="action_clear">清理</string>
     <string name="font_delete_title">删除字体</string>
     <string name="font_delete_confirm">删除「%1$s」？之后要用需重新下载或导入。</string>
-    <string name="hostkey_clear_confirm">清除 %1$s 已保存的指纹？下次连接时会重新请你确认指纹。</string>
     <string name="action_clear_fingerprint">清除</string>
     <string name="reset_default_confirm">把外观设置全部恢复为默认值？当前的字体、配色、字号与光标设置会被覆盖。</string>
     <!-- 终端链接操作条 -->
@@ -435,27 +413,23 @@
     <string name="fwd_title">端口转发</string>
     <string name="fwd_add">添加</string>
     <string name="fwd_add_title">添加端口转发</string>
-    <string name="fwd_hint">把远端机器上的端口转到手机本机，再用浏览器访问——适合查看远端 dev server 之类没有公网地址的服务。只监听手机本机，局域网里的其他设备访问不到。</string>
-    <string name="fwd_empty">还没有转发。点「添加」，或在终端里点一下 localhost 链接。</string>
+    <string name="fwd_empty">还没有转发</string>
     <string name="fwd_connecting">远端 %1$d · 正在建立…</string>
     <string name="fwd_row_remote">远端 %1$d</string>
     <string name="fwd_failed">已断开</string>
     <string name="fwd_copy_address">复制地址</string>
     <string name="fwd_stop">停止</string>
     <string name="fwd_remote_port">远端端口</string>
-    <string name="fwd_local_port">本机端口（可选）</string>
+    <string name="fwd_local_port">本机端口</string>
     <string name="fwd_local_port_hint">留空自动分配</string>
     <string name="fwd_local_port_invalid">请输入 1024–65535，或留空</string>
-    <string name="fwd_open_failed">转发失败：无法建立到远端 %1$d 端口的转发</string>
+    <string name="fwd_open_failed">无法转发端口 %1$d</string>
     <string name="link_forward_open">转发并打开</string>
     <string name="menu_port_forward">端口转发</string>
-    <string name="field_forward_ports">连接后自动转发的端口（可选）</string>
-    <string name="field_forward_ports_hint">如 5173, 8080；连上后自动建好，可在终端的端口转发面板里查看</string>
+    <string name="field_forward_ports">转发端口</string>
+    <string name="field_forward_ports_hint">5173, 8080</string>
     <string name="field_forward_ports_invalid">无法识别：%1$s</string>
     <!-- 终端提醒 -->
-    <string name="alert_bell">终端响铃了</string>
     <string name="alert_channel_name">终端提醒</string>
-    <string name="alert_channel_desc">远端程序响铃或发出通知时提醒你</string>
-    <string name="menu_terminal_alerts">响铃与通知提醒</string>
-    <string name="menu_terminal_alerts_sub">远端程序响铃或发出通知序列（OSC 9 / 777）时，如果你不在这个会话里，用系统通知提醒你</string>
+    <string name="menu_terminal_alerts">响铃通知</string>
 </resources>

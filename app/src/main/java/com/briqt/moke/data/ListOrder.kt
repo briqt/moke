@@ -9,7 +9,7 @@ import com.briqt.moke.R
  */
 enum class GroupBy(@StringRes val labelRes: Int) {
     NONE(R.string.group_none),
-    HOST(R.string.group_host),         // 按连接（会话所属主机）
+    HOST(R.string.group_host),         // 按主机（会话所属主机）
     PROJECT(R.string.group_project),   // 按项目（主机 group 字段）
     ;
 

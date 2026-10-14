@@ -95,7 +95,7 @@ fun fontCapabilityBadges(
 fun NavRow(
     icon: ImageVector,
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     /** 右侧箭头前点一个主题色小圆点（用于"远端有更新"这类无打扰提示）。 */
@@ -113,7 +113,9 @@ fun NavRow(
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (subtitle.isNotEmpty()) {
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             if (showDot) Dot(modifier = Modifier.padding(end = 6.dp))
             Icon(
@@ -168,12 +170,6 @@ fun ScrollModeDialog(
                         )
                     }
                 }
-                Text(
-                    stringResource(R.string.scroll_mode_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
@@ -278,7 +274,7 @@ fun ThemeModeDialog(current: ThemeMode, onPick: (ThemeMode) -> Unit, onDismiss: 
 fun SwitchRow(
     icon: ImageVector,
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -294,7 +290,9 @@ fun SwitchRow(
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (subtitle.isNotEmpty()) {
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }

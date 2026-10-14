@@ -22,7 +22,7 @@
     <!-- 连接 / 主机列表 -->
     <string name="add_host">Add host</string>
     <string name="empty_hosts_title">No hosts yet</string>
-    <string name="empty_hosts_hint">Tap + to add an SSH server</string>
+    <string name="empty_hosts_hint">Tap + to add a host</string>
     <string name="sort_label">Sort</string>
     <string name="ungrouped">Ungrouped</string>
     <string name="drag_to_reorder">Drag to reorder</string>
@@ -54,14 +54,11 @@
     <string name="tmux_retry">Retry</string>
     <string name="tmux_checking">Checking tmux…</string>
     <string name="tmux_not_installed">tmux is not installed on the remote host</string>
-    <string name="tmux_control_unavailable">Could not reach the tmux control channel. Check the network and retry.</string>
+    <string name="tmux_control_unavailable">Could not connect to tmux. Check the network.</string>
     <string name="tmux_invalid_response">The remote tmux response could not be understood</string>
     <string name="tmux_action_failed">tmux action failed</string>
-    <string name="tmux_target">Managed target: %1$s</string>
+    <string name="tmux_target">Current host: %1$s</string>
     <string name="tmux_via_jump">via %1$s</string>
-    <string name="tmux_help">About the managed target</string>
-    <string name="tmux_help_title">Which host is managed?</string>
-    <string name="tmux_manual_hop_notice">After manually running ssh or mosh to another machine, this panel still manages the configured target above. Save the inner machine as a connection to manage it.</string>
     <string name="tmux_take_over_confirm_title">Take over tmux session?</string>
     <plurals name="tmux_take_over_confirm_message">
         <item quantity="one">Detach %1$d existing client from “%2$s”, then attach this device. Programs in the session will keep running.</item>
@@ -75,11 +72,10 @@
     </plurals>
     <string name="tmux_kill_confirm_title">Kill tmux session?</string>
     <string name="tmux_kill_confirm_message">Programs in “%1$s” will be terminated. This cannot be undone.</string>
-    <string name="tmux_picker_prompt">Pick a session to enter, or create one. Your choice is remembered for next time.</string>
     <string name="tmux_plain_shell">Open a plain shell</string>
     <string name="tmux_left">Left tmux. The remote session is still running.</string>
     <string name="tmux_left_short">left tmux</string>
-    <string name="tmux_attach_unconfirmed">Could not attach to tmux; fell back to a plain shell (see the output above).</string>
+    <string name="tmux_attach_unconfirmed">Could not enter tmux. Opened a plain shell.</string>
     <string name="host_edit">Edit</string>
     <string name="host_duplicate">Duplicate</string>
     <string name="host_copy_command">Copy connect command</string>
@@ -87,13 +83,13 @@
 
     <!-- 会话 -->
     <string name="empty_sessions_title">No sessions</string>
-    <string name="empty_sessions_hint">Pick a host under Hosts to start</string>
+    <string name="empty_sessions_hint">Pick a host to start</string>
     <string name="sessions_clear_ended">Clear ended (%1$d)</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
     <string name="duplicate_session">Duplicate session</string>
     <string name="session_set_title">Set title</string>
-    <string name="session_title_hint">Custom title (empty restores the dynamic title)</string>
+    <string name="session_title_hint">Title</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">Group</string>
@@ -108,7 +104,7 @@
     <!-- 分组维度选项 -->
     <string name="group_none">None</string>
     <string name="group_project">Project</string>
-    <string name="group_host">Connection</string>
+    <string name="group_host">Host</string>
     <string name="group_date">Date</string>
     <!-- 按日期分组的时间桶 -->
     <string name="date_today">Today</string>
@@ -117,9 +113,7 @@
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">Appearance</string>
-    <string name="menu_appearance_sub">Font · Colors · Size · Cursor</string>
     <string name="menu_about">About</string>
-    <string name="menu_about_sub">Version</string>
     <string name="menu_language">Language</string>
 
     <!-- 语言选择 -->
@@ -129,24 +123,23 @@
 
     <!-- 主机编辑 -->
     <string name="host_edit_title">Edit host</string>
-    <string name="field_name">Name (optional)</string>
-    <string name="field_group">Group (optional)</string>
-    <string name="field_host">Host</string>
+    <string name="field_name">Name</string>
+    <string name="field_group">Group</string>
+    <string name="field_host">Host *</string>
     <string name="field_port">Port</string>
-    <string name="field_username">Username</string>
+    <string name="field_username">Username *</string>
     <string name="field_password">Password</string>
     <string name="auth_key">Private key</string>
-    <string name="field_private_key">Private key (PEM, paste contents)</string>
-    <string name="field_passphrase">Key passphrase (optional)</string>
+    <string name="field_private_key">Private key</string>
+    <string name="field_passphrase">Key passphrase</string>
     <string name="label_protocol">Protocol</string>
-    <string name="field_jump_host">Jump host (optional)</string>
-    <string name="jump_none">None (direct)</string>
-    <string name="mosh_jump_hint">Note: the jump host only bootstraps mosh (SSH launches mosh-server). Session data runs over UDP and needs the target reachable directly from this device. If the target is only reachable via the jump host, use SSH for this one.</string>
-    <string name="field_startup_command">Startup command (optional)</string>
+    <string name="field_jump_host">Jump host</string>
+    <string name="jump_none">Direct</string>
+    <string name="mosh_jump_hint">The jump host only handles startup. If this machine cannot be reached directly from the phone, use SSH.</string>
+    <string name="field_startup_command">Startup command</string>
     <string name="startup_command_hint">e.g. powershell.exe, wsl, zsh -l</string>
-    <string name="startup_command_help">Launched directly instead of the default login shell (SSH exec / mosh-server). Use it to pick cmd, PowerShell or WSL on Windows hosts. Leave empty for the default shell.</string>
-    <string name="startup_command_tmux_note">Not used while session persistence is tmux — the startup slot is taken by the tmux attach.</string>
-    <string name="field_login_command">Run on login (optional)</string>
+    <string name="startup_command_tmux_note">Unavailable when terminal multiplexing is tmux</string>
+    <string name="field_login_command">Run on login</string>
     <string name="login_command_hint">e.g. cd /var/www &amp;&amp; ls</string>
 
     <!-- 终端 -->
@@ -161,7 +154,6 @@
     <string name="hide_extra_keys">Hide shortcut keys</string>
     <string name="show_extra_keys">Show shortcut keys</string>
     <string name="menu_extra_keys">Shortcut keys</string>
-    <string name="menu_extra_keys_sub">Change the keys on the two rows. Touch and hold Ctrl, Alt, or Shift to lock it.</string>
     <string name="extra_keys_reset">Restore default</string>
     <string name="extra_keys_pick">Choose a key</string>
     <string name="key_mod_once">%1$s, next key</string>
@@ -179,8 +171,7 @@
     <string name="keys_section_edit">Editing</string>
     <string name="keys_section_fn">Function</string>
     <string name="keys_section_ctrl">Control</string>
-    <string name="composer_title">Text block</string>
-    <string name="composer_field">Text to send</string>
+    <string name="composer_title">Text</string>
     <string name="composer_clear">Clear</string>
     <string name="composer_send">Send</string>
     <string name="composer_send_enter">Send + Enter</string>
@@ -193,7 +184,6 @@
     <string name="primary_font">Primary font</string>
     <string name="fallback_font">Fallback font</string>
     <string name="font_manage_title">Manage fonts</string>
-    <string name="font_manage_sub">Download fonts · set primary / fallback</string>
     <string name="line_spacing">Line spacing</string>
     <string name="letter_spacing">Letter spacing</string>
     <string name="color_scheme">Color scheme</string>
@@ -202,7 +192,7 @@
     <string name="cursor_bar">Bar</string>
     <string name="cursor_blink">Cursor blink</string>
     <string name="reset_done">Reset to defaults</string>
-    <string name="fallback_none">None (system default)</string>
+    <string name="fallback_none">None</string>
 
     <!-- 字体能力标签 -->
     <string name="tag_bundled">Bundled</string>
@@ -212,7 +202,6 @@
 
     <!-- 字体管理 -->
     <string name="fonts_title">Fonts</string>
-    <string name="fonts_desc">The primary font sets the Latin look; the fallback fills glyphs it lacks (such as Chinese). Pick a CJK font as the fallback for good-looking Chinese.</string>
     <string name="font_upload">Upload local font (TTF / OTF)</string>
     <string name="font_importing">Importing…</string>
     <string name="font_imported">Imported \"%1$s\"</string>
@@ -281,7 +270,6 @@
     <string name="files_path_copied">Path copied</string>
     <string name="files_link">link</string>
     <string name="files_pick_download_dir">Choose a download folder</string>
-    <string name="files_pick_download_dir_desc">Downloads go here from now on; you can change it later in the ⋮ menu.</string>
     <string name="files_change_download_dir">Change download folder</string>
     <string name="files_transfers">Transfers</string>
     <string name="files_transfer_resume">Resume</string>
@@ -292,7 +280,7 @@
     <string name="files_transfer_cancelled">Cancelled</string>
     <string name="files_transfer_queued">Queued</string>
     <string name="transfer_interrupted">Interrupted — the app was stopped</string>
-    <string name="transfer_host_gone">That connection no longer exists</string>
+    <string name="transfer_host_gone">That host no longer exists</string>
     <string name="transfer_remote_missing">The remote file is gone</string>
     <string name="transfer_local_unwritable">Cannot write to the local file</string>
     <string name="transfer_local_unreadable">Cannot read the local file</string>
@@ -303,22 +291,25 @@
     <string name="ssh_via_jump">[moke] Connecting via jump host %1$s…</string>
     <string name="ssh_connection_lost">[SSH connection lost: %1$s]</string>
     <string name="startup_command_exited">[moke] startup command \"%1$s\" exited with %2$d</string>
-    <string name="mosh_unavailable">[mosh unavailable] This build has no bundled mosh native component (arm64-v8a only). Use SSH instead, or install a build with mosh.</string>
-    <string name="mosh_bootstrapping">[moke] Bootstrapping mosh-server over SSH…</string>
-    <string name="mosh_client_starting">[moke] mosh-server UDP port %1$d, starting mosh-client…</string>
+    <string name="mosh_unavailable">This install does not include mosh. Use SSH.</string>
+    <string name="mosh_bootstrapping">[moke] Connecting…</string>
+    <string name="mosh_client_starting">[moke] Port %1$d</string>
     <string name="mosh_connect_failed">[mosh failed: %1$s]</string>
     <string name="hostkey_first_seen">First connection to %1$s; host fingerprint saved: %2$s</string>
-    <string name="hostkey_changed">⚠️ Host key changed!\n  saved:   %1$s\n  current: %2$s\nThis may be a man-in-the-middle attack; connection rejected. If you are sure the server rotated its key, open this connection’s edit page and tap “Clear saved host fingerprint”, then reconnect (deleting and re-adding the connection does not clear it).</string>
+    <string name="hostkey_changed">Host key changed. Connection rejected.\nSaved %1$s\nThis connection %2$s</string>
+    <string name="hostkey_changed_title">Host key changed</string>
+    <string name="hostkey_changed_rejected">Connection rejected.</string>
+    <string name="hostkey_changed_saved">Saved</string>
+    <string name="hostkey_changed_current">This connection</string>
+    <string name="hostkey_changed_ask">If the server key was replaced, clear the saved host fingerprint?</string>
     <string name="hostkey_rejected">Host key for %1$s was not trusted; connection aborted.</string>
     <string name="hostkey_confirm_title">Trust this host?</string>
-    <string name="hostkey_confirm_body">First connection to %1$s. Check this fingerprint against the server before trusting it — on the server, run:\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\nTrusting the wrong key means whoever holds it can read this session from now on.</string>
     <string name="hostkey_confirm_trust">Trust</string>
-    <string name="menu_auto_trust_hostkey">Trust new hosts without asking</string>
-    <string name="menu_auto_trust_hostkey_sub">Off: the first connection to a new host shows its fingerprint for confirmation. On: the fingerprint is recorded silently, so an interception on that first connection goes unnoticed. Key changes are always rejected either way.</string>
+    <string name="menu_auto_trust_hostkey">Trust new hosts</string>
     <string name="hostkey_clear">Clear saved host fingerprint</string>
     <string name="hostkey_clear_hint">Saved: %1$s</string>
     <string name="hostkey_none">No fingerprint saved for this host yet</string>
-    <string name="hostkey_cleared">Cleared. The fingerprint will be recorded again on next connect.</string>
+    <string name="hostkey_cleared">Cleared</string>
 
     <!-- 覆盖 vendored terminal-view 的选中菜单文案（app 资源优先于 library，随 App 语言本地化；不改 vendored 组件） -->
     <string name="copy_text">Copy</string>
@@ -329,22 +320,20 @@
     <string name="theme_system">Follow system</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
-    <string name="menu_dynamic_color">Dynamic color</string>
-    <string name="menu_dynamic_color_sub">Tint the UI from your wallpaper (Android 12+)</string>
+    <string name="menu_dynamic_color">Wallpaper colors</string>
     <string name="tag_light_scheme">Light</string>
 
     <!-- 终端软键盘模式 -->
     <string name="keyboard_mode">Keyboard mode</string>
     <string name="kbmode_secure">Character mode</string>
-    <string name="kbmode_secure_desc">Sends each character as typed, no learning or autocorrect. Some vendor keyboards switch to their secure keyboard here, which can block CJK candidates.</string>
+    <string name="kbmode_secure_desc">No suggestions or corrections</string>
     <string name="kbmode_standard">Standard</string>
-    <string name="kbmode_standard_desc">Passes keys straight through. Works with most keyboards.</string>
+    <string name="kbmode_standard_desc">Works with most keyboards</string>
     <string name="kbmode_ime">IME first</string>
-    <string name="kbmode_ime_desc">Acts as a normal text field: full candidates, prediction and autocorrect. Best for Chinese, Japanese and Korean input.</string>
+    <string name="kbmode_ime_desc">For Chinese</string>
 
     <!-- 关闭会话二次确认 -->
-    <string name="menu_confirm_close">Confirm before closing</string>
-    <string name="menu_confirm_close_sub">Ask again before ending a session</string>
+    <string name="menu_confirm_close">Ask before closing</string>
     <string name="session_close">Close session</string>
     <string name="close_connection_confirm">End “%1$s”? Anything running in it will be terminated.</string>
 
@@ -355,65 +344,55 @@
 
     <!-- 终端配色随明暗联动 -->
     <string name="scheme_follows_theme">Follow app theme</string>
-    <string name="scheme_follows_theme_sub">Use a separate terminal scheme in light and dark mode</string>
     <string name="color_scheme_dark">Color scheme · dark mode</string>
     <string name="color_scheme_light">Color scheme · light mode</string>
 
 
     <!-- 设置分组 -->
     <string name="menu_terminal_input">Terminal &amp; input</string>
-    <string name="menu_terminal_input_sub">Keyboard mode · screen · session prompts</string>
     <string name="section_ui">Interface</string>
-    <string name="menu_tmux_scroll_setup">Let tmux handle swipe scrolling</string>
-    <string name="menu_tmux_scroll_setup_sub">After attaching, enables mouse mode for that session and binds the wheel so pagers page and prompts scroll history. Adds a root-table key binding on the remote tmux server.</string>
-    <string name="menu_keep_screen_on">Keep screen on in terminal</string>
-    <string name="menu_keep_screen_on_sub">Stays awake while a terminal tab is open; uses more battery</string>
+    <string name="menu_tmux_scroll_setup">tmux scrolling</string>
+    <string name="menu_keep_screen_on">Keep screen on</string>
     <string name="update_found">New version %1$s available</string>
 
-    <string name="host_persistence">Session persistence</string>
+    <string name="host_persistence">Terminal multiplexing</string>
     <string name="persistence_none">None</string>
-    <string name="persistence_tmux">tmux (attach on connect)</string>
-    <string name="host_persistence_hint">With tmux: connecting to this host enters a tmux session — straight in if a session name is remembered, otherwise you pick one first.</string>
-    <string name="scroll_none_mosh">mosh does not carry a scrollback buffer, so there is no history to scroll here. Run tmux on the remote (or use SSH) to scroll.</string>
-    <string name="scroll_none_alt">A full-screen program owns the screen; there is no history to scroll.</string>
+    <string name="persistence_tmux">tmux</string>
     <string name="scroll_jump_bottom">Jump to latest</string>
     <string name="scroll_mode">Swipe in full-screen programs</string>
     <string name="scroll_mode_smart">Smart</string>
     <string name="scroll_mode_wheel">Always send wheel</string>
     <string name="scroll_mode_arrows">Always send arrow keys</string>
-    <string name="scroll_mode_hint">Smart (recommended): sends wheel events when the remote enables mouse scrolling; scrolls local history for ordinary output; sends nothing when it cannot tell, so arrow keys never walk your command history.\nAlways send wheel: worth trying when the remote supports the mouse but has not enabled tracking on the current screen.\nAlways send arrow keys: use it when pagers (less, man, vim) will not scroll — especially over mosh, which carries no information about the foreground program, so only you can decide.</string>
     <string name="include_prerelease">Include pre-releases</string>
-    <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
     <string name="github_repo">GitHub repository</string>
 
     <!-- 0.1.20: credential store / connect feedback / font notes -->
-    <string name="hosts_unreadable_title">Saved connections cannot be decrypted</string>
-    <string name="hosts_unreadable_hint">They are encrypted with a key held in this device\'s keystore, and that key is gone — usually after restoring a backup onto a new device. The old data is kept untouched and nothing new will be written over it. Clear the app\'s data to start fresh.</string>
+    <string name="hosts_unreadable_title">Could not open saved hosts. Clear app data.</string>
     <string name="ssh_connecting">[moke] Connecting to %1$s…</string>
-    <string name="mosh_bootstrap_unparsed">No MOSH CONNECT line in the mosh-server output:\n%1$s</string>
-    <string name="font_note_jetbrains_mono">Bundled default · crisp and refined; CJK falls back to the fallback font</string>
+    <string name="mosh_bootstrap_unparsed">Could not start mosh\n%1$s</string>
+    <string name="font_note_jetbrains_mono">Bundled default, CJK uses the fallback font</string>
     <string name="font_note_noto_sans_sc">Bundled CJK fallback · Noto Sans SC subset (common Han characters)</string>
-    <string name="font_note_fira_code">The most popular ligature coding font · small</string>
-    <string name="font_note_maple_mono">Rounded monospace · CJK (2:1) + Nerd icons · unhinted for hi-dpi · large download, use Wi-Fi</string>
-    <string name="font_note_hack">Classic coding monospace · Latin only, no ligatures, small</string>
-    <string name="font_note_ibm_plex_mono">By IBM · calm and legible</string>
-    <string name="font_note_source_code_pro">Adobe\'s classic coding monospace</string>
+    <string name="font_note_fira_code">Ligatures</string>
+    <string name="font_note_maple_mono">Rounded monospace · CJK (2:1) + Nerd icons · unhinted for hi-dpi</string>
+    <string name="font_note_hack">Coding monospace · Latin only, no ligatures</string>
+    <string name="font_note_ibm_plex_mono">By IBM</string>
+    <string name="font_note_source_code_pro">Adobe coding monospace</string>
     <string name="font_note_roboto_mono">The monospace member of the Roboto family</string>
     <string name="font_note_ubuntu_mono">Ubuntu\'s system monospace</string>
-    <string name="font_note_inconsolata">Crisp and narrow monospace</string>
+    <string name="font_note_inconsolata">Narrow monospace</string>
     <string name="font_note_space_mono">Retro geometric monospace</string>
-    <string name="font_note_anonymous_pro">Monospace designed for coding</string>
+    <string name="font_note_anonymous_pro">Coding monospace</string>
     <string name="font_note_cascadia_code">Microsoft\'s terminal font · ligatures</string>
     <string name="font_note_jetbrains_mono_nerd_font">JetBrains Mono + Nerd icons</string>
     <string name="font_note_victor_mono">Ligatures + cursive italics</string>
-    <string name="font_note_dejavu_sans_mono">Broad glyph coverage · very compatible</string>
+    <string name="font_note_dejavu_sans_mono">Broad glyph coverage</string>
 
     <!-- 0.1.20-rc.2: session status lines + font errors (issue #1) -->
     <string name="term_connect_failed">[connect failed: %1$s]</string>
     <string name="term_session_ended">[session ended]</string>
     <string name="term_left_tmux">[left tmux]</string>
-    <string name="term_session_ended_code">[session ended (code %1$d)]</string>
-    <string name="term_session_ended_signal">[session ended (signal %1$d)]</string>
+    <string name="term_session_ended_code">[session ended, exit code %1$d]</string>
+    <string name="term_session_ended_signal">[session ended, signal %1$d]</string>
     <string name="font_no_url">This font has no download URL</string>
     <string name="font_checksum_failed">Checksum mismatch (sha256)</string>
     <string name="font_zip_entry_missing">No ttf matching \'%1$s\' inside the archive</string>
@@ -428,7 +407,6 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="action_clear">Clear</string>
     <string name="font_delete_title">Delete font</string>
     <string name="font_delete_confirm">Delete “%1$s”? You\'ll need to download or import it again to use it.</string>
-    <string name="hostkey_clear_confirm">Clear the saved fingerprint for %1$s? You\'ll be asked to confirm the fingerprint again on the next connection.</string>
     <string name="action_clear_fingerprint">Clear</string>
     <string name="reset_default_confirm">Reset all appearance settings to their defaults? Your current font, color scheme, size and cursor settings will be replaced.</string>
     <!-- 终端链接操作条 -->
@@ -439,27 +417,23 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="fwd_title">Port forwarding</string>
     <string name="fwd_add">Add</string>
     <string name="fwd_add_title">Add port forward</string>
-    <string name="fwd_hint">Forward a port on the remote machine to this phone and open it in a browser — handy for things like a remote dev server with no public address. Listens on this phone only; other devices on your network can\'t reach it.</string>
-    <string name="fwd_empty">No forwards yet. Tap Add, or tap a localhost link in the terminal.</string>
+    <string name="fwd_empty">No forwards yet</string>
     <string name="fwd_connecting">Remote %1$d · connecting…</string>
     <string name="fwd_row_remote">Remote %1$d</string>
     <string name="fwd_failed">Disconnected</string>
     <string name="fwd_copy_address">Copy address</string>
     <string name="fwd_stop">Stop</string>
     <string name="fwd_remote_port">Remote port</string>
-    <string name="fwd_local_port">Local port (optional)</string>
+    <string name="fwd_local_port">Local port</string>
     <string name="fwd_local_port_hint">Leave empty to pick automatically</string>
     <string name="fwd_local_port_invalid">Enter 1024–65535, or leave empty</string>
-    <string name="fwd_open_failed">Forwarding failed: couldn\'t forward remote port %1$d</string>
+    <string name="fwd_open_failed">Could not forward port %1$d</string>
     <string name="link_forward_open">Forward &amp; open</string>
     <string name="menu_port_forward">Port forwarding</string>
-    <string name="field_forward_ports">Ports to forward on connect (optional)</string>
-    <string name="field_forward_ports_hint">e.g. 5173, 8080 — set up automatically after connecting; see them in the terminal\'s port forwarding panel</string>
+    <string name="field_forward_ports">Forward ports</string>
+    <string name="field_forward_ports_hint">5173, 8080</string>
     <string name="field_forward_ports_invalid">Not recognized: %1$s</string>
     <!-- 终端提醒 -->
-    <string name="alert_bell">The terminal rang the bell</string>
     <string name="alert_channel_name">Terminal alerts</string>
-    <string name="alert_channel_desc">When a remote program rings the bell or sends a notification</string>
-    <string name="menu_terminal_alerts">Bell &amp; notification alerts</string>
-    <string name="menu_terminal_alerts_sub">When a remote program rings the bell or sends a notification sequence (OSC 9 / 777) while you\'re not in that session, show a system notification</string>
+    <string name="menu_terminal_alerts">Bell notifications</string>
 </resources>

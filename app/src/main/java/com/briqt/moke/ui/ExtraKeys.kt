@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -28,7 +29,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -386,10 +390,9 @@ fun TextBlockComposer(
     val keyboard = LocalSoftwareKeyboardController.current
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // 头行：标题 + 清空 + 关闭（关闭回到附加键行）。
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(R.string.composer_title),
@@ -398,24 +401,44 @@ fun TextBlockComposer(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { onValueChange("") }) { Text(stringResource(R.string.composer_clear)) }
-                IconButton(onClick = onDismiss) {
+                TextButton(
+                    onClick = { onValueChange("") },
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) { Text(stringResource(R.string.composer_clear)) }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            // 高度受限：2 行起，内容多则框内滚动到上限，不顶出发送按钮。
-            OutlinedTextField(
+            val scroll = rememberScrollState()
+            BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 160.dp).focusRequester(focusRequester),
-                minLines = 2,
-                placeholder = { Text(stringResource(R.string.composer_field)) },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 40.dp, max = 120.dp)
+                    .focusRequester(focusRequester)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .verticalScroll(scroll),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = MokeMono,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = { onSend(value, false) }) { Text(stringResource(R.string.composer_send)) }
-                Button(onClick = { onSend(value, true) }) { Text(stringResource(R.string.composer_send_enter)) }
+                OutlinedButton(
+                    onClick = { onSend(value, false) },
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                ) { Text(stringResource(R.string.composer_send)) }
+                Button(
+                    onClick = { onSend(value, true) },
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                ) { Text(stringResource(R.string.composer_send_enter)) }
             }
         }
     }

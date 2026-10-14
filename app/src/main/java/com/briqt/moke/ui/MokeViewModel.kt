@@ -9,6 +9,7 @@ import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.data.Host
+import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
@@ -168,6 +169,16 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val hostKeyRequest: StateFlow<HostKeyPrompt.Request?> = HostKeyPrompt.pending
 
     fun resolveHostKey(id: String, trusted: Boolean) = HostKeyPrompt.resolve(id, trusted)
+
+    /** 主机密钥变更（非空=询问是否清除已保存的指纹）。 */
+    val hostKeyChange: StateFlow<HostKeyChangePrompt.Request?> = HostKeyChangePrompt.pending
+
+    fun clearChangedFingerprint(target: String) {
+        knownHosts.forget(target)
+        HostKeyChangePrompt.dismiss()
+    }
+
+    fun dismissHostKeyChange() = HostKeyChangePrompt.dismiss()
     /** 检查更新是否包含预发布版（关于页开关）。 */
     val includePrerelease: StateFlow<Boolean> = settings.includePrerelease
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)

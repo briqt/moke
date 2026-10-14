@@ -59,18 +59,21 @@ object TerminalAlerts {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         ensureChannel(context)
-        val text = body?.takeIf { it.isNotBlank() } ?: context.localized(R.string.alert_bell)
+        val headline = title?.takeIf { it.isNotBlank() }
+        val message = body?.takeIf { it.isNotBlank() }
         val intent = Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN_SESSIONS)
             .putExtra(MainActivity.EXTRA_SESSION_ID, sessionId)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title?.takeIf { it.isNotBlank() } ?: sessionTitle)
-            .setContentText(text)
-            .setSubText(if (title.isNullOrBlank()) null else sessionTitle)
+            .setContentTitle(headline ?: sessionTitle)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .apply {
+                if (message != null) setContentText(message)
+                if (headline != null) setSubText(sessionTitle)
+            }
             .setContentIntent(
                 // requestCode 按会话区分：同一 Activity 的多条 PendingIntent 只差 extra 时会被合并成一条。
                 PendingIntent.getActivity(
@@ -110,7 +113,7 @@ object TerminalAlerts {
                 CHANNEL_ID,
                 context.localized(R.string.alert_channel_name),
                 NotificationManager.IMPORTANCE_HIGH,
-            ).apply { description = context.localized(R.string.alert_channel_desc) }
+            ).apply { description = "" }
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }

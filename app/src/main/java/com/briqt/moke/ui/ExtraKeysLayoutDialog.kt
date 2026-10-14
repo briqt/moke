@@ -55,11 +55,6 @@ fun ExtraKeysLayoutDialog(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    stringResource(R.string.menu_extra_keys_sub),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 slots.forEachIndexed { row, ids ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
