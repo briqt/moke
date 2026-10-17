@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
-[![minSdk](https://img.shields.io/badge/minSdk-24-blue)](#)
+[![minSdk](https://img.shields.io/badge/minSdk-30-blue)](#)
 
 </div>
 
@@ -54,7 +54,7 @@ Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接连接远�
 
 ## 构建
 
-需要 JDK 17 + Android SDK（compileSdk 35 / build-tools 35）。在项目根创建 `local.properties` 指向 SDK：`sdk.dir=/path/to/Android/sdk`。
+需要 JDK 17 及以上 + Android SDK（compileSdk 37 / build-tools 36）。在项目根创建 `local.properties` 指向 SDK：`sdk.dir=/path/to/Android/sdk`。
 
 ```bash
 ./gradlew assembleStandardDebug   # 常规调试 APK
@@ -64,7 +64,7 @@ Moke 是一个 Android 原生 SSH / mosh 终端。它在 app 内直接连接远�
 ./scripts/fetch-maple-font.sh && ./gradlew assembleMapleDebug
 ```
 
-mosh native 产物由 [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) 从公开源码（mosh 1.4.0 + rjyo/mosh-android 预编译库）复现构建，需 NDK r29；GPLv3 二进制不入库。maple 变体内置字体由 [`scripts/fetch-maple-font.sh`](scripts/fetch-maple-font.sh) 获取（OFL，不入库）。
+mosh native 产物由 [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) 从公开源码（mosh 1.4.0 + rjyo/mosh-android 预编译库）复现构建，需 NDK r30；GPLv3 二进制不入库。maple 变体内置字体由 [`scripts/fetch-maple-font.sh`](scripts/fetch-maple-font.sh) 获取（OFL，不入库）。
 
 ## 反馈
 

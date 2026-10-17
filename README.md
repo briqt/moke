@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
-[![minSdk](https://img.shields.io/badge/minSdk-24-blue)](#)
+[![minSdk](https://img.shields.io/badge/minSdk-30-blue)](#)
 
 </div>
 
@@ -54,7 +54,7 @@ Allow "install from unknown sources" and install. Release builds use a stable si
 
 ## Build
 
-Requires JDK 17 + Android SDK (compileSdk 35 / build-tools 35). Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
+Requires JDK 17 or newer + Android SDK (compileSdk 37 / build-tools 36). Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
 
 ```bash
 ./gradlew assembleStandardDebug   # standard debug APK
@@ -65,7 +65,7 @@ Requires JDK 17 + Android SDK (compileSdk 35 / build-tools 35). Create `local.pr
 ./scripts/fetch-maple-font.sh && ./gradlew assembleMapleDebug
 ```
 
-The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r29 is required, and the GPLv3 binaries are not checked in. The `maple` flavor's bundled font is fetched by [`scripts/fetch-maple-font.sh`](scripts/fetch-maple-font.sh) (OFL, not checked in).
+The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r30 is required, and the GPLv3 binaries are not checked in. The `maple` flavor's bundled font is fetched by [`scripts/fetch-maple-font.sh`](scripts/fetch-maple-font.sh) (OFL, not checked in).
 
 ## Feedback
 

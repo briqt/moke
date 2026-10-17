@@ -50,7 +50,7 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 |---|---|---|
 | [sshj](https://github.com/hierynomus/sshj) | Apache-2.0 | SSH 传输 |
 | [Bouncy Castle](https://www.bouncycastle.org/) (`bcprov-jdk18on`, `bcpkix-jdk18on`) | MIT-style (Bouncy Castle License) | 加密算法（sshj 依赖） |
-| [EdDSA-Java](https://github.com/str4d/ed25519-java) (`net.i2p.crypto:eddsa`) | CC0-1.0 | ed25519 密钥（sshj 依赖） |
+| [SLF4J](https://www.slf4j.org/) (`slf4j-api`) | MIT | 日志接口（sshj 依赖） |
 | AndroidX / Jetpack Compose / Material3 | Apache-2.0 | UI 框架 |
 | Kotlin 标准库与协程 | Apache-2.0 | 语言运行时 |
 
