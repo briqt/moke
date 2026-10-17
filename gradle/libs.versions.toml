@@ -9,6 +9,8 @@ datastore = "1.2.1"
 sshj = "0.41.2"
 bouncycastle = "1.86"
 annotation = "1.11.0"
+# 登录 tailnet 用 Custom Tabs 打开授权页（同官方 Android 客户端）。
+browser = "1.10.0"
 junit = "4.13.2"
 # 单测里用真的 org.json：Android 打包的那份在 JVM 单测中只是抛异常的桩，
 # 而任务表/主机表的 JSON 往返正是最该被钉住的部分。
@@ -30,6 +32,7 @@ androidx-material3 = { group = "androidx.compose.material3", name = "material3" 
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 sshj = { group = "com.hierynomus", name = "sshj", version.ref = "sshj" }
 bouncycastle-prov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 bouncycastle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncycastle" }

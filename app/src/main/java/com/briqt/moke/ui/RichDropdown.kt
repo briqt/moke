@@ -36,8 +36,11 @@ data class DropdownOption(
 )
 
 /**
- * 通用富下拉框（字体 / 配色共用）。收起时锚点显示当前选中项标题；展开后每行含
+ * 通用富下拉框（字体 / 配色 / 跳板机 / 网络共用）。收起时锚点显示当前选中项标题；展开后每行含
  * 前导 + 标题 + 标签 + 副标题 + 状态，点击即回调选择/触发动作。可选 [footer]（如"管理字体…"）。
+ *
+ * [enabled] 为 false 时整体置灰、不能展开（值保留）；[isError] + [supportingText] 用于失效引用等
+ * 必须改选的情况；[missingTitle] 是选中项已不在列表里时锚点显示的文字。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,29 +50,36 @@ fun RichDropdown(
     selectedId: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: String? = null,
+    missingTitle: String = "—",
     footer: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selected = options.firstOrNull { it.id == selectedId }
 
     ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
+        expanded = expanded && enabled,
+        onExpandedChange = { if (enabled) expanded = it },
         modifier = modifier,
     ) {
         OutlinedTextField(
-            value = selected?.title ?: "—",
+            value = selected?.title ?: missingTitle,
             onValueChange = {},
             readOnly = true,
+            enabled = enabled,
+            isError = isError,
             label = { Text(label) },
             leadingIcon = selected?.leading?.let { lead -> { lead() } },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
+            supportingText = supportingText?.let { { Text(it) } },
             modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled)
                 .fillMaxWidth(),
         )
         ExposedDropdownMenu(
-            expanded = expanded,
+            expanded = expanded && enabled,
             onDismissRequest = { expanded = false },
         ) {
             options.forEach { opt ->

@@ -4,7 +4,9 @@ import android.content.Context
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.connectFailureText
+import com.briqt.moke.net.needsLogin
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.sftp.RemoteEntry
@@ -32,6 +34,8 @@ data class FilesUiState(
     val error: String = "",
     val notice: String = "",
     val terminalPath: String = "",
+    /** 失败因网络需要登录：横幅给出「登录」。 */
+    val loginNetwork: NetworkEntry? = null,
 )
 
 /**
@@ -83,7 +87,8 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
                     )
                 }
             }.onFailure { t ->
-                _state.update { it.copy(loading = false, error = describe(t, s.consumeNotice())) }
+                val login = (t as? NetworkException)?.takeIf { it.needsLogin }?.network
+                _state.update { it.copy(loading = false, error = describe(t, s.consumeNotice()), loginNetwork = login) }
             }
         }
     }
@@ -124,7 +129,7 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    fun clearError() = _state.update { it.copy(error = "") }
+    fun clearError() = _state.update { it.copy(error = "", loginNetwork = null) }
 
     /**
      * 当前目录下这些名字里，哪些远端已经有了。

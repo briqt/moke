@@ -30,6 +30,9 @@ fun NetworkException.describe(context: Context): String {
     return context.localized(id, name)
 }
 
+/** 这些失败要先去登录网络（失败条据此给出「登录」）。 */
+val NetworkException.needsLogin: Boolean get() = code in setOf("NEEDS_LOGIN", "LOGIN_EXPIRED", "NEEDS_MACHINE_AUTH")
+
 /** 连接失败的统一说法：网络错误说人话，其余沿用原消息。 */
 fun Throwable.connectFailureText(context: Context): String =
     (this as? NetworkException)?.describe(context) ?: message ?: javaClass.simpleName

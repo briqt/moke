@@ -41,6 +41,10 @@ class EncryptedStateFiles(
         }
     }
 
+    /** 本地有没有这个网络的节点状态（登录过且没退出）。不读内容、不解密。 */
+    @Synchronized
+    fun hasAny(networkId: String): Boolean = dirOf(networkId).list()?.any { !it.endsWith(".tmp") } == true
+
     /** 删除网络时连同节点状态一起删掉。 */
     @Synchronized
     fun deleteNetwork(networkId: String) {

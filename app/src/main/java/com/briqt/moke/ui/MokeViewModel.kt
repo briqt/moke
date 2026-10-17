@@ -25,7 +25,9 @@ import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
 import com.briqt.moke.data.ListState
+import com.briqt.moke.data.MissingKind
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.NetworkStore
 import com.briqt.moke.data.Route
 import com.briqt.moke.data.clearDanglingJumps
@@ -35,6 +37,9 @@ import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
 import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.net.NetworkException
+import com.briqt.moke.net.NetworkManager
+import com.briqt.moke.net.describe
 import com.briqt.moke.net.refusalText
 import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.FontInstallState
@@ -329,6 +334,216 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val knownHosts by lazy { KnownHosts(getApplication()) }
+
+    // ---------- 网络（tailnet / 代理） ----------
+
+    private val networkManager get() = getApplication<MokeApplication>().networks
+
+    /** 已保存的网络（读不出来或还在读时为空；那两种情况由 [networksState] 区分）。 */
+    val networks: StateFlow<List<NetworkEntry>> = networkStore.state
+        .map { (it as? ListState.Ready)?.items.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 网络的运行时快照：本地是否登录过（看节点状态文件，不启动任何东西），运行中的 tailnet 再加
+     * 实时状态。只在有网络页面可见时轮询（[watchNetworks]），平时按需刷新一次。
+     */
+    data class NetworkLive(
+        val loggedIn: Map<String, Boolean> = emptyMap(),
+        val status: Map<String, NetworkManager.NodeStatus> = emptyMap(),
+        val leases: Map<String, Int> = emptyMap(),
+        /** 本次运行中已得知登录失效的 tailnet（节点停了也记得）。 */
+        val expired: Set<String> = emptySet(),
+    )
+
+    private val _networkLive = MutableStateFlow(NetworkLive())
+    val networkLive: StateFlow<NetworkLive> = _networkLive.asStateFlow()
+
+    /** 进行中的 tailnet 登录：网络 id → 登录流程状态。 */
+    data class LoginFlow(val url: String = "", val error: String? = null, val busy: Boolean = true)
+
+    private val _loginFlows = MutableStateFlow<Map<String, LoginFlow>>(emptyMap())
+    val loginFlows: StateFlow<Map<String, LoginFlow>> = _loginFlows.asStateFlow()
+
+    /** 要在浏览器（Custom Tabs）里打开的授权页；界面打开后调 [consumeLoginUrl]。 */
+    private val _loginUrl = MutableStateFlow<String?>(null)
+    val loginUrl: StateFlow<String?> = _loginUrl.asStateFlow()
+    fun consumeLoginUrl() { _loginUrl.value = null }
+
+    /** 登录在浏览器里完成：界面据此把应用带回前台（一次性）。 */
+    private val _loginCompleted = MutableStateFlow<String?>(null)
+    val loginCompleted: StateFlow<String?> = _loginCompleted.asStateFlow()
+    fun consumeLoginCompleted() { _loginCompleted.value = null }
+
+    /** 网络操作的一次性提示（如「已退出，但没能通知控制服务器」）。 */
+    private val _networkNotice = MutableStateFlow<String?>(null)
+    val networkNotice: StateFlow<String?> = _networkNotice.asStateFlow()
+    fun consumeNetworkNotice() { _networkNotice.value = null }
+
+    private var watchers = 0
+    private var watchJob: kotlinx.coroutines.Job? = null
+
+    /** 网络页面可见时开（离开时关）：每 2 秒刷新一次快照。 */
+    fun watchNetworks(on: Boolean) {
+        watchers = (watchers + if (on) 1 else -1).coerceAtLeast(0)
+        if (watchers > 0 && watchJob == null) {
+            watchJob = viewModelScope.launch(Dispatchers.IO) {
+                while (currentCoroutineContext().isActive) {
+                    refreshNetworkLive()
+                    delay(2_000)
+                }
+            }
+        } else if (watchers == 0) {
+            watchJob?.cancel()
+            watchJob = null
+        }
+    }
+
+    /** 不在网络页面时也要知道「未登录」（设置行、主机卡片、连接前检查）：刷新一次本地状态。 */
+    fun refreshNetworksOnce() = viewModelScope.launch(Dispatchers.IO) { refreshNetworkLive() }
+
+    private fun refreshNetworkLive() {
+        val list = networks.value
+        val nm = networkManager
+        val status = HashMap<String, NetworkManager.NodeStatus>()
+        val leases = HashMap<String, Int>()
+        for (e in list) {
+            if (!nm.isRunning(e)) continue
+            runCatching { nm.status(e) }.getOrNull()?.let { status[e.id] = it }
+            leases[e.id] = runCatching { nm.leases(e) }.getOrDefault(0)
+        }
+        _networkLive.value = NetworkLive(
+            loggedIn = list.filter { it.kind == NetworkKind.TAILSCALE }.associate { it.id to nm.hasLoggedIn(it) },
+            status = status,
+            leases = leases,
+            expired = list.filter { nm.isKnownExpired(it) }.map { it.id }.toSet(),
+        )
+        // 登录流程：节点进入 Running 即完成（浏览器授权、认证密钥、管理员批准都走到这里）。
+        val flows = _loginFlows.value
+        val done = flows.keys.filter { id -> status[id]?.state == "Running" }
+        if (done.isNotEmpty()) {
+            done.forEach { id -> list.firstOrNull { it.id == id }?.let { nm.endLogin(it) } }
+            if (done.any { flows[it]?.url?.isNotEmpty() == true }) _loginCompleted.value = done.first()
+            _loginFlows.update { it - done.toSet() }
+        }
+    }
+
+    /**
+     * 保存网络。代理的连接参数变了就升版本：之后的新连接用新实例，已连着的留在旧实例上直到结束。
+     * @return 保存后的条目（版本可能已加一）。
+     */
+    fun saveNetwork(entry: NetworkEntry): NetworkEntry {
+        val old = networks.value.firstOrNull { it.id == entry.id }
+        val bumped = if (old != null && entry.kind == NetworkKind.PROXY && proxyChanged(old, entry)) {
+            entry.copy(revision = old.revision + 1)
+        } else {
+            entry.copy(revision = old?.revision ?: entry.revision)
+        }
+        viewModelScope.launch {
+            networkStore.update { list ->
+                if (list.any { it.id == bumped.id }) list.map { if (it.id == bumped.id) bumped else it } else list + bumped
+            }
+            refreshNetworkLive()
+        }
+        if (old != null && bumped.revision != old.revision && networkManager.leases(old) > 0) {
+            _networkNotice.value = str(R.string.network_saved_sessions_unaffected)
+        }
+        return bumped
+    }
+
+    private fun proxyChanged(a: NetworkEntry, b: NetworkEntry) =
+        a.proxyType != b.proxyType || a.proxyHost != b.proxyHost || a.proxyPort != b.proxyPort ||
+            a.username != b.username || a.password != b.password || a.extraCaPem != b.extraCaPem
+
+    /** 开始 tailnet 登录（先保存条目）。[authKey] 为空 = 浏览器登录。 */
+    fun loginTailnet(entry: NetworkEntry, authKey: String = "") {
+        val saved = saveNetwork(entry)
+        _loginFlows.update { it + (saved.id to LoginFlow()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = networkManager.beginLogin(saved, authKey.trim())
+                _loginFlows.update { it + (saved.id to LoginFlow(url = url, busy = url.isEmpty())) }
+                if (url.isNotEmpty()) _loginUrl.value = url
+            } catch (t: Throwable) {
+                networkManager.endLogin(saved)
+                val text = (t as? NetworkException)?.describe(getApplication()) ?: t.message ?: t.javaClass.simpleName
+                _loginFlows.update { it + (saved.id to LoginFlow(error = text, busy = false)) }
+            }
+            refreshNetworkLive()
+        }
+    }
+
+    /** 重新打开授权页（用户把浏览器关了还没授权）。 */
+    fun reopenLoginUrl(id: String) {
+        _loginFlows.value[id]?.url?.takeIf { it.isNotEmpty() }?.let { _loginUrl.value = it }
+    }
+
+    /** 放弃这次登录：不再保持节点运行（空闲后自动停止）。 */
+    fun cancelLogin(entry: NetworkEntry) {
+        networkManager.endLogin(entry)
+        _loginFlows.update { it - entry.id }
+    }
+
+    /** 退出登录：尽力通知控制服务器，必定清除本机的节点状态；条目保留为「未登录」。 */
+    fun logoutTailnet(entry: NetworkEntry) {
+        closeSessionsUsing(entry.id)
+        _loginFlows.update { it - entry.id }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = networkManager.forget(entry)
+            if (!ok) _networkNotice.value = str(R.string.network_logout_offline, entry.name)
+            refreshNetworkLive()
+        }
+    }
+
+    /** 删除网络：断开在用它的会话、清掉节点状态（tailnet 尽力退出登录），条目移除。 */
+    fun deleteNetwork(entry: NetworkEntry) {
+        closeSessionsUsing(entry.id)
+        _loginFlows.update { it - entry.id }
+        viewModelScope.launch {
+            networkStore.update { list -> list.filterNot { it.id == entry.id } }
+            val ok = kotlinx.coroutines.withContext(Dispatchers.IO) { networkManager.forget(entry) }
+            if (!ok) _networkNotice.value = str(R.string.network_logout_offline, entry.name)
+            refreshNetworkLive()
+        }
+    }
+
+    private fun closeSessionsUsing(networkId: String) {
+        sessions.sessions.value.filter { it.network?.id == networkId }.forEach { sessions.close(it.id) }
+    }
+
+    /** 直接选用这个网络的主机数（经跳板机时目标的网络不生效，但引用仍在，删除后同样失效）。 */
+    fun hostsUsing(networkId: String): Int = hosts.value.count { it.networkId == networkId }
+
+    /** 选用它、且确实会经它跑 mosh 的主机数（不经跳板机）。 */
+    fun moshHostsUsing(networkId: String): Int =
+        hosts.value.count { it.networkId == networkId && it.useMosh && it.jumpHostId.isBlank() }
+
+    /** 正在经它连接的会话数（删除时会断开）。 */
+    fun liveSessionsUsing(networkId: String): Int =
+        sessions.sessions.value.count { it.network?.id == networkId && it.alive.value }
+
+    /** 点主机连接之前、本地就能知道的问题（不必开一个注定失败的会话）。 */
+    sealed interface Preflight {
+        data object Ok : Preflight
+        data class NeedsLogin(val network: NetworkEntry, val expired: Boolean) : Preflight
+        data class Refused(val reason: String) : Preflight
+    }
+
+    fun preflight(host: Host): Preflight {
+        val route = routeOf(host.id)
+        if (route is Route.Missing && route.what != MissingKind.HOST) {
+            return Preflight.Refused(route.refusalText(getApplication()).orEmpty())
+        }
+        val net = (route as? Route.Ok)?.network ?: return Preflight.Ok
+        // 已知失效的登录（本次运行中连接时得知）不论节点还在不在跑都先去登录；从没登录过的只在没跑时判断
+        // （正在登录中的节点会在跑）。
+        if (net.kind == NetworkKind.TAILSCALE &&
+            (networkManager.isKnownExpired(net) || (!networkManager.isRunning(net) && !networkManager.hasLoggedIn(net)))
+        ) {
+            return Preflight.NeedsLogin(net, expired = networkManager.isKnownExpired(net))
+        }
+        return Preflight.Ok
+    }
 
     /** 该主机已记录的指纹（null=还没记录）。 */
     fun savedFingerprint(host: Host): String? =

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -91,6 +93,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -100,6 +103,8 @@ import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.SortBy
@@ -153,7 +158,20 @@ fun HomeScreen(
     onOpenAppearance: () -> Unit,
     onOpenTerminalSettings: () -> Unit,
     onOpenAbout: () -> Unit,
+    networks: List<NetworkEntry> = emptyList(),
+    networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
+    onOpenNetworks: () -> Unit = {},
+    /** 点主机连接前的本地检查（已删除的网络/跳板机、从没登录的 tailnet），见 [MokeViewModel.preflight]。 */
+    preflight: (Host) -> MokeViewModel.Preflight = { MokeViewModel.Preflight.Ok },
+    onLoginNetwork: (NetworkEntry) -> Unit = {},
 ) {
+    var pendingPreflight by remember { mutableStateOf<Pair<Host, MokeViewModel.Preflight>?>(null) }
+    val connect: (Host) -> Unit = { host ->
+        when (val p = preflight(host)) {
+            MokeViewModel.Preflight.Ok -> onConnectHost(host)
+            else -> pendingPreflight = host to p
+        }
+    }
     // 会话列表里点「关闭」也走二次确认（与终端页 ⋮ 一致），避免误触断掉正在跑的活。
     var pendingClose by remember { mutableStateOf<String?>(null) }
     val closeRequest: (String) -> Unit = { id -> if (confirmClose) pendingClose = id else onCloseSession(id) }
@@ -240,24 +258,47 @@ fun HomeScreen(
         // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             when (tabs[page]) {
-                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, onConnectHost)
+                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive)
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
+                    networks, networkLive, onOpenNetworks,
                 )
             }
         }
     }
 
     pendingDeleteHost?.let { host ->
+        val jumpUsers = hosts.count { it.id != host.id && it.jumpHostId == host.id }
         ConfirmDialog(
             title = stringResource(R.string.host_delete_title),
-            message = stringResource(R.string.host_delete_confirm, host.displayName),
+            message = stringResource(R.string.host_delete_confirm, host.displayName) +
+                (if (jumpUsers > 0) "\n" + pluralStringResource(R.plurals.host_delete_jump_users, jumpUsers, jumpUsers) else ""),
             confirmLabel = stringResource(R.string.action_delete),
             destructive = true,
             onConfirm = { pendingDeleteHost = null; onDeleteHost(host) },
             onDismiss = { pendingDeleteHost = null },
         )
+    }
+
+    pendingPreflight?.let { (host, p) ->
+        when (p) {
+            is MokeViewModel.Preflight.NeedsLogin -> ConfirmDialog(
+                title = stringResource(if (p.expired) R.string.preflight_expired_title else R.string.preflight_login_title, p.network.name),
+                message = stringResource(if (p.expired) R.string.preflight_expired_message else R.string.preflight_login_message, p.network.name),
+                confirmLabel = stringResource(R.string.action_login),
+                onConfirm = { pendingPreflight = null; onLoginNetwork(p.network) },
+                onDismiss = { pendingPreflight = null },
+            )
+            is MokeViewModel.Preflight.Refused -> ConfirmDialog(
+                title = stringResource(R.string.preflight_refused_title),
+                message = p.reason,
+                confirmLabel = stringResource(R.string.host_edit),
+                onConfirm = { pendingPreflight = null; onEditHost(host) },
+                onDismiss = { pendingPreflight = null },
+            )
+            MokeViewModel.Preflight.Ok -> pendingPreflight = null
+        }
     }
 
     pendingClose?.let { id ->
@@ -330,7 +371,29 @@ private fun ConnectionsContent(
     onDuplicate: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     onConnect: (Host) -> Unit,
+    networks: List<NetworkEntry>,
+    networkLive: MokeViewModel.NetworkLive,
 ) {
+    // 主机卡片上的路由徽标：选了网络显示网络名；本地就能知道的问题（引用已删除、tailnet 从没登录）用错误色。
+    val hostIds = hosts.map { it.id }.toSet()
+    val deletedNetwork = stringResource(R.string.badge_network_deleted)
+    val deletedJump = stringResource(R.string.badge_jump_deleted)
+    val notLoggedIn = stringResource(R.string.net_state_not_logged_in)
+    val expiredLabel = stringResource(R.string.net_state_expired)
+    val errorColor = MaterialTheme.colorScheme.error
+    val neutral = MaterialTheme.colorScheme.onSurfaceVariant
+    val routeBadge: (Host) -> BadgeSpec? = { h ->
+        val net = networks.firstOrNull { it.id == h.networkId }
+        when {
+            h.jumpHostId.isNotBlank() && h.jumpHostId !in hostIds -> BadgeSpec(deletedJump, errorColor)
+            h.jumpHostId.isNotBlank() -> null
+            h.networkId.isBlank() -> null
+            net == null -> BadgeSpec(deletedNetwork, errorColor)
+            net.kind == NetworkKind.TAILSCALE && networkLive.loggedIn[net.id] == false -> BadgeSpec("${net.name} · $notLoggedIn", errorColor)
+            net.kind == NetworkKind.TAILSCALE && net.id in networkLive.expired -> BadgeSpec("${net.name} · $expiredLabel", errorColor)
+            else -> BadgeSpec(net.name, neutral)
+        }
+    }
     // 「读不出来」不能伪装成「一台都没有」——那会让用户以为数据没了，
     // 转头新建一条连接就把还在磁盘上的密文覆盖掉（写入已在 HostStore 侧挡住，这里负责说清楚）。
     if (credentialsUnreadable) {
@@ -367,7 +430,7 @@ private fun ConnectionsContent(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) { host, dragging, handle ->
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging)
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
             }
         } else {
             val groups = orderedKeys.map { k -> ReorderGroup(k, hosts.filter { keyOf(it) == k }) }
@@ -395,7 +458,7 @@ private fun ConnectionsContent(
                 },
             ) { host, dragging, handle ->
                 // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging)
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
             }
         }
     }
@@ -561,6 +624,8 @@ private fun HostCard(
     showGroup: Boolean = true,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
+    /** 经网络时的网络名，或本地可知的路由问题（错误色）。 */
+    routeBadge: BadgeSpec? = null,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -594,6 +659,7 @@ private fun HostCard(
                         maxLines = 1,
                     )
                     ProtocolBadge(host.useMosh)
+                    routeBadge?.let { RouteBadge(it) }
                 }
                 Text(
                     "${host.username}@${host.host}:${host.port}" +
@@ -643,6 +709,30 @@ private fun HostCard(
                 }
             }
         }
+    }
+}
+
+/** 路由徽标：与协议徽标同一尺寸，比能力标签更紧凑；过长的网络名省略。 */
+@Composable
+private fun RouteBadge(spec: BadgeSpec) {
+    Surface(color = spec.color.copy(alpha = MokeDimens.badgeAlpha), shape = MokeShapes.pill) {
+        Text(
+            spec.text,
+            color = spec.color,
+            fontSize = 10.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            style = LocalTextStyle.current.copy(
+                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                ),
+            ),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp).widthIn(max = 140.dp),
+        )
     }
 }
 
@@ -911,9 +1001,20 @@ private fun SettingsMenuContent(
     onOpenAppearance: () -> Unit,
     onOpenTerminalSettings: () -> Unit,
     onOpenAbout: () -> Unit,
+    networks: List<NetworkEntry>,
+    networkLive: MokeViewModel.NetworkLive,
+    onOpenNetworks: () -> Unit,
 ) {
     val context = LocalContext.current
     var langDialog by remember { mutableStateOf(false) }
+    // 设置行副标题：没有网络时说用途；有需要登录的 tailnet 时点名并带小圆点；否则给数量。
+    val tailnets = networks.filter { it.kind == NetworkKind.TAILSCALE }
+    val needsLogin = tailnets.firstOrNull { networkLive.loggedIn[it.id] == false || it.id in networkLive.expired }
+    val networkSubtitle = when {
+        networks.isEmpty() -> stringResource(R.string.menu_network_empty)
+        needsLogin != null -> stringResource(R.string.menu_network_needs_login, needsLogin.name)
+        else -> stringResource(R.string.menu_network_summary, tailnets.size, networks.size - tailnets.size)
+    }
     val langTag = LocaleManager.currentTag(context)
     val langLabel = when (langTag) {
         LocaleManager.ZH -> stringResource(R.string.lang_zh)
@@ -928,6 +1029,7 @@ private fun SettingsMenuContent(
         // 而不是继续往这一屏平铺（那样很快就乱）。
         NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
         NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
+        NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
         NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
         // 有新版时在「关于」上点一个主题色小圆点（静默检查的唯一提示）。
         NavRow(

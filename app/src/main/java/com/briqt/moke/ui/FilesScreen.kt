@@ -103,6 +103,7 @@ fun FilesScreen(
     onPickDownloadDir: () -> Unit,
     onSendToTerminal: ((String) -> Unit)?,
     onClearError: () -> Unit,
+    onLoginNetwork: (com.briqt.moke.data.NetworkEntry) -> Unit = {},
     onTaskResume: (String) -> Unit,
     onTaskCancel: (String) -> Unit,
     onTaskRemove: (String) -> Unit,
@@ -235,7 +236,7 @@ fun FilesScreen(
             HorizontalDivider()
 
             if (state.error.isNotBlank()) {
-                ErrorBanner(state.error, onClearError)
+                ErrorBanner(state.error, onClearError, state.loginNetwork?.let { n -> { onLoginNetwork(n) } })
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -399,7 +400,7 @@ private fun Crumbs(path: String, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+private fun ErrorBanner(message: String, onDismiss: () -> Unit, onLogin: (() -> Unit)? = null) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
@@ -411,6 +412,11 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f),
             )
+            if (onLogin != null) {
+                TextButton(onClick = onLogin) {
+                    Text(stringResource(R.string.action_login), color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
             IconButton(onClick = onDismiss) {
                 Icon(
                     Icons.Filled.Close,

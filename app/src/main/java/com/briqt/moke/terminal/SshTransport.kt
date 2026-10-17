@@ -5,6 +5,7 @@ import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.connectFailureText
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -26,6 +27,8 @@ class SshTransport(
     private val jumpHost: Host? = null,
     /** 第一跳的网络（见 `resolveRoute`）；null = 直连。 */
     private val network: NetworkEntry? = null,
+    /** 经网络连不上时报给会话（需要登录时失败条给出「登录」）。 */
+    private val onNetworkError: (NetworkException) -> Unit = {},
     /** 实时延迟回调（ms，null=测不到）。用于终端状态条显示 RTT。 */
     private val onLatency: (Int?) -> Unit = {},
     /**
@@ -161,6 +164,7 @@ class SshTransport(
             } catch (e: Exception) {
                 if (!established) {
                     // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
+                    (e as? NetworkException)?.let(onNetworkError)
                     session.onTransportConnectFailed(e.connectFailureText(appContext))
                 } else {
                     // 连上之后才断的：是"中断"，不是"连接失败"。

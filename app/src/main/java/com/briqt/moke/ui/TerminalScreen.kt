@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -126,6 +127,8 @@ fun TerminalScreen(
     onReconnect: () -> Unit,
     onClose: () -> Unit,
     onEditHost: () -> Unit,
+    /** 连接因网络需要登录而失败时去登录（登录完回到这里，由用户点重连）。 */
+    onLoginNetwork: (com.briqt.moke.data.NetworkEntry) -> Unit = {},
     onFontSize: (Float) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
@@ -145,6 +148,7 @@ fun TerminalScreen(
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val connectFailed by ts.connectFailed.collectAsState()
+    val loginNetwork by ts.loginNetwork.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val remoteTmuxName by ts.remoteTmuxName.collectAsState()
@@ -461,8 +465,14 @@ fun TerminalScreen(
                             modifier = Modifier.weight(1f),
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // 连不上多半是地址 / 凭据填错：直接给出改配置的入口。
-                            if (connectFailed) {
+                            // 连不上多半是地址 / 凭据填错：直接给出改配置的入口；网络需要登录时主机配置没问题，给「登录」。
+                            val login = loginNetwork
+                            if (connectFailed && login != null) {
+                                TextButton(onClick = { onLoginNetwork(login) }) {
+                                    Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                                    Text("  " + stringResource(R.string.action_login))
+                                }
+                            } else if (connectFailed) {
                                 TextButton(onClick = onEditHost) {
                                     Icon(Icons.Filled.Edit, contentDescription = null)
                                     Text("  " + stringResource(R.string.host_edit))

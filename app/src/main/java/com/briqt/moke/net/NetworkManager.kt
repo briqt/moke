@@ -60,6 +60,18 @@ class NetworkManager(context: Context) {
 
     /** 已启动的实例 → 最近一次仍有租约（或刚被使用）的时刻。 */
     private val running = HashMap<String, Long>()
+
+    /**
+     * 登录进行中的 tailnet → 保持运行的截止时刻。用户在浏览器里授权、或等管理员批准都可能远超
+     * 空闲回收的 1 分钟；登录期间节点没有连接租约，没有这个保持就会被回收、登录作废。
+     */
+    private val loginHolds = HashMap<String, Long>()
+
+    /**
+     * 本次运行中得知「登录已失效」的 tailnet（连接时拿到 LOGIN_EXPIRED）。节点随后会因空闲停掉，
+     * 本地状态文件却还在；记住它，界面才不会把已失效的登录显示成「已登录」。下次 Running 时清除。
+     */
+    private val knownExpired = HashSet<String>()
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "moke-net-idle").apply { isDaemon = true } }
     private val ifaceThread = Executors.newSingleThreadExecutor { r -> Thread(r, "moke-net-ifaces").apply { isDaemon = true } }
 
@@ -121,14 +133,22 @@ class NetworkManager(context: Context) {
         while (true) {
             val st = status(e)
             when (st?.state) {
-                "Running" -> if (!st.expired) return else throw NetworkException("LOGIN_EXPIRED", e, "node key expired")
-                "NeedsLogin" -> throw NetworkException(if (st.everLoggedIn) "LOGIN_EXPIRED" else "NEEDS_LOGIN", e, "node needs login")
+                "Running" -> if (!st.expired) return else expired(e)
+                "NeedsLogin" -> if (st.everLoggedIn) expired(e) else throw NetworkException("NEEDS_LOGIN", e, "node needs login")
                 "NeedsMachineAuth" -> throw NetworkException("NEEDS_MACHINE_AUTH", e, "awaiting approval")
             }
             if (SystemClock.elapsedRealtime() > deadline) throw NetworkException("NOT_READY", e, "node is ${st?.state}")
             Thread.sleep(200)
         }
     }
+
+    private fun expired(e: NetworkEntry): Nothing {
+        synchronized(lock) { knownExpired.add(e.id) }
+        throw NetworkException("LOGIN_EXPIRED", e, "node key expired")
+    }
+
+    /** 本次运行中已得知它的登录失效（且之后没有重新登录成功）。 */
+    fun isKnownExpired(e: NetworkEntry): Boolean = synchronized(lock) { e.id in knownExpired }
 
     /** 为一次 TCP 连接取一次性凭据（启动网络、租约开始）。 */
     fun openDial(e: NetworkEntry): DialTicket {
@@ -208,6 +228,7 @@ class NetworkManager(context: Context) {
         if (e.kind != NetworkKind.TAILSCALE || !isRunning(e)) return null
         val o = runCatching { JSONObject(Netbridge.nodeStatus(instanceId(e))) }.getOrNull() ?: return null
         val ips = o.optJSONArray("ips")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        if (o.optString("state") == "Running" && !o.optBoolean("expired")) synchronized(lock) { knownExpired.remove(e.id) }
         return NodeStatus(
             state = o.optString("state"), ips = ips, tailnet = o.optString("tailnet"), loginName = o.optString("loginName"),
             expired = o.optBoolean("expired"), everLoggedIn = o.optBoolean("haveNodeKey"),
@@ -216,6 +237,23 @@ class NetworkManager(context: Context) {
     }
 
     fun isRunning(e: NetworkEntry): Boolean = synchronized(lock) { instanceId(e) in running }
+
+    /**
+     * 本地可知的登录状态：有节点状态 = 登录过且没退出（是否已过期要运行起来才知道）。
+     * 不加载 Go、不启动网络，可在界面上随时调用。
+     */
+    fun hasLoggedIn(e: NetworkEntry): Boolean =
+        e.kind == NetworkKind.TAILSCALE && runCatching { stateStore.files.hasAny(e.id) }.getOrDefault(false)
+
+    /** 登录流程结束（成功、取消或离开页面）：不再额外保持节点，回到按租约回收。 */
+    fun endLogin(e: NetworkEntry) {
+        synchronized(lock) {
+            val id = instanceId(e)
+            loginHolds.remove(id)
+            // 空闲计时从登录结束算起：刚登录完往往马上就要连接，不该立刻停掉再重启。
+            if (id in running) running[id] = SystemClock.elapsedRealtime()
+        }
+    }
 
     /** 运行中实例的租约数（会话、待用凭据、中继）。 */
     fun leases(e: NetworkEntry): Int = if (isRunning(e)) Netbridge.leases(instanceId(e)).toInt() else 0
@@ -239,6 +277,7 @@ class NetworkManager(context: Context) {
                 }
             }
             running[id] = SystemClock.elapsedRealtime()
+            loginHolds[id] = SystemClock.elapsedRealtime() + LOGIN_HOLD_MS
         }
         return try {
             Netbridge.loginURL(instanceId(e))
@@ -250,6 +289,15 @@ class NetworkManager(context: Context) {
     /** 删除网络：尽力退出登录，必定清掉本地节点状态。@return 退出登录是否成功（失败时提示到控制台移除）。 */
     fun forget(e: NetworkEntry): Boolean {
         var loggedOut = true
+        // 从没运行过的代理、从没登录过的 tailnet：没有要停的、也没有要退出的，不为此加载 Go。
+        val idle = synchronized(lock) { running.keys.none { it == e.id || it.startsWith("${e.id}.r") } && e.id !in loginHolds }
+        if (idle && (e.kind == NetworkKind.PROXY || !hasLoggedIn(e))) {
+            if (e.kind == NetworkKind.TAILSCALE) {
+                stateStore.files.deleteNetwork(e.id)
+                File(app.noBackupFilesDir, "tailnet/${e.id}").deleteRecursively()
+            }
+            return true
+        }
         ensureGo()
         synchronized(lock) {
             val ids = running.keys.filter { it == e.id || it.startsWith("${e.id}.r") }
@@ -260,9 +308,11 @@ class NetworkManager(context: Context) {
                 }
                 loggedOut = runCatching { Netbridge.logout(e.id) }.isSuccess
             }
+            loginHolds.remove(e.id)
+            knownExpired.remove(e.id)
             for (id in ids + listOf(e.id)) {
-                runCatching { Netbridge.stop(id) }
-                running.remove(id)
+                // 仍有连接（BUSY）时 Go 不停：留在表里，等连接结束后由空闲回收停掉。
+                if (runCatching { Netbridge.stop(id) }.isSuccess) running.remove(id)
             }
         }
         if (e.kind == NetworkKind.TAILSCALE) {
@@ -277,6 +327,8 @@ class NetworkManager(context: Context) {
         val now = SystemClock.elapsedRealtime()
         val candidates = synchronized(lock) { running.toMap() }
         for ((id, lastBusy) in candidates) {
+            val held = synchronized(lock) { (loginHolds[id] ?: 0L) > now }
+            if (held) continue
             val leases = runCatching { Netbridge.leases(id) }.getOrDefault(0L)
             if (leases > 0) {
                 synchronized(lock) { if (id in running) running[id] = now }
@@ -318,6 +370,7 @@ class NetworkManager(context: Context) {
         private const val IDLE_CHECK_S = 15L
         private const val IDLE_STOP_MS = 60_000L
         private const val READY_TIMEOUT_MS = 20_000L
+        private const val LOGIN_HOLD_MS = 10 * 60_000L
 
         /** 默认本设备名：`moke-<机型>`，只留控制面接受的字符。 */
         fun defaultDeviceName(): String =

@@ -4,6 +4,8 @@ import android.content.Context
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.NetworkException
+import com.briqt.moke.net.needsLogin
 import com.briqt.moke.localized
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -89,6 +91,9 @@ class TermSession(
      * 结束条据此说「连接失败」并给出「编辑主机」——两种结束给同一句「会话已结束」，用户分不清该干什么。
      */
     val connectFailed = MutableStateFlow(false)
+
+    /** 因网络需要登录（未登录、过期、等待批准）而连不上时是哪个网络；失败条据此给出「登录」。 */
+    val loginNetwork = MutableStateFlow<NetworkEntry?>(null)
 
     /** 本会话上的本地端口转发（SSH 借会话连接，mosh 借控制连接）。 */
     val forwards: PortForwards? = (transport as? ForwardCapable)?.let { PortForwards(it) }
@@ -178,14 +183,18 @@ class SessionManager(context: Context) {
         )
         // 传输选择：偏好 mosh 的主机走 MoshTransport（SSH 引导 + native mosh-client 子进程 PTY），
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
+        // 传输在 TerminalSession 第一次量好尺寸时才启动，那时 ts 已建好。
+        var created: TermSession? = null
+        val onNetworkError: (NetworkException) -> Unit = { ex -> if (ex.needsLogin) created?.loginNetwork?.value = ex.network }
         val transport = when {
             refusal != null -> RefusedTransport(refusal)
-            host.useMosh -> MoshTransport(host, appContext, jumpHost, startupCommand, network)
+            host.useMosh -> MoshTransport(host, appContext, jumpHost, startupCommand, network, onNetworkError)
             else -> SshTransport(
                 host = host,
                 context = appContext,
                 jumpHost = jumpHost,
                 network = network,
+                onNetworkError = onNetworkError,
                 onLatency = { latency.value = it },
                 startupCommand = startupCommand,
             )
@@ -211,6 +220,7 @@ class SessionManager(context: Context) {
             remoteTmuxName = MutableStateFlow(remoteTmuxName),
             startedAt = System.currentTimeMillis(),
         )
+        created = ts
         // 结束文案按本会话的真实处境说：确认附加在 tmux 上、又是正常退出（detach 就是 code 0），
         // 屏幕上写「会话结束」会和界面上「已离开 tmux，远端会话仍在运行」自相矛盾。
         session.sessionStatusText = object : TerminalSession.StatusText {

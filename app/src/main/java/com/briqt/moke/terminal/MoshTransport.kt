@@ -8,6 +8,7 @@ import com.briqt.moke.data.Host
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
+import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.UdpRelay
 import com.briqt.moke.net.connectFailureText
 import com.termux.terminal.JNI
@@ -48,6 +49,8 @@ class MoshTransport(
     private val startupCommand: String? = null,
     /** 第一跳的网络（见 `resolveRoute`）；null = 直连。 */
     private val network: NetworkEntry? = null,
+    /** 经网络连不上时报给会话（需要登录时失败条给出「登录」）。 */
+    private val onNetworkError: (NetworkException) -> Unit = {},
 ) : TerminalTransport, ForwardCapable {
 
     /** 本次交给 `mosh-server … -- …` 的程序；null=远端默认 shell。 */
@@ -220,6 +223,7 @@ class MoshTransport(
                 serverPid?.let { killOrphanServer(it) }
                 if (!closed) {
                     // mosh-client 还没起来（引导 SSH 连不上 / mosh-server 回应无法解析）：属于"连接失败"。
+                    (e as? NetworkException)?.let(onNetworkError)
                     failConnect(session, e.connectFailureText(appContext))
                 } else {
                     finish(session, 1)

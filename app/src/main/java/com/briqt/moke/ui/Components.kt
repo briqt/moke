@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextButton
@@ -296,6 +299,24 @@ fun SwitchRow(
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
+    }
+}
+
+/**
+ * 表单里的说明行：小图标 + 一段 bodySmall 文字。中性说明用 info 图标；[error] 时换错误色与警告图标，
+ * 用于「必须先改正才能保存」的原因（如 mosh 选了不能转 UDP 的代理）。
+ */
+@Composable
+fun InfoNote(text: String, modifier: Modifier = Modifier, error: Boolean = false) {
+    val color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+        Icon(
+            if (error) Icons.Outlined.ErrorOutline else Icons.Outlined.Info,
+            contentDescription = null,
+            modifier = Modifier.padding(top = 1.dp).size(16.dp),
+            tint = color,
+        )
+        Text(text, style = MaterialTheme.typography.bodySmall, color = color)
     }
 }
 

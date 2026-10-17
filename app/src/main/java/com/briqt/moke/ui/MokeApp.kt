@@ -27,6 +27,7 @@ import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.terminal.Tmux
@@ -46,6 +47,12 @@ sealed interface Screen {
     data object TerminalSettings : Screen
     data object Fonts : Screen
     data object About : Screen
+
+    /** 设置 → 网络（tailnet 与代理）。 */
+    data object Networks : Screen
+
+    /** 网络表单；[networkId] 为空 = 新建。[back] 是关闭后回到的页面（网络页、终端、文件页、连接列表）。 */
+    data class NetworkEdit(val kind: NetworkKind, val networkId: String?, val back: Screen) : Screen
 
     /**
      * 远端文件页。[sessionId] 非空表示从终端 ⋮ 进来的——只有那种情况才拿得到"终端当前目录"，
@@ -101,6 +108,61 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val includePrerelease by vm.includePrerelease.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
     val openSessionsRequest by vm.openSessionsRequest.collectAsState()
+    val networks by vm.networks.collectAsState()
+    val networkLive by vm.networkLive.collectAsState()
+    val loginFlows by vm.loginFlows.collectAsState()
+    val loginUrl by vm.loginUrl.collectAsState()
+    val loginCompleted by vm.loginCompleted.collectAsState()
+    val networkNotice by vm.networkNotice.collectAsState()
+    val context = LocalContext.current
+
+    // tailnet 登录：授权页交给 Custom Tabs；在浏览器里授权完成后把 moke 带回前台（做不到时用户手动返回，状态照样刷新）。
+    LaunchedEffect(loginUrl) {
+        val url = loginUrl ?: return@LaunchedEffect
+        vm.consumeLoginUrl()
+        openLoginPage(context, url)
+    }
+    LaunchedEffect(loginCompleted) {
+        loginCompleted ?: return@LaunchedEffect
+        vm.consumeLoginCompleted()
+        runCatching {
+            context.startActivity(
+                android.content.Intent(context, com.briqt.moke.MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+        }
+    }
+    LaunchedEffect(networkNotice) {
+        val text = networkNotice ?: return@LaunchedEffect
+        vm.consumeNetworkNotice()
+        android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+    }
+    // 回到连接列表时刷新一次本地可知的网络状态（卡片上的「未登录」、设置行的提示）。
+    LaunchedEffect(screen is Screen.Home, networks) {
+        if (screen is Screen.Home) vm.refreshNetworksOnce()
+    }
+
+    /** 绑定好 ViewModel 的网络表单：网络页路由与主机编辑的全屏层共用。 */
+    val networkEditor: @Composable (NetworkKind, String?, (String?) -> Unit) -> Unit = { kind, id, onClose ->
+        NetworkEditScreen(
+            kind = kind,
+            initial = id?.let { nid -> networks.firstOrNull { it.id == nid } },
+            networks = networks,
+            live = networkLive,
+            loginFlows = loginFlows,
+            hostsUsing = vm::hostsUsing,
+            moshHostsUsing = vm::moshHostsUsing,
+            liveSessionsUsing = vm::liveSessionsUsing,
+            onWatch = vm::watchNetworks,
+            onSave = vm::saveNetwork,
+            onLogin = vm::loginTailnet,
+            onReopenLogin = vm::reopenLoginUrl,
+            onCancelLogin = vm::cancelLogin,
+            onLogout = vm::logoutTailnet,
+            onDelete = vm::deleteNetwork,
+            onClose = onClose,
+        )
+    }
 
     // 点后台保活通知：只有一个会话就直接进它，多个就进会话列表；停在文件页的先断开 SFTP。
     LaunchedEffect(openSessionsRequest) {
@@ -132,6 +194,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             is Screen.Appearance -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.TerminalSettings -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
+            is Screen.Networks -> { screen = Screen.Home; homeTab = HomeTab.Settings }
+            is Screen.NetworkEdit -> screen = (screen as Screen.NetworkEdit).back
             is Screen.Edit -> screen = Screen.Home
             is Screen.Terminal -> screen = Screen.Home
             // 从终端进来的回终端，从连接列表进来的回列表；离开即断开那条 SFTP 连接。
@@ -180,6 +244,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onOpenAppearance = { screen = Screen.Appearance },
             onOpenTerminalSettings = { screen = Screen.TerminalSettings },
             onOpenAbout = { screen = Screen.About },
+            networks = networks,
+            networkLive = networkLive,
+            onOpenNetworks = { screen = Screen.Networks },
+            preflight = vm::preflight,
+            onLoginNetwork = { screen = Screen.NetworkEdit(NetworkKind.TAILSCALE, it.id, Screen.Home) },
         )
 
         is Screen.Edit -> HostEditScreen(
@@ -192,7 +261,24 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onCancel = { screen = Screen.Home },
             savedFingerprint = s.host?.let { vm.savedFingerprint(it) },
             onClearFingerprint = { h, p -> vm.clearFingerprint((s.host ?: Host()).copy(host = h, port = p)) },
+            networks = networks,
+            networkLive = networkLive,
+            networkEditor = { kind, onClose -> networkEditor(kind, null, onClose) },
         )
+
+        is Screen.Networks -> NetworksScreen(
+            networks = networks,
+            live = networkLive,
+            loginFlows = loginFlows,
+            onWatch = vm::watchNetworks,
+            onAdd = { kind -> screen = Screen.NetworkEdit(kind, null, Screen.Networks) },
+            onOpen = { e -> screen = Screen.NetworkEdit(e.kind, e.id, Screen.Networks) },
+            onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+        )
+
+        is Screen.NetworkEdit -> key(s.networkId ?: s.kind.name) {
+            networkEditor(s.kind, s.networkId) { screen = s.back }
+        }
 
         is Screen.Terminal -> {
             val ts = vm.sessions.get(s.sessionId)
@@ -244,6 +330,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                             vm.closeSession(ts.id)
                             screen = Screen.Edit(latest)
                         },
+                        onLoginNetwork = { n -> screen = Screen.NetworkEdit(n.kind, n.id, Screen.Terminal(ts.id)) },
                         onFontSize = { vm.setFontSize(it) },
                         onKeyboardMode = { vm.setKeyboardMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
@@ -401,6 +488,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                     }
                 },
                 onClearError = { vm.filesClearError() },
+                onLoginNetwork = { n -> screen = Screen.NetworkEdit(n.kind, n.id, s) },
                 onTaskResume = { vm.resumeTransfer(it) },
                 onTaskCancel = { vm.cancelTransfer(it) },
                 onTaskRemove = { vm.removeTransfer(it) },

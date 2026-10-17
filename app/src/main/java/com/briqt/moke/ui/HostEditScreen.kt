@@ -16,8 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -49,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.PortForwards
@@ -64,6 +69,10 @@ fun HostEditScreen(
     /** 该 host:port 已记录的指纹（null=无记录），用于「清除已保存的主机指纹」。 */
     savedFingerprint: String? = null,
     onClearFingerprint: (String, Int) -> Unit = { _, _ -> },
+    networks: List<NetworkEntry> = emptyList(),
+    networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
+    /** 「新建…」打开的网络表单（全屏层，主机表单留在下面不丢草稿）；回调参数是保存了的网络 id。 */
+    networkEditor: @Composable (kind: NetworkKind, onClose: (String?) -> Unit) -> Unit = { _, _ -> },
 ) {
     val base = initial ?: Host()
     var label by remember { mutableStateOf(base.label) }
@@ -80,6 +89,8 @@ fun HostEditScreen(
     var showPrivateKey by remember { mutableStateOf(base.privateKeyPem.isBlank()) }
     var useMosh by remember { mutableStateOf(base.useMosh) }
     var jumpHostId by remember { mutableStateOf(base.jumpHostId) }
+    var networkId by remember { mutableStateOf(base.networkId) }
+    var creatingNetwork by remember { mutableStateOf<NetworkKind?>(null) }
     var startupCommand by remember { mutableStateOf(base.startupCommand) }
     var loginCommand by remember { mutableStateOf(base.loginCommand) }
     var forwardPorts by remember { mutableStateOf(base.forwardPorts) }
@@ -95,6 +106,30 @@ fun HostEditScreen(
         allHosts.filter { it.id != base.id }.map { h ->
             DropdownOption(id = h.id, title = h.displayName, subtitle = "${h.username}@${h.host}:${h.port}")
         }
+    val jumpHost = allHosts.firstOrNull { it.id == jumpHostId && it.id != base.id }
+    // 失效引用（被引用的跳板机 / 网络已删除）：下拉显示为错误项，改选前不能保存（不悄悄直连）。
+    val jumpMissing = jumpHostId.isNotBlank() && jumpHost == null
+    val selectedNetwork = networks.firstOrNull { it.id == networkId }
+    val networkMissing = networkId.isNotBlank() && selectedNetwork == null && jumpHostId.isBlank()
+    // mosh 的 UDP 必须走选定的网络：只能转 TCP 的代理下 mosh 必然不可用，禁止保存并说明原因。
+    val moshNoUdp = useMosh && jumpHostId.isBlank() && selectedNetwork?.kind == NetworkKind.PROXY &&
+        !selectedNetwork.proxyType.carriesUdp
+    val notLoggedIn = stringResource(R.string.net_state_not_logged_in)
+    val errorColor = MaterialTheme.colorScheme.error
+    val networkOptions = listOf(
+        DropdownOption(id = "", title = stringResource(R.string.network_direct), subtitle = stringResource(R.string.network_direct_desc)),
+    ) + networks.sortedBy { it.kind }.map { e ->
+        DropdownOption(
+            id = e.id,
+            title = e.name,
+            subtitle = networkSubtitle(e),
+            tags = if (e.kind == NetworkKind.TAILSCALE && networkLive.loggedIn[e.id] == false) {
+                listOf(BadgeSpec(notLoggedIn, errorColor))
+            } else {
+                emptyList()
+            },
+        )
+    }
     // 已有分组（动态枚举：来自各主机的 group 字段，无独立管理；无主机使用的分组自然不出现）。
     val existingGroups = allHosts.mapNotNull { it.group.trim().ifBlank { null } }.distinct().sorted()
 
@@ -235,34 +270,50 @@ fun HostEditScreen(
                 }
             }
 
-            // 跳板机（可选）：仅在已有其它主机时展示。
-            if (jumpOptions.size > 1) {
+            // 跳板机（可选）：仅在已有其它主机、或引用已失效时展示。
+            if (jumpOptions.size > 1 || jumpMissing) {
                 RichDropdown(
                     label = stringResource(R.string.field_jump_host),
                     options = jumpOptions,
                     selectedId = jumpHostId,
                     onSelect = { jumpHostId = it },
+                    isError = jumpMissing,
+                    missingTitle = stringResource(R.string.badge_jump_deleted),
+                    supportingText = if (jumpMissing) stringResource(R.string.route_missing_jump) else null,
                 )
                 // mosh + 跳板机：跳板机只接引导那段 SSH，数据面(UDP)仍需目标从本机直达。
-                // 友好说明（info 图标 + 中性色），不硬禁、不吞——那个"UDP 直达、仅 SSH 受限"的窄场景仍成立。
-                if (useMosh && jumpHostId.isNotBlank()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Icon(
-                            Icons.Outlined.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            stringResource(R.string.mosh_jump_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                // 友好说明，不硬禁——那个"UDP 直达、仅 SSH 受限"的窄场景仍成立。
+                if (useMosh && jumpHostId.isNotBlank()) InfoNote(stringResource(R.string.mosh_jump_hint))
+            }
+
+            // 网络：只决定「怎么直接到达这台主机」。有跳板机时第一跳归跳板机自己的网络，这里置灰并说明实际路径。
+            RichDropdown(
+                label = stringResource(R.string.field_network),
+                options = networkOptions,
+                selectedId = networkId,
+                onSelect = { networkId = it },
+                enabled = jumpHostId.isBlank(),
+                isError = networkMissing || moshNoUdp,
+                missingTitle = stringResource(R.string.network_missing_option),
+                supportingText = when {
+                    networkMissing -> stringResource(R.string.network_missing_error)
+                    moshNoUdp -> stringResource(R.string.mosh_needs_udp_network, selectedNetwork.name)
+                    else -> null
+                },
+                footer = { dismiss ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.network_new_tailnet_item), color = MaterialTheme.colorScheme.primary) },
+                        onClick = { dismiss(); creatingNetwork = NetworkKind.TAILSCALE },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.network_new_proxy_item), color = MaterialTheme.colorScheme.primary) },
+                        onClick = { dismiss(); creatingNetwork = NetworkKind.PROXY },
+                    )
+                },
+            )
+            if (jumpHost != null) {
+                val via = networks.firstOrNull { it.id == jumpHost.networkId }?.name ?: stringResource(R.string.network_direct)
+                InfoNote(stringResource(R.string.network_via_jump, jumpHost.displayName, via))
             }
 
             // 会话持久化：选 tmux 后，连接这台主机即进入 tmux 会话（记住过会话名就直接进）。
@@ -385,6 +436,7 @@ fun HostEditScreen(
                                 passphrase = passphrase,
                                 useMosh = useMosh,
                                 jumpHostId = jumpHostId,
+                                networkId = networkId,
                                 startupCommand = startupCommand.trim(),
                                 loginCommand = loginCommand.trim(),
                                 forwardPorts = PortForwards.parsePorts(forwardPorts).ports.joinToString(", "),
@@ -399,11 +451,31 @@ fun HostEditScreen(
                             )
                         )
                     },
-                    enabled = host.isNotBlank() && username.isNotBlank() && forwardInvalid.isEmpty(),
+                    enabled = host.isNotBlank() && username.isNotBlank() && forwardInvalid.isEmpty() &&
+                        !jumpMissing && !networkMissing && !moshNoUdp,
                     modifier = Modifier.weight(1f),
                 ) { Text(stringResource(R.string.action_save)) }
             }
         }
+        }
+    }
+
+    creatingNetwork?.let { kind ->
+        NetworkEditorOverlay(kind, networkEditor) { savedId ->
+            creatingNetwork = null
+            if (savedId != null) networkId = savedId
+        }
+    }
+}
+
+@Composable
+private fun NetworkEditorOverlay(kind: NetworkKind, editor: @Composable (NetworkKind, (String?) -> Unit) -> Unit, onClose: (String?) -> Unit) {
+    Dialog(
+        onDismissRequest = { onClose(null) },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            editor(kind, onClose)
         }
     }
 }

@@ -63,6 +63,8 @@ public class TerminalSession extends TerminalOutput {
 
     private static final int MSG_NEW_INPUT = 1;
     private static final int MSG_TRANSPORT_FINISHED = 4;
+    /** {@link #MSG_TRANSPORT_FINISHED} 的 obj：连接建立前就失败（已写过失败说明，不再写结束行）。 */
+    private static final Object CONNECT_FAILED = new Object();
 
     public final String mHandle = UUID.randomUUID().toString();
 
@@ -149,7 +151,8 @@ public class TerminalSession extends TerminalOutput {
             byte[] b = ("\r\n" + line + "\r\n").getBytes(StandardCharsets.UTF_8);
             processToEmulator(b, b.length);
         }
-        onTransportFinished(1);
+        // 连不上不是「会话结束」：不再追加一行「会话结束，退出码 1」（那个退出码不属于任何远端进程）。
+        mMainThreadHandler.sendMessage(mMainThreadHandler.obtainMessage(MSG_TRANSPORT_FINISHED, CONNECT_FAILED));
     }
 
     /** 传输层收到远端字节后调用（任意线程）：入队并通知主线程喂给 emulator。 */
@@ -300,10 +303,10 @@ public class TerminalSession extends TerminalOutput {
 
                 int exitCode = (msg.obj instanceof Integer) ? (Integer) msg.obj : 0;
                 StatusText text = sessionStatusText != null ? sessionStatusText : statusText;
-                String desc = "\r\n" + text.sessionEnded(exitCode) + "\r\n";
+                String desc = msg.obj == CONNECT_FAILED ? "" : "\r\n" + text.sessionEnded(exitCode) + "\r\n";
                 byte[] b = desc.getBytes(StandardCharsets.UTF_8);
                 if (mEmulator != null) {
-                    mEmulator.append(b, b.length);
+                    if (b.length > 0) mEmulator.append(b, b.length);
                     notifyScreenUpdate();
                 }
 
