@@ -24,6 +24,7 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.clearDanglingJumps
 import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.SettingsStore
@@ -229,6 +230,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (repaired != current) store.save(repaired)
+    }
+
+    /**
+     * 升级后只做一次：清掉已经失效的跳板引用（旧版对它们静默直连，清掉后行为不变）。
+     * 之后删除跳板机按新规则拒连。主机库解不开时不动，下次启动再试。
+     */
+    private fun clearDanglingJumpsOnce() = viewModelScope.launch(Dispatchers.IO) {
+        if (settings.danglingJumpsCleared.first()) return@launch
+        if (store.updateAll { clearDanglingJumps(it) }) settings.setDanglingJumpsCleared()
     }
 
     // 连接页：固定按项目分组，仅持久化「分组顺序」与「已折叠分组」。
@@ -845,6 +855,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
     init {
         repairLegacyTmuxLoginCommands()
+        clearDanglingJumpsOnce()
         checkUpdateSilently()
     }
 

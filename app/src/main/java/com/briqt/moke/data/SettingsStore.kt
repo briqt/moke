@@ -72,6 +72,7 @@ class SettingsStore(private val context: Context) {
     private val downloadTreeKey = stringPreferencesKey("download_tree_uri")
     // 文件页：是否显示隐藏文件 + 排序方式。
     private val filesShowHiddenKey = booleanPreferencesKey("files_show_hidden")
+    private val danglingJumpsClearedKey = booleanPreferencesKey("dangling_jumps_cleared")
     private val filesSortKey = stringPreferencesKey("files_sort")
 
     companion object {
@@ -218,6 +219,15 @@ class SettingsStore(private val context: Context) {
 
     val filesShowHidden: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[filesShowHiddenKey] ?: false
+    }
+
+    /** 存量失效跳板引用是否已一次性清理（见 `clearDanglingJumps`）。 */
+    val danglingJumpsCleared: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[danglingJumpsClearedKey] ?: false
+    }
+
+    suspend fun setDanglingJumpsCleared() {
+        context.settingsDataStore.edit { it[danglingJumpsClearedKey] = true }
     }
 
     val filesSort: Flow<FilesSort> = context.settingsDataStore.data.map { prefs ->

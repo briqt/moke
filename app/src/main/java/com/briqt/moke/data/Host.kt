@@ -26,6 +26,8 @@ data class Host(
     val useMosh: Boolean = false,
     /** 跳板机：引用另一台已存主机的 id（空=直连）。经其 direct-tcpip 转发到本机。 */
     val jumpHostId: String = "",
+    /** 网络：引用一个 [NetworkEntry] 的 id（空=直连）。选了跳板机时不生效（第一跳用跳板机自己的网络）。 */
+    val networkId: String = "",
     /**
      * 协议级启动命令（空=远端默认 login shell）。与 [loginCommand] 语义不同：
      * 这条由 SSH `exec` / `mosh-server -- …` 直接启动（Windows 主机指定 cmd/powershell/wsl 靠它），
@@ -92,6 +94,7 @@ data class Host(
         put("passphrase", passphrase)
         put("useMosh", useMosh)
         put("jumpHostId", jumpHostId)
+        put("networkId", networkId)
         put("startupCommand", startupCommand)
         put("loginCommand", loginCommand)
         put("group", group)
@@ -115,6 +118,7 @@ data class Host(
             passphrase = o.optString("passphrase", ""),
             useMosh = o.optBoolean("useMosh", false),
             jumpHostId = o.optString("jumpHostId", ""),
+            networkId = o.optString("networkId", ""),
             startupCommand = o.optString("startupCommand", ""),
             loginCommand = o.optString("loginCommand", ""),
             group = o.optString("group", ""),

@@ -12,6 +12,16 @@ import org.json.JSONArray
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "moke_hosts")
 
+/**
+ * 加密列表的一次读取结论。三态必须分开：冷启动还没读完（[Loading]）不能当成「没有」，
+ * 密文解不开（[Unreadable]）不能当成「空」——否则引用它的主机会被误判为失效。
+ */
+sealed interface ListState<out T> {
+    data object Loading : ListState<Nothing>
+    data object Unreadable : ListState<Nothing>
+    data class Ready<T>(val items: List<T>) : ListState<T>
+}
+
 /** 一次解码的完整结论：拿到的 JSON，以及「存量密文根本解不开」这个必须区分出来的状态。 */
 internal data class DecodedHosts(val json: String, val unreadable: Boolean)
 
@@ -47,6 +57,11 @@ class HostStore(private val context: Context) {
      * UI 据此给出说明，[save] 据此拒绝写入。
      */
     val unreadable: Flow<Boolean> = decoded.map { it.unreadable }
+
+    /** 同一份读取的三态视图（初值由订阅方给 [ListState.Loading]）。 */
+    val state: Flow<ListState<Host>> = decoded.map { d ->
+        if (d.unreadable) ListState.Unreadable else ListState.Ready(parse(d.json))
+    }
 
     private fun decode(raw: String?): DecodedHosts = decodeHosts(raw, CredentialCrypto::decrypt)
 
@@ -96,6 +111,22 @@ class HostStore(private val context: Context) {
             written = true
         }
         return written
+    }
+
+    /**
+     * 整表读-改-写在同一事务里完成；[transform] 返回 null 表示无需修改。
+     * @return 存储可读（无论改没改）；false = 解不开或加密失败，什么也没写。
+     */
+    suspend fun updateAll(transform: (List<Host>) -> List<Host>?): Boolean {
+        var ok = false
+        context.dataStore.edit { prefs ->
+            val current = decode(prefs[key])
+            if (current.unreadable) return@edit
+            val next = transform(parse(current.json))
+            if (next != null) prefs[key] = encode(next) ?: return@edit
+            ok = true
+        }
+        return ok
     }
 
     suspend fun delete(host: Host, current: List<Host>): Boolean =

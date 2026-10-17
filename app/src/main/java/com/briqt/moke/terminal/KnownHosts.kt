@@ -31,5 +31,12 @@ class KnownHosts(context: Context) {
 
     companion object {
         fun idOf(host: String, port: Int) = "$host:$port"
+
+        /**
+         * 经某个网络（tailnet / 代理）到达时，同一个 `host:port` 可能是另一台机器（如不同 tailnet
+         * 里同名的节点），指纹按网络分开记：`<networkId>/host:port`。直连保持旧键，存量无需迁移。
+         */
+        fun idOf(host: String, port: Int, networkId: String?) =
+            if (networkId.isNullOrBlank()) idOf(host, port) else "$networkId/${idOf(host, port)}"
     }
 }
