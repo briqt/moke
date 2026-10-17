@@ -8,6 +8,9 @@ plugins {
 // release 直接失败，避免发出不完整的包。
 val mapleFont = file("src/main/res/font/maple_mono.ttf")
 
+// 网络（tailnet / 代理 / mosh 中继）的 Go 部分：scripts/build-netbridge.sh 生成，不入库。
+val netbridgeAar = file("libs/netbridge.aar")
+
 android {
     namespace = "com.briqt.moke"
     compileSdk = 37
@@ -112,6 +115,8 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.datastore.preferences)
 
+    implementation(files(netbridgeAar))
+
     // SSH 传输（引导 + 交互）
     implementation(libs.sshj)
     implementation(libs.bouncycastle.prov)
@@ -124,6 +129,12 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    doFirst {
+        check(netbridgeAar.exists()) { "缺少 app/libs/netbridge.aar，先运行 scripts/build-netbridge.sh" }
+    }
 }
 
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {

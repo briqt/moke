@@ -44,6 +44,16 @@ jobs:
       - name: Install NDK r30
         run: sdkmanager --install "ndk;30.0.16248370"
 
+      # netbridge（Go）：版本取 netbridge/go.mod 的 toolchain 行；gomobile 由 go.mod 的 tool 依赖锁定。
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: netbridge/go.mod
+          cache-dependency-path: netbridge/go.sum
+
+      - name: Build netbridge AAR
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370" bash scripts/build-netbridge.sh
+
       - name: Build mosh native (arm64-v8a)
         run: |
           NDK_DIR="$ANDROID_HOME/ndk/30.0.16248370"
@@ -77,6 +87,7 @@ jobs:
           APK=app/build/outputs/apk/release/app-release.apk
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libmosh-client.so" || { echo "❌ $APK 缺 libmosh-client.so"; exit 1; }
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libtermux.so" || { echo "❌ $APK 缺 libtermux.so"; exit 1; }
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libgojni.so" || { echo "❌ $APK 缺 libgojni.so"; exit 1; }
           # release 构建会压缩资源路径（res/font/maple_mono.ttf → res/xx.ttf），故按体积判定：
           # 内置 Maple 字体约 20MB，是唯一 >15MB 的 ttf。
           unzip -l "$APK" | awk '/\.ttf$/ && $1+0 > 15000000 {f=1} END{exit !f}' \

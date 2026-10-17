@@ -26,3 +26,7 @@ app/src/main/res/font/maple_mono.ttf
 /AGENTS.md
 # 内部设计文档（不公开）
 /ARCHITECTURE.md
+
+# netbridge（Go）AAR：由 scripts/build-netbridge.sh 生成（不入库）
+app/libs/netbridge.aar
+app/libs/netbridge-sources.jar
