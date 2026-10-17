@@ -1,16 +1,15 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.briqt.moke"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.briqt.moke"
-        minSdk = 24
+        minSdk = 30
         targetSdk = 35
         versionCode = 53
         versionName = "0.1.22-rc.1"
@@ -72,9 +71,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     buildFeatures {
         compose = true
@@ -82,6 +78,11 @@ android {
     }
 
     packaging {
+        dex {
+            // minSdk ≥ 28 时 AGP 默认不压缩 dex（面向应用商店按需压缩下载）；moke 直接分发 APK，
+            // 不压缩会让下载体积翻倍以上，故保持压缩。
+            useLegacyPackaging = true
+        }
         jniLibs {
             // 必须解压 native 库到 nativeLibraryDir，才能作为独立进程 exec libmosh-client.so。
             useLegacyPackaging = true
@@ -124,7 +125,6 @@ dependencies {
     implementation(libs.sshj)
     implementation(libs.bouncycastle.prov)
     implementation(libs.bouncycastle.pkix)
-    implementation(libs.eddsa)
 
     debugImplementation(libs.androidx.ui.tooling)
 

@@ -719,16 +719,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         return fromCursor ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
     }
 
-    /**
-     * 是否还得先问用户要一个下载目录。
-     *
-     * Android 10+ 有免权限写系统「下载」的通道，默认落 `下载/Moke`，一次都不问；更低版本没有
-     * 这条路，只能让用户选一个目录（选完记住）。
-     */
-    val needsDownloadDir: StateFlow<Boolean> = downloadTreeUri
-        .map { it.isBlank() && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     /** [treeUri] 为 null=用默认落点（下载/Moke）。 */
     fun download(entry: com.briqt.moke.terminal.sftp.RemoteEntry, treeUri: android.net.Uri?) {
         val host = filesState.value.host ?: return

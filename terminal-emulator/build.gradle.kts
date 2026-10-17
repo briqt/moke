@@ -6,10 +6,10 @@ plugins {
 
 android {
     namespace = "com.termux.emulator"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
-        minSdk = 24
+        minSdk = 30
         consumerProguardFiles("proguard-rules.pro")
     }
 

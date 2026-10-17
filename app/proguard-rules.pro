@@ -5,8 +5,6 @@
 -dontwarn net.schmizz.sshj.**
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
--keep class net.i2p.crypto.eddsa.** { *; }
--dontwarn net.i2p.crypto.eddsa.**
 -dontwarn org.slf4j.**
 
 # 终端渲染内核（vendored, Apache-2.0）

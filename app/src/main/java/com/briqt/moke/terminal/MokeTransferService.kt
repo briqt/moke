@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.briqt.moke.MainActivity
@@ -95,25 +94,21 @@ class MokeTransferService : Service() {
     }
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(
-                CHANNEL_ID,
-                localized(R.string.notif_transfer_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = localized(R.string.notif_transfer_channel_desc)
-                setShowBadge(false)
-            }
-            notificationManager().createNotificationChannel(ch)
+        val ch = NotificationChannel(
+            CHANNEL_ID,
+            localized(R.string.notif_transfer_channel_name),
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = localized(R.string.notif_transfer_channel_desc)
+            setShowBadge(false)
         }
+        notificationManager().createNotificationChannel(ch)
     }
 
     private fun notificationManager() = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-    @Suppress("DEPRECATION")
     private fun stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
-        else stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     companion object {

@@ -2,8 +2,6 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import android.graphics.Typeface
-import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.core.content.res.ResourcesCompat
 import com.briqt.moke.R
 import com.briqt.moke.localized
@@ -139,13 +137,7 @@ class FontRepository(private val context: Context) {
     private fun resolveTypefaceUncached(primaryId: String?, fallbackId: String?): Typeface {
         val primary = specFor(primaryId) ?: FontCatalog.byId(FontCatalog.DEFAULT_ID)
         val fallback = fallbackId?.takeIf { it.isNotBlank() }?.let { specFor(it) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return buildWithFallback(primary, fallback) ?: bundledTypeface()
-        }
-        // API < 29：无自定义回退。优先已装的主字体文件，否则内置。
-        val f = if (!primary.bundled) fileFor(primary.id) else null
-        return if (f != null && f.exists()) runCatching { Typeface.createFromFile(f) }.getOrNull()
-            ?: bundledTypeface() else bundledTypeface()
+        return buildWithFallback(primary, fallback) ?: bundledTypeface()
     }
 
     /** id → FontSpec：先查内置目录；否则若本地已有该字体文件（下载/用户上传）则合成一个非内置 spec。 */
@@ -161,7 +153,6 @@ class FontRepository(private val context: Context) {
         return null
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun buildWithFallback(primary: FontSpec, fallback: FontSpec?): Typeface? = runCatching {
         val pf = loadFont(primary) ?: return@runCatching null
         val builder = Typeface.CustomFallbackBuilder(
@@ -186,12 +177,10 @@ class FontRepository(private val context: Context) {
         builder.build()
     }.getOrNull()
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun loadSymbolsFont(): android.graphics.fonts.Font? = runCatching {
         android.graphics.fonts.Font.Builder(context.resources, R.font.noto_sans_symbols2).build()
     }.getOrNull()
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun loadNerdSymbolsFont(): android.graphics.fonts.Font? = runCatching {
         android.graphics.fonts.Font.Builder(context.resources, R.font.symbols_nerd_font).build()
     }.getOrNull()
@@ -224,7 +213,6 @@ class FontRepository(private val context: Context) {
         else -> null
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun loadFont(spec: FontSpec): android.graphics.fonts.Font? = runCatching {
         if (spec.bundled) {
             val resId = bundledResId(spec.id) ?: R.font.jetbrains_mono

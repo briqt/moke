@@ -1,5 +1,6 @@
 package com.briqt.moke.ui
 
+import android.content.ClipData
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,12 +54,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
@@ -70,7 +73,7 @@ import com.briqt.moke.terminal.sftp.TransferTask
 import com.briqt.moke.ui.theme.MokeMono
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * 远端文件页：面包屑 + 列表 + 传输队列条。
@@ -106,7 +109,8 @@ fun FilesScreen(
     onClearFinished: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
     var mkdirOpen by remember { mutableStateOf(false) }
     var gotoOpen by remember { mutableStateOf(false) }
@@ -279,7 +283,7 @@ fun FilesScreen(
             onDownload = { selected = null; onDownload(e) },
             onCopyPath = {
                 selected = null
-                clipboard.setText(AnnotatedString(e.path))
+                scope.launch { clipboard.setClipEntry(ClipData.newPlainText("path", e.path).toClipEntry()) }
             },
             onSendToTerminal = {
                 selected = null
@@ -354,7 +358,7 @@ private fun sortEntries(entries: List<RemoteEntry>, sort: FilesSort, showHidden:
 @Composable
 private fun subtitleOf(e: RemoteEntry): String {
     val time = if (e.mtime > 0) {
-        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(e.mtime * 1000))
+        SimpleDateFormat("MM-dd HH:mm", LocalLocale.current.platformLocale).format(Date(e.mtime * 1000))
     } else ""
     val size = if (e.isDir) "" else RemotePath.formatSize(e.size)
     val link = if (e.isLink) stringResource(R.string.files_link) else ""

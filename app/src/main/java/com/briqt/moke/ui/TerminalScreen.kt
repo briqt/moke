@@ -74,6 +74,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -137,6 +139,8 @@ fun TerminalScreen(
     onOpenFiles: () -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
+    val density = LocalDensity.current.density
     val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
@@ -237,7 +241,7 @@ fun TerminalScreen(
         // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
         view.setBackgroundColor(schemeBgColor(schemeId))
         // 注意顺序：先 setTextSize 创建 renderer，再 setTypeface（其读取 mRenderer 不判空）。
-        val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
+        val px = Math.round(fontSizeSp * density)
         view.setTextSize(px)
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
@@ -267,7 +271,7 @@ fun TerminalScreen(
         view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, fontSizeSp) {
-        val px = Math.round(fontSizeSp * context.resources.displayMetrics.density)
+        val px = Math.round(fontSizeSp * density)
         view.setTextSize(px)
         controller.fontSizeSp = fontSizeSp
         view.onScreenUpdated()
@@ -423,7 +427,7 @@ fun TerminalScreen(
                                         if (local != null) {
                                             openUrl(context, PortForwards.rewriteToLocal(url, local))
                                         } else {
-                                            Toast.makeText(context, context.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
+                                            Toast.makeText(context, resources.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
                                         }
                                     }
                                 }

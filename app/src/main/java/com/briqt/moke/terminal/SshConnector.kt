@@ -6,8 +6,10 @@ import com.briqt.moke.data.Host
 import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.userauth.keyprovider.PKCS8KeyFile
 import net.schmizz.sshj.userauth.password.PasswordUtils
 import java.io.File
+import java.io.StringReader
 
 /**
  * 建连 + 认证 + 跳板 + TOFU 的唯一实现。
@@ -86,11 +88,16 @@ class SshConnector(
         }
     }
 
-    /** 密码 / 私钥认证。私钥必须先落盘（sshj 的 loadKeys 只吃路径），用完立即删除。 */
+    /** 密码 / 私钥认证。私钥先落盘交给 sshj 识别格式，用完立即删除（加口令 PKCS#8 例外，只在内存里解）。 */
     fun authenticate(client: SSHClient, h: Host) {
         when (h.authType) {
             AuthType.PASSWORD -> client.authPassword(h.username, h.password)
-            AuthType.KEY -> {
+            AuthType.KEY -> if (EncryptedPkcs8.matches(h.privateKeyPem)) {
+                // 加口令的 PKCS#8 不走 sshj 自己的解密（Android 上会空指针），见 EncryptedPkcs8。
+                val plain = EncryptedPkcs8.decryptToPem(h.privateKeyPem, h.passphrase.toCharArray())
+                val kp = PKCS8KeyFile().apply { init(StringReader(plain)) }
+                client.authPublickey(h.username, kp)
+            } else {
                 val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
                 try {
                     keyFile.writeText(h.privateKeyPem)

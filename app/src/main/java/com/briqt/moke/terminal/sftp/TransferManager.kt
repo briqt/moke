@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.DocumentsContract
@@ -369,18 +368,10 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
      */
     private fun createTarget(task: TransferTask): Uri {
         val tree = task.treeUri.takeIf { it.isNotBlank() } ?: return createInDownloads(task.name)
-        return runCatching { createInTree(Uri.parse(tree), task.name) }.getOrElse { t ->
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) throw t
+        return runCatching { createInTree(Uri.parse(tree), task.name) }.getOrElse {
             onTreeUnusable?.invoke()
             createInDownloads(task.name)
         }
-    }
-
-    /** 免权限写系统「下载」只有 Android 10+ 有；更低版本本就不会走到这里（见 needsDownloadDir）。 */
-    @Suppress("NewApi")
-    private fun createInDownloads(name: String): Uri {
-        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { "MediaStore downloads requires Android 10+" }
-        return createInDownloadsApi29(name)
     }
 
     /** 用户选的下载目录已不可用时回调（上层据此清掉记住的目录）。 */
@@ -395,12 +386,8 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     /**
      * 默认落点：系统「下载」下的 `Moke` 子目录，经 MediaStore 写入——**零存储权限、零选择器**，
      * 与 Chrome / Telegram 等下载类应用一致。同名由 MediaStore 自己让位（`name (1).ext`），不覆盖。
-     *
-     * 仅 Android 10+ 可用；更低版本没有这条免权限通道，由上层改走"选一个目录"（见
-     * `MokeViewModel.needsDownloadDir`），所以这里到不了。
      */
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
-    private fun createInDownloadsApi29(name: String): Uri {
+    private fun createInDownloads(name: String): Uri {
         // 先试子目录；某些 ROM（HyperOS 实测）不会为 RELATIVE_PATH 里不存在的子目录建文件夹，
         // insert 能成功但随后打开就报 `Missing file for primary:Download/Moke`。所以插入后立刻
         // 探一次写入：不通就删掉这条无效记录，退回「下载」根目录——宁可少一层目录，也不能下载不了。
@@ -417,7 +404,6 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         return fallback
     }
 
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private fun insertDownload(name: String, relativePath: String): Uri? = runCatching {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)

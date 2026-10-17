@@ -97,24 +97,19 @@ object TerminalAlerts {
     fun cancelStale(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         runCatching {
-            nm.activeNotifications.filter { it.notification.channelIdCompat() == CHANNEL_ID }.forEach { nm.cancel(it.id) }
+            nm.activeNotifications.filter { it.notification.channelId == CHANNEL_ID }.forEach { nm.cancel(it.id) }
         }
     }
-
-    private fun android.app.Notification.channelIdCompat(): String? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) channelId else null
 
     /** 每个会话一条通知：新的提醒覆盖旧的。避开前台服务通知所用的 id。 */
     private fun notificationId(sessionId: String): Int = 0x4D4B0000 or (sessionId.hashCode() and 0xFFFF)
 
     private fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(
-                CHANNEL_ID,
-                context.localized(R.string.alert_channel_name),
-                NotificationManager.IMPORTANCE_HIGH,
-            ).apply { description = "" }
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
-        }
+        val ch = NotificationChannel(
+            CHANNEL_ID,
+            context.localized(R.string.alert_channel_name),
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply { description = "" }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 }

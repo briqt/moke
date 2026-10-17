@@ -4,21 +4,21 @@
 #   - libmosh-client.so : mosh-client 可执行文件（mosh 1.4.0 前端 + rjyo/mosh-android 预编译静态库，GPLv3）
 # 产物输出到 app/src/main/jniLibs/<abi>/（该目录下的 *.so 不入库，见 .gitignore）。
 #
-# 依赖：Android NDK r29（或兼容）、curl、tar、git。
+# 依赖：Android NDK r30（或兼容）、curl、tar、git。
 # 用法：ANDROID_NDK=/path/to/ndk ./scripts/build-mosh-native.sh [abi ...]
 #   abi 默认 arm64-v8a，可传 armeabi-v7a / x86_64。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ABIS=("$@"); [ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a)
-API=24
+API=30
 MOSH_TAG="mosh-1.4.0"
 RJYO_URL="https://github.com/rjyo/mosh-android/releases/download/v1.0.0/mosh-android-libs-v1.0.0.tar.gz"
 
 # 定位 NDK
 NDK="${ANDROID_NDK:-}"
 if [ -z "$NDK" ]; then
-  NDK="$(ls -d "$HOME"/android-sdk/ndk/29.* 2>/dev/null | head -1 || true)"
+  NDK="$(ls -d "$HOME"/android-sdk/ndk/30.* 2>/dev/null | head -1 || true)"
 fi
 [ -n "$NDK" ] && [ -d "$NDK" ] || { echo "找不到 NDK，请设置 ANDROID_NDK"; exit 1; }
 HOSTTAG="$(uname | tr '[:upper:]' '[:lower:]')-x86_64"

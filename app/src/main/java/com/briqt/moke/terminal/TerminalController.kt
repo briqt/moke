@@ -123,7 +123,7 @@ class TerminalController(
         val v = view ?: return
         v.requestFocus()
         val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+        imm.showSoftInput(v, 0)
     }
     /** 跳回最新输出：翻到历史深处后不必反复滑动，也不必靠"随便敲个键"（那会真的发字节给远端）。 */
     fun scrollToBottom() {

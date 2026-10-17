@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -478,7 +479,7 @@ private fun AppearancePreview(
     val controller = remember { TerminalController(context) }
     val view = remember { TerminalView(context, null) }
     val session = remember { TerminalSession(PreviewTransport(), 200, controller) }
-    val density = context.resources.displayMetrics.density
+    val density = LocalDensity.current.density
 
     DisposableEffect(Unit) {
         controller.view = view

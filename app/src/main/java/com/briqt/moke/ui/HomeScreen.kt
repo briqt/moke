@@ -90,6 +90,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -261,12 +262,13 @@ fun HomeScreen(
 
     pendingClose?.let { id ->
         val pendingSession = sessions.firstOrNull { it.id == id }
-        val name = pendingSession?.displayTitle?.value.orEmpty()
+        val name = pendingSession?.displayTitle?.collectAsState()?.value.orEmpty()
+        val tmuxName = pendingSession?.remoteTmuxName?.collectAsState()?.value
         ConfirmDialog(
             title = stringResource(R.string.session_close),
             // 按**名称**判定，与终端页一致：从选择器「新建」出来的会话在第一次刷新前
             // remoteTmuxId 还是 null，只看 ID 会漏掉它，弹出的确认里就不会说明「远端 tmux 仍在跑」。
-            message = if (pendingSession?.remoteTmuxName?.value != null) {
+            message = if (tmuxName != null) {
                 stringResource(R.string.close_tmux_connection_confirm, name)
             } else {
                 stringResource(R.string.close_connection_confirm, name)
@@ -561,6 +563,7 @@ private fun HostCard(
     dragging: Boolean = false,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     var menuOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onConnect),
@@ -628,7 +631,7 @@ private fun HostCard(
                             menuOpen = false
                             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             cm.setPrimaryClip(ClipData.newPlainText("moke", host.connectCommand))
-                            Toast.makeText(context, context.getString(R.string.host_copied, host.connectCommand), Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, resources.getString(R.string.host_copied, host.connectCommand), Toast.LENGTH_SHORT).show()
                         },
                     )
                     HorizontalDivider()
