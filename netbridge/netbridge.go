@@ -169,7 +169,10 @@ func DialError(username string) string {
 	return ""
 }
 
-// OpenUDPRelay opens a mosh relay: {"id","networkID","targetIP","targetPort"}.
+// OpenUDPRelay opens a mosh relay before the bootstrap: {"id","networkID","targetHost"}.
+// targetHost is a literal IP (a tailnet address from ResolveTarget), or for a
+// SOCKS5 proxy also a name the proxy resolves. Nothing is forwarded until
+// StartUDPRelay; it fails with PROXY_NO_UDP when the network cannot carry UDP.
 func OpenUDPRelay(configJSON string) (string, error) {
 	info, err := defaultBridge.openUDPRelay(configJSON)
 	if err != nil {
@@ -177,6 +180,12 @@ func OpenUDPRelay(configJSON string) (string, error) {
 	}
 	data, err := json.Marshal(info)
 	return string(data), err
+}
+
+// StartUDPRelay starts forwarding to mosh-server's UDP port, accepting only
+// datagrams that authenticate with the session key (MOSH_KEY).
+func StartUDPRelay(id string, port int, key string) error {
+	return defaultBridge.startUDPRelay(id, port, key)
 }
 
 func CloseUDPRelay(id string) error { return defaultBridge.closeUDPRelay(id) }
@@ -191,6 +200,7 @@ func Stats() string {
 	data, _ := json.Marshal(map[string]any{
 		"networks": networks, "pendingDials": tickets, "relays": b.relays.Count(),
 		"relayDropped": b.relays.Dropped(), "relayRebinds": b.relays.Rebinds(),
+		"relayRejected": b.relays.Rejected(), "relayReopens": b.relays.Reopens(),
 		"relayFlow": flow, "at": time.Now().Unix(),
 	})
 	return string(data)

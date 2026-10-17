@@ -2,6 +2,9 @@ package relay
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +15,30 @@ import (
 	"testing"
 	"time"
 )
+
+// testKey is a mosh session key (22 base64 characters, 128 bits).
+var testKey = func() string {
+	raw := make([]byte, 16)
+	rand.Read(raw)
+	return base64.RawStdEncoding.EncodeToString(raw)
+}()
+
+// moshDatagram builds a datagram as mosh-client sends it: an 8-byte nonce
+// (direction bit + sequence) followed by AES-128-OCB ciphertext and tag.
+func moshDatagram(t *testing.T, key string, seq uint64, toClient bool, payload string) []byte {
+	t.Helper()
+	aead, err := moshCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := seq
+	if toClient {
+		wire |= directionMask
+	}
+	var nonce [12]byte
+	binary.BigEndian.PutUint64(nonce[4:], wire)
+	return aead.Seal(append([]byte(nil), nonce[4:]...), nonce[:], []byte(payload), nil)
+}
 
 type datagram struct {
 	data []byte
@@ -99,7 +126,7 @@ func newFixture(t *testing.T) (*Manager, *fakePacketConn, *fakePacketConn) {
 		}
 		return local, nil
 	}
-	info, err := m.Open(Config{ID: "s1", NetworkID: "a", TargetIP: "100.64.0.2", TargetPort: 60000}, Network{
+	info, err := m.Open(Config{ID: "s1", NetworkID: "a", TargetHost: "100.64.0.2"}, Network{
 		ID: "a", IPs: []netip.Addr{netip.MustParseAddr("fd7a:115c:a1e0::1"), netip.MustParseAddr("100.64.0.1")},
 		ListenPacket: func(network, address string) (net.PacketConn, error) {
 			if network != "udp" || address != "100.64.0.1:0" {
@@ -115,19 +142,28 @@ func newFixture(t *testing.T) (*Manager, *fakePacketConn, *fakePacketConn) {
 		t.Fatalf("unexpected info: %+v", info)
 	}
 	t.Cleanup(func() { m.CloseAll() })
+	if err := m.Start("s1", 60000, testKey); err != nil {
+		t.Fatal(err)
+	}
 	return m, local, remote
 }
 
 func TestDatagramBoundariesAndFiltering(t *testing.T) {
-	_, local, remote := newFixture(t)
-	// Non-loopback traffic cannot claim the local endpoint.
-	sendPacket(local, []byte("reject"), "192.0.2.1:40000")
-	sendPacket(local, []byte("first"), "127.0.0.1:40000")
-	receivePacket(t, remote, []byte("first"), "100.64.0.2:60000")
+	m, local, remote := newFixture(t)
+	// Non-loopback traffic cannot claim the local endpoint, even when authentic.
+	sendPacket(local, moshDatagram(t, testKey, 0, false, "reject"), "192.0.2.1:40000")
+	first := moshDatagram(t, testKey, 1, false, "first")
+	sendPacket(local, first, "127.0.0.1:40000")
+	receivePacket(t, remote, first, "100.64.0.2:60000")
+	// Too short to carry a nonce and tag: dropped.
 	sendPacket(local, nil, "127.0.0.1:40000")
-	sendPacket(local, []byte("second"), "127.0.0.1:40000")
-	receivePacket(t, remote, nil, "100.64.0.2:60000")
-	receivePacket(t, remote, []byte("second"), "100.64.0.2:60000")
+	sendPacket(local, make([]byte, moshNonceWire+moshTag-1), "127.0.0.1:40000")
+	second := moshDatagram(t, testKey, 2, false, "")
+	sendPacket(local, second, "127.0.0.1:40000")
+	receivePacket(t, remote, second, "100.64.0.2:60000")
+	if got := m.Rejected(); got != 2 {
+		t.Fatalf("rejected = %d, want 2", got)
+	}
 	// Neither another IP nor another port can inject replies.
 	sendPacket(remote, []byte("reject"), "100.64.0.3:60000")
 	sendPacket(remote, []byte("reject"), "100.64.0.2:60001")
@@ -137,10 +173,12 @@ func TestDatagramBoundariesAndFiltering(t *testing.T) {
 
 func TestPayloadBoundedBothDirections(t *testing.T) {
 	_, local, remote := newFixture(t)
+	overhead := moshNonceWire + moshTag
+	sendPacket(local, moshDatagram(t, testKey, 0, false, strings.Repeat("x", maxPayload+1-overhead)), "127.0.0.1:40000")
+	fits := moshDatagram(t, testKey, 1, false, strings.Repeat("x", maxPayload-overhead))
+	sendPacket(local, fits, "127.0.0.1:40000")
+	receivePacket(t, remote, fits, "100.64.0.2:60000")
 	big := bytes.Repeat([]byte{0xa5}, maxPayload)
-	sendPacket(local, append(append([]byte(nil), big...), 1), "127.0.0.1:40000")
-	sendPacket(local, big, "127.0.0.1:40000")
-	receivePacket(t, remote, big, "100.64.0.2:60000")
 	sendPacket(remote, append(append([]byte(nil), big...), 1), "100.64.0.2:60000")
 	sendPacket(remote, big, "100.64.0.2:60000")
 	receivePacket(t, local, big, "127.0.0.1:40000")
@@ -174,16 +212,22 @@ func TestCloseIsIdempotentAndUnblocksReaders(t *testing.T) {
 }
 
 func TestStrictTargetsAndFamilies(t *testing.T) {
-	for _, target := range []string{"peer.example", "::ffff:100.64.0.2", "fe80::1%wlan0", "0.0.0.0", "224.0.0.1", "::"} {
+	for _, target := range []string{"peer.example", "::ffff:100.64.0.2", "fe80::1%wlan0", "0.0.0.0", "224.0.0.1", "::", "127.0.0.1"} {
 		t.Run(target, func(t *testing.T) {
-			c := Config{ID: "s", NetworkID: "a", TargetIP: target, TargetPort: 60000}
-			if _, err := c.target(); err == nil {
-				t.Fatal("accepted unsupported target")
+			c := Config{ID: "s", NetworkID: "a", TargetHost: target}
+			if _, err := c.targetFor(false); err == nil {
+				t.Fatal("tailnet relay accepted an unsupported target")
 			}
 		})
 	}
-	if _, err := ParseConfig(`{"id":"s","networkID":"a","targetIP":"peer.example","targetPort":60000}`); err == nil || !strings.Contains(err.Error(), "DNS names are not supported") {
-		t.Fatalf("domain error was not explicit: %v", err)
+	// Names are for the proxy to resolve; anything else is rejected outright.
+	if _, err := ParseConfig(`{"id":"s","networkID":"a","targetHost":"peer.example"}`); err != nil {
+		t.Fatalf("proxy name target: %v", err)
+	}
+	for _, bad := range []string{"", "bad_name", "-x.example", "a..b", strings.Repeat("a", 64) + ".example", "host:22"} {
+		if _, err := ParseConfig(`{"id":"s","networkID":"a","targetHost":"` + bad + `"}`); err == nil {
+			t.Fatalf("accepted target %q", bad)
+		}
 	}
 	m := NewManager()
 	defer m.CloseAll()
@@ -192,10 +236,10 @@ func TestStrictTargetsAndFamilies(t *testing.T) {
 		binds++
 		return nil, errors.New("must not bind")
 	}}
-	if _, err := m.Open(Config{ID: "s", NetworkID: "a", TargetIP: "fd7a:115c:a1e0::2", TargetPort: 60000}, network); err == nil || binds != 0 {
+	if _, err := m.Open(Config{ID: "s", NetworkID: "a", TargetHost: "fd7a:115c:a1e0::2"}, network); err == nil || binds != 0 {
 		t.Fatal("IPv6 target fell back to IPv4")
 	}
-	if _, err := m.Open(Config{ID: "s", NetworkID: "b", TargetIP: "100.64.0.2", TargetPort: 60000}, network); err == nil || binds != 0 {
+	if _, err := m.Open(Config{ID: "s", NetworkID: "b", TargetHost: "100.64.0.2"}, network); err == nil || binds != 0 {
 		t.Fatal("selected a different network")
 	}
 }
@@ -206,7 +250,7 @@ func TestIPv6UsesExplicitAssignedSource(t *testing.T) {
 	local := fakeConn("127.0.0.1:32001")
 	remote := fakeConn("[fd7a:115c:a1e0::1]:33000")
 	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
-	_, err := m.Open(Config{ID: "s", NetworkID: "a", TargetIP: "fd7a:115c:a1e0::2", TargetPort: 60000}, Network{
+	_, err := m.Open(Config{ID: "s", NetworkID: "a", TargetHost: "fd7a:115c:a1e0::2"}, Network{
 		ID: "a", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1"), netip.MustParseAddr("fd7a:115c:a1e0::1")},
 		ListenPacket: func(network, address string) (net.PacketConn, error) {
 			if network != "udp" || address != "[fd7a:115c:a1e0::1]:0" {
@@ -218,8 +262,12 @@ func TestIPv6UsesExplicitAssignedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sendPacket(local, []byte("v6"), "127.0.0.1:40000")
-	receivePacket(t, remote, []byte("v6"), "[fd7a:115c:a1e0::2]:60000")
+	if err := m.Start("s", 60000, testKey); err != nil {
+		t.Fatal(err)
+	}
+	v6 := moshDatagram(t, testKey, 0, false, "v6")
+	sendPacket(local, v6, "127.0.0.1:40000")
+	receivePacket(t, remote, v6, "[fd7a:115c:a1e0::2]:60000")
 	sendPacket(remote, []byte("reply"), "[fd7a:115c:a1e0::2]:60000")
 	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
 }
@@ -233,18 +281,22 @@ func TestNetworkCloseDoesNotTouchOtherNode(t *testing.T) {
 	m.listenLocal = func(string, string) (net.PacketConn, error) { return locals[index], nil }
 	for i, id := range []string{"a", "b"} {
 		index = i
-		_, err := m.Open(Config{ID: id, NetworkID: id, TargetIP: "100.64.0.2", TargetPort: 60000}, Network{
+		_, err := m.Open(Config{ID: id, NetworkID: id, TargetHost: "100.64.0.2"}, Network{
 			ID: id, IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
 			ListenPacket: func(string, string) (net.PacketConn, error) { return remotes[i], nil },
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := m.Start(id, 60000, testKey); err != nil {
+			t.Fatal(err)
+		}
 	}
-	sendPacket(locals[0], []byte("network-a"), "127.0.0.1:40000")
-	sendPacket(locals[1], []byte("network-b"), "127.0.0.1:40000")
-	receivePacket(t, remotes[0], []byte("network-a"), "100.64.0.2:60000")
-	receivePacket(t, remotes[1], []byte("network-b"), "100.64.0.2:60000")
+	a, b := moshDatagram(t, testKey, 0, false, "network-a"), moshDatagram(t, testKey, 0, false, "network-b")
+	sendPacket(locals[0], a, "127.0.0.1:40000")
+	sendPacket(locals[1], b, "127.0.0.1:40000")
+	receivePacket(t, remotes[0], a, "100.64.0.2:60000")
+	receivePacket(t, remotes[1], b, "100.64.0.2:60000")
 	if err := m.CloseNetwork("a"); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +312,7 @@ func TestPartialOpenCleansRemoteAndCanRetry(t *testing.T) {
 	defer m.CloseAll()
 	remote := fakeConn("100.64.0.1:33000")
 	m.listenLocal = func(string, string) (net.PacketConn, error) { return nil, errors.New("local bind failed") }
-	c := Config{ID: "s", NetworkID: "a", TargetIP: "100.64.0.2", TargetPort: 60000}
+	c := Config{ID: "s", NetworkID: "a", TargetHost: "100.64.0.2"}
 	network := Network{ID: "a", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")}, ListenPacket: func(string, string) (net.PacketConn, error) { return remote, nil }}
 	if _, err := m.Open(c, network); err == nil || remote.closeCount.Load() != 1 || m.Count() != 0 {
 		t.Fatal("partial open leaked a socket or registry entry")
@@ -275,10 +327,11 @@ func TestPartialOpenCleansRemoteAndCanRetry(t *testing.T) {
 func TestTransientSendFailureDropsDatagramOnly(t *testing.T) {
 	m, local, remote := newFixture(t)
 	remote.failWrites.Store(2)
-	sendPacket(local, []byte("lost-1"), "127.0.0.1:40000")
-	sendPacket(local, []byte("lost-2"), "127.0.0.1:40000")
-	sendPacket(local, []byte("after"), "127.0.0.1:40000")
-	receivePacket(t, remote, []byte("after"), "100.64.0.2:60000")
+	sendPacket(local, moshDatagram(t, testKey, 0, false, "lost-1"), "127.0.0.1:40000")
+	sendPacket(local, moshDatagram(t, testKey, 1, false, "lost-2"), "127.0.0.1:40000")
+	after := moshDatagram(t, testKey, 2, false, "after")
+	sendPacket(local, after, "127.0.0.1:40000")
+	receivePacket(t, remote, after, "100.64.0.2:60000")
 	if got := m.Dropped(); got != 2 {
 		t.Fatalf("dropped = %d, want 2", got)
 	}
@@ -304,14 +357,17 @@ func TestClosedSocketEndsRelay(t *testing.T) {
 	m := NewManager()
 	defer m.CloseAll()
 	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
-	_, err := m.Open(Config{ID: "s", NetworkID: "a", TargetIP: "100.64.0.2", TargetPort: 60000}, Network{
+	_, err := m.Open(Config{ID: "s", NetworkID: "a", TargetHost: "100.64.0.2"}, Network{
 		ID: "a", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
 		ListenPacket: func(string, string) (net.PacketConn, error) { return remote, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sendPacket(local, []byte("failure"), "127.0.0.1:40000")
+	if err := m.Start("s", 60000, testKey); err != nil {
+		t.Fatal(err)
+	}
+	sendPacket(local, moshDatagram(t, testKey, 0, false, "failure"), "127.0.0.1:40000")
 	select {
 	case <-remote.closed:
 	case <-time.After(2 * time.Second):
@@ -334,18 +390,20 @@ func TestClosedSocketEndsRelay(t *testing.T) {
 
 func TestFollowsClientSourcePortHop(t *testing.T) {
 	m, local, remote := newFixture(t)
-	sendPacket(local, []byte("old-port"), "127.0.0.1:40000")
-	receivePacket(t, remote, []byte("old-port"), "100.64.0.2:60000")
+	old := moshDatagram(t, testKey, 0, false, "old-port")
+	sendPacket(local, old, "127.0.0.1:40000")
+	receivePacket(t, remote, old, "100.64.0.2:60000")
 	// mosh-client hop_port(): later datagrams come from a new loopback source port.
-	sendPacket(local, []byte("new-port"), "127.0.0.1:40001")
-	receivePacket(t, remote, []byte("new-port"), "100.64.0.2:60000")
+	hop := moshDatagram(t, testKey, 1, false, "new-port")
+	sendPacket(local, hop, "127.0.0.1:40001")
+	receivePacket(t, remote, hop, "100.64.0.2:60000")
 	sendPacket(remote, []byte("reply"), "100.64.0.2:60000")
 	receivePacket(t, local, []byte("reply"), "127.0.0.1:40001")
 	if got := m.Rebinds(); got != 1 {
 		t.Fatalf("rebinds = %d, want 1", got)
 	}
 	// Non-loopback senders still never claim the session.
-	sendPacket(local, []byte("reject"), "192.0.2.1:40002")
+	sendPacket(local, moshDatagram(t, testKey, 5, false, "reject"), "192.0.2.1:40002")
 	sendPacket(remote, []byte("reply-2"), "100.64.0.2:60000")
 	receivePacket(t, local, []byte("reply-2"), "127.0.0.1:40001")
 }
@@ -355,7 +413,7 @@ func TestLoopbackTargetOnlyForProxyBackends(t *testing.T) {
 	defer m.CloseAll()
 	local := fakeConn("127.0.0.1:32002")
 	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
-	c := Config{ID: "lo", NetworkID: "a", TargetIP: "127.0.0.1", TargetPort: 60021}
+	c := Config{ID: "lo", NetworkID: "a", TargetHost: "127.0.0.1"}
 	node := Network{ID: "a", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
 		ListenPacket: func(string, string) (net.PacketConn, error) { return fakeConn("100.64.0.1:1"), nil }}
 	if _, err := m.Open(c, node); err == nil {
@@ -369,4 +427,163 @@ func TestLoopbackTargetOnlyForProxyBackends(t *testing.T) {
 	if _, err := m.Open(c, proxy); err != nil || bind != "" {
 		t.Fatalf("proxy relay: %v, bind %q", err, bind)
 	}
+}
+
+func TestOnlyAuthenticClientDatagramsAreForwardedOrFollowed(t *testing.T) {
+	m, local, remote := newFixture(t)
+	legit := moshDatagram(t, testKey, 10, false, "legit")
+	sendPacket(local, legit, "127.0.0.1:40000")
+	receivePacket(t, remote, legit, "100.64.0.2:60000")
+
+	other := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 16))
+	tampered := moshDatagram(t, testKey, 11, false, "tampered")
+	tampered[len(tampered)-1] ^= 1
+	for _, d := range [][]byte{
+		moshDatagram(t, other, 11, false, "wrong key"),
+		moshDatagram(t, testKey, 11, true, "toward the client"),
+		tampered,
+		bytes.Repeat([]byte{0}, 64),
+	} {
+		sendPacket(local, d, "127.0.0.1:40666")
+	}
+	// A replayed authentic datagram reaches the server (which ignores it, as it
+	// would on the wire) but cannot move the session to the replaying port.
+	sendPacket(local, legit, "127.0.0.1:40666")
+	receivePacket(t, remote, legit, "100.64.0.2:60000")
+	sendPacket(remote, []byte("reply"), "100.64.0.2:60000")
+	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
+	if m.Rejected() != 4 || m.Rebinds() != 0 {
+		t.Fatalf("rejected = %d, rebinds = %d; want 4, 0", m.Rejected(), m.Rebinds())
+	}
+	select {
+	case d := <-remote.writes:
+		t.Fatalf("forwarded an unauthenticated datagram (%d bytes)", len(d.data))
+	default:
+	}
+}
+
+func TestNothingFlowsBeforeStart(t *testing.T) {
+	m := NewManager()
+	defer m.CloseAll()
+	local, remote := fakeConn("127.0.0.1:32003"), fakeConn("100.64.0.1:33003")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
+	if _, err := m.Open(Config{ID: "s", NetworkID: "a", TargetHost: "100.64.0.2"}, Network{ID: "a",
+		IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")}, ListenPacket: func(string, string) (net.PacketConn, error) { return remote, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	sendPacket(local, moshDatagram(t, testKey, 0, false, "early"), "127.0.0.1:40000")
+	sendPacket(remote, []byte("early reply"), "100.64.0.2:60000")
+	for deadline := time.Now().Add(2 * time.Second); m.Rejected() == 0 || len(remote.reads) > 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("early datagrams were not processed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, bad := range []struct {
+		port int
+		key  string
+	}{{0, testKey}, {65536, testKey}, {60000, ""}, {60000, testKey[:21]}, {60000, testKey[:21] + "!"}, {60000, "AAAAAAAAAAAAAAAAAAAAAB"}} {
+		if err := m.Start("s", bad.port, bad.key); err == nil {
+			t.Fatalf("Start accepted port %d key %q", bad.port, bad.key)
+		}
+	}
+	if err := m.Start("missing", 60000, testKey); err == nil {
+		t.Fatal("started a relay that is not open")
+	}
+	if err := m.Start("s", 60000, testKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start("s", 60001, testKey); err == nil {
+		t.Fatal("a started relay accepted a second key")
+	}
+	d := moshDatagram(t, testKey, 1, false, "after start")
+	sendPacket(local, d, "127.0.0.1:40000")
+	receivePacket(t, remote, d, "100.64.0.2:60000")
+	if got := m.Rejected(); got != 1 {
+		t.Fatalf("rejected = %d, want the one datagram sent before Start", got)
+	}
+	select {
+	case w := <-local.writes:
+		t.Fatalf("delivered a reply before Start: %q", w.data)
+	default:
+	}
+}
+
+// hostConn is a proxy association that resolves names itself.
+type hostConn struct{ *fakePacketConn }
+
+type hostAddr string
+
+func (h hostAddr) Network() string { return "udp" }
+func (h hostAddr) String() string  { return string(h) }
+
+func (h hostConn) WriteToHost(p []byte, host string, port uint16) (int, error) {
+	return h.WriteTo(p, hostAddr(fmt.Sprintf("%s:%d", host, port)))
+}
+
+func TestNameTargetGoesToTheProxy(t *testing.T) {
+	m := NewManager()
+	defer m.CloseAll()
+	local := fakeConn("127.0.0.1:32004")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
+	c := Config{ID: "n", NetworkID: "p", TargetHost: "target.lab"}
+	plain := Network{ID: "p", AnySource: true, ListenPacket: func(string, string) (net.PacketConn, error) { return fakeConn("192.0.2.9:1"), nil }}
+	if _, err := m.Open(c, plain); err == nil {
+		t.Fatal("name target opened on a backend that cannot send to names")
+	}
+	assoc := hostConn{fakeConn("192.0.2.9:2")}
+	proxy := Network{ID: "p", AnySource: true, ListenPacket: func(string, string) (net.PacketConn, error) { return assoc, nil }}
+	if _, err := m.Open(c, proxy); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start("n", 60010, testKey); err != nil {
+		t.Fatal(err)
+	}
+	d := moshDatagram(t, testKey, 0, false, "named")
+	sendPacket(local, d, "127.0.0.1:40000")
+	receivePacket(t, assoc.fakePacketConn, d, "target.lab:60010")
+	// The proxy reports the address it resolved, or the name itself; the
+	// association is ours alone.
+	sendPacket(assoc.fakePacketConn, []byte("reply"), "203.0.113.5:60010")
+	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
+	assoc.reads <- datagram{data: []byte("named reply"), addr: hostAddr("target.lab:60010")}
+	receivePacket(t, local, []byte("named reply"), "127.0.0.1:40000")
+}
+
+func TestReopensAnEndedBackendSocket(t *testing.T) {
+	m := NewManager()
+	defer m.CloseAll()
+	local := fakeConn("127.0.0.1:32005")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
+	backends := make(chan *fakePacketConn, 4)
+	first, second := fakeConn("192.0.2.9:3"), fakeConn("192.0.2.9:4")
+	backends <- first
+	backends <- second
+	opens := atomic.Int32{}
+	proxy := Network{ID: "p", AnySource: true, Reopen: true, ListenPacket: func(string, string) (net.PacketConn, error) {
+		opens.Add(1)
+		return <-backends, nil
+	}}
+	if _, err := m.Open(Config{ID: "r", NetworkID: "p", TargetHost: "198.51.100.7"}, proxy); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start("r", 60020, testKey); err != nil {
+		t.Fatal(err)
+	}
+	d0 := moshDatagram(t, testKey, 0, false, "before")
+	sendPacket(local, d0, "127.0.0.1:40000")
+	receivePacket(t, first, d0, "198.51.100.7:60020")
+	first.Close() // The association's control connection dropped.
+	deadline := time.Now().Add(5 * time.Second)
+	for m.Reopens() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if m.Reopens() != 1 || opens.Load() != 2 || m.Count() != 1 {
+		t.Fatalf("reopens = %d, opens = %d, relays = %d", m.Reopens(), opens.Load(), m.Count())
+	}
+	d1 := moshDatagram(t, testKey, 1, false, "after")
+	sendPacket(local, d1, "127.0.0.1:40000")
+	receivePacket(t, second, d1, "198.51.100.7:60020")
+	sendPacket(second, []byte("reply"), "198.51.100.7:60020")
+	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
 }

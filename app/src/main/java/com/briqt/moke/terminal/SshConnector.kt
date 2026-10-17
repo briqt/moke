@@ -39,14 +39,20 @@ class SshConnector(
      * 的握手 promise 默认 30s 就超时——用户认真核对指纹的时间远比这长。这种连接把握手超时放宽到
      * 略大于确认弹窗自身的超时，否则"仔细核对完再点信任"必然连不上。
      */
-    fun newClient(heartbeat: Boolean = false, awaitsTrust: Boolean = false, network: NetworkEntry? = null): SSHClient {
+    fun newClient(
+        heartbeat: Boolean = false,
+        awaitsTrust: Boolean = false,
+        network: NetworkEntry? = null,
+        /** 经网络时实际拨的地址（mosh 引导用 tailnet 内已解析的 IP）；主机密钥仍按主机名校验与记录。 */
+        dialHost: String? = null,
+    ): SSHClient {
         val config = DefaultConfig().apply {
             if (heartbeat) keepAliveProvider = KeepAliveProvider.HEARTBEAT
         }
         val client = if (network == null) SSHClient(config) else object : SSHClient(config) {
             // 经网络时目标名保持未解析，交给网络（MagicDNS / 代理）解析，本机不查 DNS。
             override fun makeInetSocketAddress(hostname: String, port: Int): InetSocketAddress =
-                InetSocketAddress.createUnresolved(hostname, port)
+                InetSocketAddress.createUnresolved(dialHost ?: hostname, port)
         }
         return client.apply {
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -70,9 +76,16 @@ class SshConnector(
      * 返回值里的 [Connected.jump] 必须与 [Connected.client] 一起关闭——跳板连接是目标连接的
      * 载体，先关它目标连接立刻断。
      */
-    fun connect(host: Host, jumpHost: Host?, network: NetworkEntry? = null, heartbeat: Boolean = false): Connected {
+    fun connect(
+        host: Host,
+        jumpHost: Host?,
+        network: NetworkEntry? = null,
+        heartbeat: Boolean = false,
+        /** 见 [newClient]；只用于不经跳板机、直接经网络的连接。 */
+        dialHost: String? = null,
+    ): Connected {
         val direct = if (jumpHost == null) network else null
-        val client = newClient(heartbeat, awaitsTrust(host, direct), direct)
+        val client = newClient(heartbeat, awaitsTrust(host, direct), direct, dialHost.takeIf { direct != null })
         var jump: SSHClient? = null
         try {
             if (jumpHost != null) {
@@ -94,8 +107,8 @@ class SshConnector(
     }
 
     /** 短生命周期连接：块执行完即断开（mosh 控制通道、一次性 SFTP 操作）。 */
-    fun <T> use(host: Host, jumpHost: Host?, network: NetworkEntry?, block: (SSHClient) -> T): T {
-        val c = connect(host, jumpHost, network)
+    fun <T> use(host: Host, jumpHost: Host?, network: NetworkEntry?, dialHost: String? = null, block: (SSHClient) -> T): T {
+        val c = connect(host, jumpHost, network, dialHost = dialHost)
         try {
             return block(c.client)
         } finally {

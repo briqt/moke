@@ -34,4 +34,13 @@ class MoshBootstrapTest {
         assertTrue(cmd.contains("-- sh -c '"))
         assertTrue(cmd.endsWith("sh 'work'"))
     }
+
+    @Test
+    fun `reads the detached server pid from stderr`() {
+        // mosh 1.4.0 原样输出（本机实测）。
+        val stderr = "\nmosh-server (mosh 1.4.0) [build mosh 1.4.0]\n\n[mosh-server detached, pid = 1288049]\n"
+        assertEquals(1288049, MoshBootstrap.parsePid(stderr))
+        assertEquals(null, MoshBootstrap.parsePid("MOSH CONNECT 60001 AAAAAAAAAAAAAAAAAAAAAA"))
+        assertEquals(null, MoshBootstrap.parsePid("[mosh-server detached, pid = 1]"))
+    }
 }

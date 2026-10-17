@@ -5,6 +5,7 @@ go 1.27.1
 toolchain go1.27.2
 
 require (
+	github.com/ProtonMail/go-crypto v1.4.1
 	golang.org/x/net v0.61.0
 	tailscale.com v1.104.1
 )

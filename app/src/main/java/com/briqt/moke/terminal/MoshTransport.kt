@@ -5,7 +5,10 @@ import com.briqt.moke.R
 import com.briqt.moke.localized
 import android.os.ParcelFileDescriptor
 import com.briqt.moke.data.Host
+import com.briqt.moke.MokeApplication
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkKind
+import com.briqt.moke.net.UdpRelay
 import com.briqt.moke.net.connectFailureText
 import com.termux.terminal.JNI
 import com.termux.terminal.TerminalSession
@@ -20,6 +23,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -62,6 +66,14 @@ class MoshTransport(
     @Volatile private var childExited = false
     private val finishReported = AtomicBoolean(false)
 
+    /** 经网络时 mosh 的 UDP 中继（占网络的一份租约）；会话结束时归还，只归还一次。 */
+    private val relay = AtomicReference<UdpRelay?>(null)
+    private val networks get() = (appContext as MokeApplication).networks
+
+    private fun releaseRelay() {
+        relay.getAndSet(null)?.let { networks.closeRelay(it) }
+    }
+
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         Thread({
             try {
@@ -75,20 +87,32 @@ class MoshTransport(
                     return@Thread
                 }
 
-                if (network != null) {
-                    // 经网络的 mosh 需要 UDP 中继（下一步实现）；在那之前绝不让 UDP 绕开网络直出。
-                    failConnect(session, "mosh through a network is not available yet")
-                    return@Thread
+                // 经网络（不经跳板机）时 UDP 走 netbridge 中继：先开中继——网络不能转 UDP 就在这里失败，
+                // 远端什么都还没起；再引导，拿到端口与密钥后才开始转发。有跳板机时 UDP 照旧直达目标。
+                val udpNetwork = network?.takeIf { jumpHost == null }
+                if (udpNetwork != null) {
+                    feed(session, "\r\n" + appContext.localized(R.string.net_via, udpNetwork.name))
+                    // tailnet：解析一次得到字面 IP，SSH 引导与中继共用（mosh-server -s 绑定 SSH 到达的地址）。
+                    val target = if (udpNetwork.kind == NetworkKind.TAILSCALE) {
+                        networks.resolveTarget(udpNetwork, host.host, host.port).also { bootstrapDialHost = it }
+                    } else {
+                        host.host // SOCKS5 代理自行解析（ATYP=3）。
+                    }
+                    relay.set(networks.openRelay(udpNetwork, target))
                 }
 
                 // 1) SSH 引导：执行 mosh-server new，解析 MOSH CONNECT
                 feed(session, "\r\n" + appContext.localized(R.string.mosh_bootstrapping) + "\r\n")
                 val bootstrap = sshBootstrap()
-                val connect = MoshBootstrap.parse(bootstrap)
+                serverPid = MoshBootstrap.parsePid(bootstrap.stderr)
+                val connect = MoshBootstrap.parse(bootstrap.stdout)
                     ?: throw IllegalStateException(
-                        appContext.localized(R.string.mosh_bootstrap_unparsed, bootstrap.trim())
+                        appContext.localized(R.string.mosh_bootstrap_unparsed, bootstrap.stdout.trim())
                     )
+                relay.get()?.let { networks.startRelay(it, udpNetwork!!, connect.port, connect.key) }
                 feed(session, appContext.localized(R.string.mosh_client_starting, connect.port) + "\r\n")
+                val clientHost = if (relay.get() != null) "127.0.0.1" else host.host
+                val clientPort = relay.get()?.localPort ?: connect.port
 
                 // 2) 独立子进程 + PTY 运行 native mosh-client
                 val bin = "$nativeLibDir/libmosh-client.so"
@@ -105,10 +129,12 @@ class MoshTransport(
                     "HOME=${appContext.filesDir.absolutePath}",
                     "PATH=/system/bin",
                 )
+                // 引导期间会话已被关掉：不再起客户端（否则本地子进程与中继都没人收），由下方收掉远端。
+                check(!closed) { "session closed during bootstrap" }
                 val pidArr = IntArray(1)
                 val fd = JNI.createSubprocess(
                     bin, appContext.filesDir.absolutePath,
-                    arrayOf("mosh-client", host.host, connect.port.toString()),
+                    arrayOf("mosh-client", clientHost, clientPort.toString()),
                     env, pidArr, rows, columns, cellWidthPixels, cellHeightPixels,
                 )
                 ptyFd = fd
@@ -128,6 +154,7 @@ class MoshTransport(
                         if (closed) 0 else 1
                     }
                     childExited = true
+                    releaseRelay()
                     finish(session, code)
                     runCatching { pfd?.close() }
                     ptyFd = -1
@@ -186,7 +213,12 @@ class MoshTransport(
                 // createSubprocess 成功后仍由 waiter 收口；引导/创建阶段失败才在这里结束。
                 if (pid > 0) {
                     runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
-                } else if (!closed) {
+                    return@Thread
+                }
+                releaseRelay()
+                // 引导已起了 mosh-server 却没能接上：经 SSH 结束它，不留到 24h 超时。
+                serverPid?.let { killOrphanServer(it) }
+                if (!closed) {
                     // mosh-client 还没起来（引导 SSH 连不上 / mosh-server 回应无法解析）：属于"连接失败"。
                     failConnect(session, e.connectFailureText(appContext))
                 } else {
@@ -196,16 +228,36 @@ class MoshTransport(
         }, "moke-mosh-${host.host}").start()
     }
 
+    /** 经网络引导时实际拨的地址（tailnet 内已解析的 IP，与中继同一个）；null = 按主机名。 */
+    @Volatile private var bootstrapDialHost: String? = null
+
+    /** 引导起来的 mosh-server 进程号（stderr 里读到的）。 */
+    @Volatile private var serverPid: Int? = null
+
+    private class BootstrapOutput(val stdout: String, val stderr: String)
+
     /** 引导只跑一次，用完即弃的短连接（此时控制连接还没有存在的理由）。 */
-    private fun sshBootstrap(): String {
-        return SshConnector(appContext).use(host, jumpHost, network) { client ->
+    private fun sshBootstrap(): BootstrapOutput {
+        return SshConnector(appContext).use(host, jumpHost, network, bootstrapDialHost) { client ->
             client.startSession().use { s ->
                 val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = effectiveStartup))
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
+                val stderr = IOUtils.readFully(cmd.errorStream).toString()
                 cmd.join()
-                stdout
+                BootstrapOutput(stdout, stderr)
             }
         }
+    }
+
+    /** 尽力结束刚引导起来、却没有客户端接上的 mosh-server（后台进行，失败只剩 24h 兜底）。 */
+    private fun killOrphanServer(pid: Int) {
+        Thread({
+            runCatching {
+                SshConnector(appContext).use(host, jumpHost, network, bootstrapDialHost) { client ->
+                    client.startSession().use { s -> s.exec("kill $pid").join(5, TimeUnit.SECONDS) }
+                }
+            }
+        }, "moke-mosh-orphan").start()
     }
 
     /**
@@ -357,6 +409,8 @@ class MoshTransport(
             if (child > 0 && !childExited) {
                 runCatching { android.system.Os.kill(child, android.system.OsConstants.SIGKILL) }
             }
+            // 退出握手要经中继送达，所以等它结束才归还（子进程没起来时也在这里收）。
+            releaseRelay()
         }
         writeExec.shutdown()
         // 控制连接与回收线程独立于 PTY，必须一并收掉，否则会话关掉了 TCP 还挂着。

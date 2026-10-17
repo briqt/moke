@@ -481,7 +481,7 @@ func TestProxyEndToEndAndAuthFailureCode(t *testing.T) {
 	if e == nil || e.Code != codes.ProxyAuth || strings.Contains(e.Detail, "hunter22") {
 		t.Fatalf("recorded %+v", e)
 	}
-	if _, err := tb.openUDPRelay(`{"id":"r1","networkID":"web","targetIP":"203.0.113.5","targetPort":60001}`); codeOf(t, err) != codes.ProxyNoUDP {
+	if _, err := tb.openUDPRelay(`{"id":"r1","networkID":"web","targetHost":"203.0.113.5"}`); codeOf(t, err) != codes.ProxyNoUDP {
 		t.Fatal("UDP through an HTTP proxy accepted")
 	}
 	if tb.leaseCount("web") != 0 {
@@ -492,11 +492,28 @@ func TestProxyEndToEndAndAuthFailureCode(t *testing.T) {
 func TestRelayHoldsLeaseAndStaysInTailnet(t *testing.T) {
 	tb := newTestBridge(t)
 	tb.startFake(t, "home", &fakeNode{state: "Running"})
-	if _, err := tb.openUDPRelay(`{"id":"r0","networkID":"home","targetIP":"203.0.113.5","targetPort":60001}`); codeOf(t, err) != codes.NotInTailnet {
+	if _, err := tb.openUDPRelay(`{"id":"r0","networkID":"home","targetHost":"203.0.113.5"}`); codeOf(t, err) != codes.NotInTailnet {
 		t.Fatal("relay outside tailnet accepted")
 	}
-	info, err := tb.openUDPRelay(`{"id":"r1","networkID":"home","targetIP":"100.64.0.2","targetPort":60001}`)
+	// Names are resolved first (ResolveTarget), so the relay never looks one up.
+	if _, err := tb.openUDPRelay(`{"id":"r0","networkID":"home","targetHost":"peer"}`); codeOf(t, err) != codes.InvalidArgument {
+		t.Fatal("tailnet relay accepted a name")
+	}
+	if tb.leaseCount("home") != 0 {
+		t.Fatal("refused relay kept a lease")
+	}
+	info, err := tb.openUDPRelay(`{"id":"r1","networkID":"home","targetHost":"100.64.0.2"}`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "AAAAAAAAAAAAAAAAAAAAAA"
+	if err := tb.startUDPRelay("r1", 60001, key[:21]+"B"); err == nil {
+		t.Fatal("non-canonical key accepted")
+	}
+	if err := tb.startUDPRelay("r1", 0, key); err == nil || strings.Contains(err.Error(), key) {
+		t.Fatalf("bad port: %v", err)
+	}
+	if err := tb.startUDPRelay("r1", 60001, key); err != nil {
 		t.Fatal(err)
 	}
 	if info.LocalPort == 0 || tb.leaseCount("home") != 1 {

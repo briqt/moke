@@ -70,7 +70,12 @@ func TestSOCKS5TCPAndUDPAgainstIndependentServer(t *testing.T) {
 	target := echoTarget(t, "t")
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer ln.Close()
-	server := &socks5.Server{Username: "u", Password: "p"}
+	server := &socks5.Server{Username: "u", Password: "p", Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if h, p, _ := net.SplitHostPort(addr); h == "target.test" {
+			addr = net.JoinHostPort("127.0.0.1", p) // The proxy's own name resolution.
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}}
 	go server.Serve(ln)
 	host, port := hostPort(t, ln.Addr().String())
 	c := Config{Type: "socks5", Host: host, Port: port, Username: "u", Password: "p"}
@@ -109,6 +114,16 @@ func TestSOCKS5TCPAndUDPAgainstIndependentServer(t *testing.T) {
 	n, from, err := assoc.ReadFrom(buf)
 	if err != nil || string(buf[:n]) != "echo:dgram" || from.String() != udpTarget.LocalAddr().String() {
 		t.Fatalf("UDP via SOCKS5 = %q from %v, %v", buf[:n], from, err)
+	}
+	// A name target is resolved by the proxy (ATYP=3); this server labels the
+	// reply with the same name.
+	_, udpPort := hostPort(t, udpTarget.LocalAddr().String())
+	if _, err := assoc.WriteToHost([]byte("named"), "target.test", uint16(udpPort)); err != nil {
+		t.Fatal(err)
+	}
+	n, from, err = assoc.ReadFrom(buf)
+	if err != nil || string(buf[:n]) != "echo:named" || from != (HostAddr{Host: "target.test", Port: uint16(udpPort)}) {
+		t.Fatalf("named UDP via SOCKS5 = %q from %v, %v", buf[:n], from, err)
 	}
 	// Losing the control connection must end the association (RFC 1928 §7).
 	assoc.control.Close()

@@ -25,6 +25,9 @@ import org.json.JSONObject
 /** 一次连接的一次性 SOCKS 凭据（同时是该网络上的一份租约，见 netbridge）。 */
 data class DialTicket(val host: String, val port: Int, val username: String, val password: String)
 
+/** mosh 的 UDP 中继：mosh-client 发往回环 [localPort]，由 netbridge 经网络转给 mosh-server。 */
+data class UdpRelay(val id: String, val localPort: Int)
+
 /**
  * 经网络建连失败的原因：[code] 是 netbridge 的稳定错误码（NEEDS_LOGIN、NOT_IN_TAILNET、PROXY_AUTH …），
  * 界面按它说人话；[detail] 只供诊断，已去掉密钥。
@@ -144,6 +147,51 @@ class NetworkManager(context: Context) {
     /** 这张凭据对应的连接为什么失败（读一次即清）。 */
     fun dialError(t: DialTicket, e: NetworkEntry): NetworkException? =
         Netbridge.dialError(t.username).takeIf { it.isNotBlank() }?.let { NetworkException.from(Exception(it), e) }
+
+    /**
+     * 在 tailnet 内把目标名解析成字面 IP（只查该 tailnet 的节点，不走系统 DNS）。mosh 的 SSH 引导与
+     * UDP 中继共用这个 IP：`mosh-server -s` 绑定 SSH 到达的地址，两边地址族必须一致。
+     */
+    fun resolveTarget(e: NetworkEntry, host: String, port: Int): String {
+        ensureStarted(e)
+        val hostPort = if (host.contains(':')) "[$host]:$port" else "$host:$port"
+        val resolved = try {
+            Netbridge.resolveTarget(instanceId(e), hostPort)
+        } catch (t: Throwable) {
+            throw NetworkException.from(t, e)
+        }
+        return resolved.substringBeforeLast(':').removePrefix("[").removeSuffix("]")
+    }
+
+    /**
+     * 打开 mosh 中继（引导之前）：网络不能转 UDP 时这里就失败（PROXY_NO_UDP），远端什么都还没起。
+     * [targetHost] 是 tailnet 内的字面 IP，或交给 SOCKS5 代理解析的名字。中继占一份租约，用完必须 [closeRelay]。
+     */
+    fun openRelay(e: NetworkEntry, targetHost: String): UdpRelay {
+        ensureStarted(e)
+        val id = "mosh-" + java.util.UUID.randomUUID().toString().take(8)
+        val o = try {
+            JSONObject(Netbridge.openUDPRelay(
+                JSONObject().put("id", id).put("networkID", instanceId(e)).put("targetHost", targetHost).toString()
+            ))
+        } catch (t: Throwable) {
+            throw NetworkException.from(t, e)
+        }
+        return UdpRelay(id, o.getInt("localPort"))
+    }
+
+    /** 引导拿到 mosh-server 的端口与密钥后开始转发；只放行用该密钥认证通过的数据报。 */
+    fun startRelay(r: UdpRelay, e: NetworkEntry, port: Int, key: String) {
+        try {
+            Netbridge.startUDPRelay(r.id, port.toLong(), key)
+        } catch (t: Throwable) {
+            throw NetworkException.from(t, e)
+        }
+    }
+
+    fun closeRelay(r: UdpRelay) {
+        runCatching { Netbridge.closeUDPRelay(r.id) }
+    }
 
     data class NodeStatus(
         val state: String,

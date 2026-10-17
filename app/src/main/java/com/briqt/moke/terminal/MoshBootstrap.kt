@@ -14,6 +14,11 @@ object MoshBootstrap {
 
     data class Connect(val port: Int, val key: String)
 
+    private val PID = Regex("""\[mosh-server detached, pid = (\d+)]""")
+
+    /** mosh-server 脱离后在 stderr 报的进程号；引导之后出错时据此结束它，不留孤儿。 */
+    fun parsePid(stderr: String): Int? = PID.find(stderr)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 1 }
+
     /** 从 mosh-server 的 stdout 解析连接信息；解析失败或端口越界返回 null。 */
     fun parse(output: String): Connect? {
         val m = REGEX.find(output) ?: return null

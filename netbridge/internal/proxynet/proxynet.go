@@ -480,6 +480,32 @@ func (a *Association) WriteTo(p []byte, addr net.Addr) (int, error) {
 	return len(p), nil
 }
 
+// WriteToHost sends to a host name the proxy resolves (ATYP=3, RFC 1928 §7).
+func (a *Association) WriteToHost(p []byte, host string, port uint16) (int, error) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return a.WriteTo(p, net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, port)))
+	}
+	if host == "" || len(host) > 255 {
+		return 0, errors.New("invalid UDP target host")
+	}
+	header := append([]byte{0, 0, 0, 3, byte(len(host))}, host...)
+	header = append(header, byte(port>>8), byte(port))
+	if _, err := a.udp.Write(append(header, p...)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// HostAddr is the source of a reply that a proxy labels with a host name
+// (some answer a name-addressed datagram with the same name).
+type HostAddr struct {
+	Host string
+	Port uint16
+}
+
+func (h HostAddr) Network() string { return "udp" }
+func (h HostAddr) String() string  { return net.JoinHostPort(h.Host, strconv.Itoa(int(h.Port))) }
+
 func (a *Association) ReadFrom(p []byte) (int, net.Addr, error) {
 	buf := make([]byte, 65535)
 	for {
@@ -492,6 +518,14 @@ func (a *Association) ReadFrom(p []byte) (int, net.Addr, error) {
 			continue
 		}
 		reader := &sliceReader{data: buf[4:n]}
+		if buf[3] == 3 {
+			if n < 5 || n < 5+int(buf[4])+2 {
+				continue
+			}
+			end := 5 + int(buf[4])
+			from := HostAddr{Host: string(buf[5:end]), Port: binary.BigEndian.Uint16(buf[end : end+2])}
+			return copy(p, buf[end+2:n]), from, nil
+		}
 		from, err := readSOCKSAddr(reader, buf[3])
 		if err != nil || !from.Addr().IsValid() {
 			continue

@@ -11,7 +11,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -663,16 +662,24 @@ func (b *bridge) openUDPRelay(configJSON string) (relay.Info, error) {
 			return relay.Info{}, proxynet.ErrUDPUnsupported
 		}
 		proxy := *n.proxy
-		network = relay.Network{ID: n.id, AnySource: true, ListenPacket: func(string, string) (net.PacketConn, error) {
+		// A network change drops the association's control connection; the relay
+		// then associates again (RFC 1928 ties the association to that connection).
+		network = relay.Network{ID: n.id, AnySource: true, Reopen: true, ListenPacket: func(string, string) (net.PacketConn, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 			return proxy.AssociateUDP(ctx)
 		}}
 	default:
-		// The target must be inside this tailnet, exactly like a TCP dial.
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		_, err := n.node.ResolveUDP(ctx, net.JoinHostPort(c.TargetIP, strconv.Itoa(c.TargetPort)))
-		cancel()
+		// The target must be a literal address inside this tailnet, exactly like a
+		// TCP dial (the app resolves names with ResolveTarget first).
+		var err error
+		if _, perr := netip.ParseAddr(c.TargetHost); perr != nil {
+			err = codes.New(codes.InvalidArgument, "tailnet UDP relay needs a literal target IP")
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+			_, err = n.node.ResolveUDP(ctx, net.JoinHostPort(c.TargetHost, "1"))
+			cancel()
+		}
 		if err != nil {
 			b.release(n)
 			return relay.Info{}, codes.Boundary("open UDP relay", err, codes.Internal, n.secrets...)
@@ -685,6 +692,12 @@ func (b *bridge) openUDPRelay(configJSON string) (relay.Info, error) {
 		return relay.Info{}, codes.Boundary("open UDP relay", err, codes.Internal, n.secrets...)
 	}
 	return info, nil
+}
+
+// startUDPRelay gives an open relay the mosh-server port and session key. The
+// key stays in memory and is removed from any error text.
+func (b *bridge) startUDPRelay(id string, port int, key string) error {
+	return codes.Boundary("start UDP relay", b.relays.Start(id, port, key), codes.InvalidArgument, key)
 }
 
 func (b *bridge) closeUDPRelay(id string) error {
