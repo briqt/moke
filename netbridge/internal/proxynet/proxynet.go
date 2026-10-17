@@ -191,6 +191,10 @@ func (c Config) dialHTTP(ctx context.Context, target string) (net.Conn, error) {
 		switch {
 		case response.StatusCode == http.StatusProxyAuthRequired:
 			return codes.New(codes.ProxyAuth, "proxy requires authentication: HTTP 407")
+		case response.StatusCode == http.StatusUnauthorized:
+			// The target is never reached before a 2xx, so a 401 is the proxy's own
+			// answer: tinyproxy rejects wrong credentials with 401 instead of 407.
+			return codes.New(codes.ProxyAuth, "proxy rejected the credentials: HTTP 401")
 		case response.StatusCode == http.StatusGatewayTimeout:
 			return codes.New(codes.Timeout, "proxy CONNECT timed out: HTTP 504")
 		case response.StatusCode/100 != 2:

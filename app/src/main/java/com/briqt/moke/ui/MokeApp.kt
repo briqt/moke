@@ -191,7 +191,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             },
             onCancel = { screen = Screen.Home },
             savedFingerprint = s.host?.let { vm.savedFingerprint(it) },
-            onClearFingerprint = { h, p -> vm.clearFingerprint(Host(host = h, port = p)) },
+            onClearFingerprint = { h, p -> vm.clearFingerprint((s.host ?: Host()).copy(host = h, port = p)) },
         )
 
         is Screen.Terminal -> {

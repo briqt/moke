@@ -3,6 +3,8 @@ package com.briqt.moke.ui
 import android.content.Context
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.sftp.RemoteEntry
@@ -53,11 +55,16 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
      * shell 进程，侧通道另开的 exec 看不到，硬猜只会给出错误的路径。取不到就落到家目录，
      * 不假装知道。
      */
-    fun open(host: Host, jumpHost: Host?, from: TermSession?) {
+    fun open(host: Host, jumpHost: Host?, network: NetworkEntry?, from: TermSession?, refusal: String? = null) {
         close()
+        if (refusal != null) {
+            // 不能连（跳板机/网络已删除等）：直接给出原因，绝不退回直连。
+            _state.value = FilesUiState(host = host, loading = false, error = refusal)
+            return
+        }
         _state.value = FilesUiState(host = host, loading = true)
         job = scope.launch {
-            val s = SftpSession(host, jumpHost, appContext)
+            val s = SftpSession(host, jumpHost, appContext, network)
             session = s
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -166,7 +173,7 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
     }
 
     private fun describe(t: Throwable, notice: String?): String {
-        val base = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
+        val base = t.connectFailureText(appContext).takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
         return if (notice.isNullOrBlank()) base else "$notice\n$base"
     }
 }

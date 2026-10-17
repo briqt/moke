@@ -128,6 +128,8 @@ type Snapshot struct {
 	LoginName string
 	KeyExpiry time.Time
 	Expired   bool
+	// HaveNodeKey: the node has logged in before, so NeedsLogin means "log in again".
+	HaveNodeKey bool
 }
 
 func (n *Node) Snapshot(ctx context.Context) (Snapshot, error) {
@@ -143,7 +145,7 @@ func (n *Node) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func snapshotOf(st *ipnstate.Status) Snapshot {
-	s := Snapshot{State: st.BackendState, IPs: st.TailscaleIPs, AuthURL: st.AuthURL}
+	s := Snapshot{State: st.BackendState, IPs: st.TailscaleIPs, AuthURL: st.AuthURL, HaveNodeKey: st.HaveNodeKey}
 	if st.CurrentTailnet != nil {
 		s.Tailnet = st.CurrentTailnet.Name
 	}

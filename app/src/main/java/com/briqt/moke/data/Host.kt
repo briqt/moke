@@ -72,6 +72,12 @@ data class Host(
     val effectiveStartupCommand: String
         get() = if (persistence == SessionPersistence.TMUX) "" else startupCommand.trim()
 
+    /**
+     * 这台主机指纹的命名空间：直接经某个网络到达时是该网络（见 `KnownHosts.idOf`）；
+     * 直连或经跳板机（目标由跳板机解析）时为 null，沿用 `host:port`。
+     */
+    val fingerprintNamespace: String? get() = networkId.takeIf { it.isNotBlank() && jumpHostId.isBlank() }
+
     /** 协议短名（连接列表徽标用）。 */
     val protocol: String get() = if (useMosh) "mosh" else "SSH"
 

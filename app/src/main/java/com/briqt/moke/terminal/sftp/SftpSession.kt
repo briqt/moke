@@ -2,6 +2,7 @@ package com.briqt.moke.terminal.sftp
 
 import android.content.Context
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.terminal.SshConnector
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
@@ -40,6 +41,8 @@ class SftpSession(
     private val host: Host,
     private val jumpHost: Host?,
     context: Context,
+    /** 第一跳的网络（见 `resolveRoute`）；null = 直连。 */
+    private val network: NetworkEntry? = null,
 ) : Closeable {
 
     private val appContext = context.applicationContext
@@ -66,7 +69,7 @@ class SftpSession(
         check(!closed) { "session closed" }
         sftp?.let { return it }
         val connector = SshConnector(appContext) { notice = it }
-        val c = connector.connect(host, jumpHost, heartbeat = true)
+        val c = connector.connect(host, jumpHost, network, heartbeat = true)
         // 心跳间隔必须显式给：只设 KeepAliveProvider.HEARTBEAT 而不给间隔等于没开，
         // 浏览连接会在用户看着列表发呆几分钟后被中间设备静默掐断（真机实测）。
         runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }

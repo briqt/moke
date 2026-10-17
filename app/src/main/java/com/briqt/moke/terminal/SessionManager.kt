@@ -3,6 +3,7 @@ package com.briqt.moke.terminal
 import android.content.Context
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.localized
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -34,6 +35,8 @@ class TermSession(
     val transport: TerminalTransport,
     /** 配置式 ProxyJump；null 表示直连。只描述应用知道的连接路由。 */
     val jumpHost: Host?,
+    /** 第一跳的网络（tailnet / 代理）；null = 直连。 */
+    val network: NetworkEntry?,
     /** 协议级启动的交互程序；tmux 使用它避开 shell 提示符注入。 */
     val startupCommand: String?,
     /** 原生动态标题（转义序列设置，缺省用连接名）。展示请用 [displayTitle]。 */
@@ -145,6 +148,9 @@ class SessionManager(context: Context) {
     fun open(
         host: Host,
         jumpHost: Host? = null,
+        network: NetworkEntry? = null,
+        /** 非空 = 这台主机不能连（原因）：会话直接以连接失败结束，绝不退回直连。 */
+        refusal: String? = null,
         carryFrom: TermSession? = null,
         initialTitle: String? = null,
         remoteTmuxId: String? = null,
@@ -172,13 +178,14 @@ class SessionManager(context: Context) {
         )
         // 传输选择：偏好 mosh 的主机走 MoshTransport（SSH 引导 + native mosh-client 子进程 PTY），
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
-        val transport = if (host.useMosh) {
-            MoshTransport(host, appContext, jumpHost, startupCommand)
-        } else {
-            SshTransport(
+        val transport = when {
+            refusal != null -> RefusedTransport(refusal)
+            host.useMosh -> MoshTransport(host, appContext, jumpHost, startupCommand, network)
+            else -> SshTransport(
                 host = host,
                 context = appContext,
                 jumpHost = jumpHost,
+                network = network,
                 onLatency = { latency.value = it },
                 startupCommand = startupCommand,
             )
@@ -191,6 +198,7 @@ class SessionManager(context: Context) {
             session = session,
             transport = transport,
             jumpHost = jumpHost,
+            network = network,
             startupCommand = startupCommand,
             title = title.asStateFlow(),
             baseTitle = titleBase,
@@ -248,6 +256,9 @@ class SessionManager(context: Context) {
         source: TermSession,
         target: TmuxSession,
         jumpHost: Host? = null,
+        network: NetworkEntry? = null,
+        /** 非空 = 这台主机现在不能连（见 [open]）。 */
+        refusal: String? = null,
         detachOthers: Boolean = false,
         term: String? = null,
     ): TermSession {
@@ -262,6 +273,8 @@ class SessionManager(context: Context) {
         return open(
             host = source.host,
             jumpHost = jumpHost,
+            network = network,
+            refusal = refusal,
             initialTitle = "tmux · ${target.name}",
             // 选择器「新建」走同一条路（`new-session -A` 原子创建），此时还没有远端 ID；
             // 空串不能当成合法 ID，否则关闭确认等按 ID 判断的分支会误判。

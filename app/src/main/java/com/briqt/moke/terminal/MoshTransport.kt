@@ -5,6 +5,8 @@ import com.briqt.moke.R
 import com.briqt.moke.localized
 import android.os.ParcelFileDescriptor
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.connectFailureText
 import com.termux.terminal.JNI
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -40,6 +42,8 @@ class MoshTransport(
      * 不经 shell 提示符注入。为 null 时才轮到主机自己配置的启动命令。
      */
     private val startupCommand: String? = null,
+    /** 第一跳的网络（见 `resolveRoute`）；null = 直连。 */
+    private val network: NetworkEntry? = null,
 ) : TerminalTransport, ForwardCapable {
 
     /** 本次交给 `mosh-server … -- …` 的程序；null=远端默认 shell。 */
@@ -68,6 +72,12 @@ class MoshTransport(
                 if (!moshBin.exists() || !termuxBin.exists()) {
                     feed(session, "\r\n" + appContext.localized(R.string.mosh_unavailable) + "\r\n")
                     failConnect(session, null)
+                    return@Thread
+                }
+
+                if (network != null) {
+                    // 经网络的 mosh 需要 UDP 中继（下一步实现）；在那之前绝不让 UDP 绕开网络直出。
+                    failConnect(session, "mosh through a network is not available yet")
                     return@Thread
                 }
 
@@ -178,7 +188,7 @@ class MoshTransport(
                     runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
                 } else if (!closed) {
                     // mosh-client 还没起来（引导 SSH 连不上 / mosh-server 回应无法解析）：属于"连接失败"。
-                    failConnect(session, e.message ?: e.javaClass.simpleName)
+                    failConnect(session, e.connectFailureText(appContext))
                 } else {
                     finish(session, 1)
                 }
@@ -188,7 +198,7 @@ class MoshTransport(
 
     /** 引导只跑一次，用完即弃的短连接（此时控制连接还没有存在的理由）。 */
     private fun sshBootstrap(): String {
-        return SshConnector(appContext).use(host, jumpHost) { client ->
+        return SshConnector(appContext).use(host, jumpHost, network) { client ->
             client.startSession().use { s ->
                 val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = effectiveStartup))
                 val stdout = IOUtils.readFully(cmd.inputStream).toString()
@@ -277,7 +287,7 @@ class MoshTransport(
     private fun controlClient(): SSHClient {
         control?.takeIf { it.client.isConnected && it.client.isAuthenticated }?.let { return it.client }
         closeControl()
-        val c = SshConnector(appContext).connect(host, jumpHost, heartbeat = true)
+        val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true)
         runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
         control = c
         return c.client

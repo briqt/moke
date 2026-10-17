@@ -103,7 +103,9 @@ type statusJSON struct {
 	LoginName string   `json:"loginName"`
 	KeyExpiry int64    `json:"keyExpiry"` // Unix seconds; 0 if none.
 	Expired   bool     `json:"expired"`
-	Leases    int      `json:"leases"`
+	// HaveNodeKey: logged in before; NeedsLogin then means the login expired or was revoked.
+	HaveNodeKey bool `json:"haveNodeKey"`
+	Leases      int  `json:"leases"`
 }
 
 func knownState(state string) string {
@@ -122,7 +124,7 @@ func NodeStatus(id string) (string, error) {
 		return "", err
 	}
 	out := statusJSON{ID: id, State: knownState(s.State), IPs: []string{}, Tailnet: s.Tailnet, DNSName: s.DNSName,
-		LoginName: s.LoginName, Expired: s.Expired, Leases: defaultBridge.leaseCount(id)}
+		LoginName: s.LoginName, Expired: s.Expired, HaveNodeKey: s.HaveNodeKey, Leases: defaultBridge.leaseCount(id)}
 	for _, ip := range s.IPs {
 		if ip.IsValid() {
 			out.IPs = append(out.IPs, ip.String())

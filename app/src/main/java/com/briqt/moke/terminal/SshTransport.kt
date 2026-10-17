@@ -4,6 +4,8 @@ import android.content.Context
 import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.connectFailureText
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
@@ -22,6 +24,8 @@ class SshTransport(
     context: Context,
     /** 跳板机（可空）：先连它，再经其 direct-tcpip 转发到 [host]。 */
     private val jumpHost: Host? = null,
+    /** 第一跳的网络（见 `resolveRoute`）；null = 直连。 */
+    private val network: NetworkEntry? = null,
     /** 实时延迟回调（ms，null=测不到）。用于终端状态条显示 RTT。 */
     private val onLatency: (Int?) -> Unit = {},
     /**
@@ -81,8 +85,11 @@ class SshTransport(
                 if (jumpHost != null) {
                     feed(session, appContext.localized(R.string.ssh_via_jump, jumpHost.host) + "\r\n")
                 }
+                if (network != null) {
+                    feed(session, appContext.localized(R.string.net_via, network.name) + "\r\n")
+                }
                 // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
-                val conn = connector.connect(host, jumpHost, heartbeat = true)
+                val conn = connector.connect(host, jumpHost, network, heartbeat = true)
                 val client = conn.client
                 jump = conn.jump
                 runCatching { client.connection.keepAlive.keepAliveInterval = 30 }
@@ -154,7 +161,7 @@ class SshTransport(
             } catch (e: Exception) {
                 if (!established) {
                     // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
-                    session.onTransportConnectFailed(e.message ?: e.javaClass.simpleName)
+                    session.onTransportConnectFailed(e.connectFailureText(appContext))
                 } else {
                     // 连上之后才断的：是"中断"，不是"连接失败"。
                     val msg = ("\r\n" + appContext.localized(R.string.ssh_connection_lost, e.message ?: "") + "\r\n").toByteArray()

@@ -436,4 +436,28 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <!-- 终端提醒 -->
     <string name="alert_channel_name">Terminal alerts</string>
     <string name="menu_terminal_alerts">Bell notifications</string>
+    <!-- D10 网络：文案草稿，待第 5 步文案批次确认 -->
+    <string name="route_missing_host">This host no longer exists.</string>
+    <string name="route_missing_jump">Its jump host was deleted. Edit the host to choose another.</string>
+    <string name="route_missing_network">Its network was deleted. Edit the host to choose another.</string>
+    <string name="route_jump_chain">Its jump host uses a jump host itself. Only one jump host is supported.</string>
+    <string name="route_unreadable_networks">Could not open saved networks. Clear app data.</string>
+    <string name="route_loading">Saved hosts are still loading. Try again in a moment.</string>
+    <string name="net_joining">[moke] Joining %1$s…</string>
+    <string name="net_via">[moke] Connecting through %1$s…</string>
+    <string name="net_err_needs_login">%1$s is not logged in.</string>
+    <string name="net_err_login_expired">The login for %1$s has expired. Log in again.</string>
+    <string name="net_err_needs_machine_auth">%1$s is waiting for an administrator to approve this device.</string>
+    <string name="net_err_not_ready">%1$s cannot reach its control server right now.</string>
+    <string name="net_err_not_in_tailnet">The host is not in %1$s.</string>
+    <string name="net_err_name_not_found">No device with this name in %1$s.</string>
+    <string name="net_err_target_unreachable">The host cannot be reached (it may be offline).</string>
+    <string name="net_err_target_refused">The host refused the connection.</string>
+    <string name="net_err_timeout">The connection timed out.</string>
+    <string name="net_err_proxy_unreachable">Cannot reach the proxy %1$s.</string>
+    <string name="net_err_proxy_auth">The proxy %1$s rejected the user name or password.</string>
+    <string name="net_err_proxy_refused">The proxy %1$s refused the connection.</string>
+    <string name="net_err_proxy_tls">The certificate of the proxy %1$s could not be verified.</string>
+    <string name="net_err_proxy_no_udp">The proxy %1$s cannot carry UDP, so mosh cannot use it.</string>
+    <string name="net_err_internal">Network error (%1$s).</string>
 </resources>

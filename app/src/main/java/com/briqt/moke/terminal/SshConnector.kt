@@ -1,8 +1,11 @@
 package com.briqt.moke.terminal
 
 import android.content.Context
+import com.briqt.moke.MokeApplication
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.NetworkSocketFactory
 import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
@@ -10,6 +13,7 @@ import net.schmizz.sshj.userauth.keyprovider.PKCS8KeyFile
 import net.schmizz.sshj.userauth.password.PasswordUtils
 import java.io.File
 import java.io.StringReader
+import java.net.InetSocketAddress
 
 /**
  * 建连 + 认证 + 跳板 + TOFU 的唯一实现。
@@ -35,33 +39,44 @@ class SshConnector(
      * 的握手 promise 默认 30s 就超时——用户认真核对指纹的时间远比这长。这种连接把握手超时放宽到
      * 略大于确认弹窗自身的超时，否则"仔细核对完再点信任"必然连不上。
      */
-    fun newClient(heartbeat: Boolean = false, awaitsTrust: Boolean = false): SSHClient {
+    fun newClient(heartbeat: Boolean = false, awaitsTrust: Boolean = false, network: NetworkEntry? = null): SSHClient {
         val config = DefaultConfig().apply {
             if (heartbeat) keepAliveProvider = KeepAliveProvider.HEARTBEAT
         }
-        return SSHClient(config).apply {
+        val client = if (network == null) SSHClient(config) else object : SSHClient(config) {
+            // 经网络时目标名保持未解析，交给网络（MagicDNS / 代理）解析，本机不查 DNS。
+            override fun makeInetSocketAddress(hostname: String, port: Int): InetSocketAddress =
+                InetSocketAddress.createUnresolved(hostname, port)
+        }
+        return client.apply {
             connectTimeout = CONNECT_TIMEOUT_MS
             if (awaitsTrust) transport.timeoutMs = TRUST_PROMPT_TIMEOUT_MS
-            addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext, onNotice))
+            if (network != null) {
+                socketFactory = NetworkSocketFactory((appContext as MokeApplication).networks, network)
+            }
+            addHostKeyVerifier(MokeHostKeyVerifier(KnownHosts(appContext), appContext, onNotice, network?.id))
         }
     }
 
     /** 这台主机的密钥还没被信任过，因而这次连接会停下来等用户确认。 */
-    private fun awaitsTrust(host: Host): Boolean =
-        !HostKeyPrompt.autoTrust && KnownHosts(appContext).stored(KnownHosts.idOf(host.host, host.port)) == null
+    private fun awaitsTrust(host: Host, network: NetworkEntry?): Boolean =
+        !HostKeyPrompt.autoTrust && KnownHosts(appContext).stored(KnownHosts.idOf(host.host, host.port, network?.id)) == null
 
     /**
      * 连上 [host] 并完成认证；[jumpHost] 非空时先连它、再经 direct-tcpip 到目标。
+     * [network] 是**第一跳**的网络（见 `resolveRoute`）：有跳板机时只有跳板机那条连接走它，
+     * 目标经跳板机的 direct-tcpip 到达。
      *
      * 返回值里的 [Connected.jump] 必须与 [Connected.client] 一起关闭——跳板连接是目标连接的
      * 载体，先关它目标连接立刻断。
      */
-    fun connect(host: Host, jumpHost: Host?, heartbeat: Boolean = false): Connected {
-        val client = newClient(heartbeat, awaitsTrust(host))
+    fun connect(host: Host, jumpHost: Host?, network: NetworkEntry? = null, heartbeat: Boolean = false): Connected {
+        val direct = if (jumpHost == null) network else null
+        val client = newClient(heartbeat, awaitsTrust(host, direct), direct)
         var jump: SSHClient? = null
         try {
             if (jumpHost != null) {
-                val j = newClient(heartbeat, awaitsTrust(jumpHost))
+                val j = newClient(heartbeat, awaitsTrust(jumpHost, network), network)
                 j.connect(jumpHost.host, jumpHost.port)
                 authenticate(j, jumpHost)
                 jump = j
@@ -79,8 +94,8 @@ class SshConnector(
     }
 
     /** 短生命周期连接：块执行完即断开（mosh 控制通道、一次性 SFTP 操作）。 */
-    fun <T> use(host: Host, jumpHost: Host?, block: (SSHClient) -> T): T {
-        val c = connect(host, jumpHost)
+    fun <T> use(host: Host, jumpHost: Host?, network: NetworkEntry?, block: (SSHClient) -> T): T {
+        val c = connect(host, jumpHost, network)
         try {
             return block(c.client)
         } finally {

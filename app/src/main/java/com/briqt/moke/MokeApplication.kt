@@ -34,6 +34,9 @@ class MokeApplication : Application() {
     /** 全应用唯一的传输队列（与会话同理：不能随 Activity/ViewModel 销毁而中断）。 */
     val transfers: TransferManager by lazy { TransferManager(this, HostStore(this)) }
 
+    /** 网络（tailnet / 代理）运行时：第一次有连接走网络时才加载 Go。 */
+    val networks: com.briqt.moke.net.NetworkManager by lazy { com.briqt.moke.net.NetworkManager(this) }
+
     override fun onCreate() {
         super.onCreate()
         installOomHprofDumper()

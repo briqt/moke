@@ -12,6 +12,12 @@ import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.MissingKind
+import com.briqt.moke.data.NetworkStore
+import com.briqt.moke.data.Route
+import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.net.connectFailureText
+import com.briqt.moke.net.refusalText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,6 +45,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     private val appContext = context.applicationContext
     private val resolver: ContentResolver get() = appContext.contentResolver
     private val store = TransferStore(appContext)
+    private val networkStore = NetworkStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _tasks = MutableStateFlow<List<TransferTask>>(emptyList())
@@ -185,19 +192,17 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     }
 
     private suspend fun runOne(task: TransferTask) {
-        val hosts = hostStore.hosts.first()
-        val host = hosts.firstOrNull { it.id == task.hostId }
-        if (host == null) {
-            update(task.id) {
-                it.copy(state = TransferState.FAILED, error = appContext.localized(R.string.transfer_host_gone))
-            }
+        // 与终端同一条路由规则：失效的跳板机或网络一律不连，绝不退回直连。
+        val route = resolveRoute(task.hostId, hostStore.state.first(), networkStore.state.first())
+        if (route !is Route.Ok) {
+            val reason = if (route == Route.Missing(MissingKind.HOST)) appContext.localized(R.string.transfer_host_gone)
+            else route.refusalText(appContext).orEmpty()
+            update(task.id) { it.copy(state = TransferState.FAILED, error = reason) }
             return
         }
-        val jump = host.jumpHostId.takeIf { it.isNotBlank() && it != host.id }
-            ?.let { id -> hosts.firstOrNull { it.id == id } }
 
         update(task.id) { it.copy(state = TransferState.RUNNING, error = "") }
-        val session = SftpSession(host, jump, appContext)
+        val session = SftpSession(route.host, route.jump, appContext, route.network)
         try {
             when (task.direction) {
                 TransferDirection.DOWNLOAD -> runDownload(task, session)
@@ -443,7 +448,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
 
     /** 失败原因：优先 TOFU 等提示（没有终端可写，只能在这儿说），其次异常消息。 */
     private fun describe(t: Throwable, notice: String?): String {
-        val base = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
+        val base = t.connectFailureText(appContext).takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
         return if (notice.isNullOrBlank()) base else "$notice\n$base"
     }
 }

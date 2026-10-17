@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/briqt/moke/netbridge/internal/codes"
 	"tailscale.com/net/socks5"
 )
 
@@ -150,8 +151,14 @@ func httpProxy(t *testing.T, cert *tls.Certificate) string {
 				if err != nil || req.Method != http.MethodConnect {
 					return
 				}
-				if req.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("u:p")) {
+				switch req.Header.Get("Proxy-Authorization") {
+				case "Basic " + base64.StdEncoding.EncodeToString([]byte("u:p")):
+				case "":
 					io.WriteString(c, "HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+					return
+				default:
+					// tinyproxy answers wrong credentials with 401, not 407.
+					io.WriteString(c, "HTTP/1.1 401 Unauthorized\r\n\r\n")
 					return
 				}
 				up, err := net.Dial("tcp", req.Host)
@@ -199,6 +206,11 @@ func TestHTTPAndHTTPSConnect(t *testing.T) {
 	noAuth.Username, noAuth.Password = "", ""
 	if _, err := noAuth.DialTCP(context.Background(), target); err == nil || !strings.Contains(err.Error(), "407") {
 		t.Fatalf("missing credentials: %v", err)
+	}
+	wrong := c
+	wrong.Password = "x"
+	if _, err := wrong.DialTCP(context.Background(), target); codes.Of(err, codes.Internal).Code != codes.ProxyAuth {
+		t.Fatalf("wrong credentials: %v", err)
 	}
 
 	good, roots := certificate(t, "proxy.test", time.Now().Add(24*time.Hour))

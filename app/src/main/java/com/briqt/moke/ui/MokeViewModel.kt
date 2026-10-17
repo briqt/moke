@@ -24,12 +24,18 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.ListState
+import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkStore
+import com.briqt.moke.data.Route
 import com.briqt.moke.data.clearDanglingJumps
 import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
+import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.net.refusalText
 import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.FontRepository
@@ -82,6 +88,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     val hosts: StateFlow<List<Host>> = store.hosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 主机 / 网络列表的三态（加载中、解不开、已读到）：连接前据此解析路由，不把「没读完」当「已删除」。 */
+    private val hostsState: StateFlow<ListState<Host>> = store.state
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
+    private val networkStore = NetworkStore(app)
+    val networksState: StateFlow<ListState<NetworkEntry>> = networkStore.state
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
 
     /**
      * 存量凭据解不开（Keystore 密钥失效，典型是整机备份恢复到新机）。
@@ -307,8 +320,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun delete(host: Host) = viewModelScope.launch {
         store.delete(host, hosts.value)
         // 同时忘记指纹：否则服务器换密钥后"删除重建连接"依然连不上（指纹按 host:port 存，与条目无关）。
-        if (hosts.value.none { it.id != host.id && it.host == host.host && it.port == host.port }) {
-            knownHosts.forget(KnownHosts.idOf(host.host, host.port))
+        if (hosts.value.none {
+                it.id != host.id && it.host == host.host && it.port == host.port && it.fingerprintNamespace == host.fingerprintNamespace
+            }
+        ) {
+            knownHosts.forget(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
         }
     }
 
@@ -316,11 +332,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 该主机已记录的指纹（null=还没记录）。 */
     fun savedFingerprint(host: Host): String? =
-        knownHosts.stored(KnownHosts.idOf(host.host, host.port))
+        knownHosts.stored(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
 
     /** 显式忘记指纹：服务器换过密钥时的自救路径（编辑页动作）。 */
     fun clearFingerprint(host: Host) {
-        knownHosts.forget(KnownHosts.idOf(host.host, host.port))
+        knownHosts.forget(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
     }
 
     /** 复制主机为新条目（label 加「副本」，新 id，清空最近连接时间）。 */
@@ -482,7 +498,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         target: TmuxSession,
         detachOthers: Boolean = false,
     ): String {
-        val session = sessions.openTmux(source, target, resolveJump(source.host), detachOthers)
+        val route = routeOf(source.host.id)
+        val ok = route as? Route.Ok
+        val session = sessions.openTmux(
+            source, target, ok?.jump, ok?.network, route.refusalText(getApplication()), detachOthers,
+        )
         ensureSessionService()
         rememberTmuxSession(source.host, target.name)
         confirmTmuxAttach(session, target.name)
@@ -538,9 +558,14 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 重连时保留协议级启动命令；tmux 专用会话不能退回成普通 shell。 */
     fun reconnectSession(source: TermSession): String {
         touchHost(source.host)
+        // 按 ID 重读：重连用主机**当前**的配置（会话里存的是打开那一刻的快照）。
+        val route = routeOf(source.host.id)
+        val ok = route as? Route.Ok
         val session = sessions.open(
-            host = source.host,
-            jumpHost = resolveJump(source.host),
+            host = ok?.host ?: source.host,
+            jumpHost = ok?.jump,
+            network = ok?.network,
+            refusal = route.refusalText(getApplication()),
             initialTitle = source.displayTitle.value,
             remoteTmuxId = source.remoteTmuxId.value,
             remoteTmuxName = source.remoteTmuxName.value,
@@ -578,9 +603,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         touchHost(host)
         val remembered = host.tmuxSessionName
             .takeIf { host.persistence == SessionPersistence.TMUX && it.isNotBlank() }
+        val route = routeOf(host.id)
+        val ok = route as? Route.Ok
         val ts = sessions.open(
-            host = host,
-            jumpHost = resolveJump(host),
+            host = ok?.host ?: host,
+            jumpHost = ok?.jump,
+            network = ok?.network,
+            refusal = route.refusalText(getApplication()),
             remoteTmuxName = remembered,
             startupCommand = remembered?.let { Tmux.attachOrCreateCommand(it) },
         )
@@ -625,15 +654,24 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun duplicateSession(id: String): String? {
         val src = sessions.get(id) ?: return null
         touchHost(src.host)
-        val newId = sessions.open(src.host, resolveJump(src.host), carryFrom = src).id
+        val route = routeOf(src.host.id)
+        val ok = route as? Route.Ok
+        val newId = sessions.open(
+            host = ok?.host ?: src.host,
+            jumpHost = ok?.jump,
+            network = ok?.network,
+            refusal = route.refusalText(getApplication()),
+            carryFrom = src,
+        ).id
         ensureSessionService()
         return newId
     }
 
-    /** 解析主机的跳板机（避免自引用；空/无效返回 null）。 */
-    private fun resolveJump(host: Host): Host? = host.jumpHostId
-        .takeIf { it.isNotBlank() && it != host.id }
-        ?.let { id -> hosts.value.firstOrNull { it.id == id } }
+    /**
+     * 这台主机现在怎么连（唯一入口，见 [resolveRoute]）：失效的跳板机或网络一律拒连，
+     * 不再像过去那样把被删除的跳板机静默当成直连。
+     */
+    private fun routeOf(hostId: String): Route = resolveRoute(hostId, hostsState.value, networksState.value)
 
     /** 拉起前台服务：退后台/关屏时保活会话（服务在会话归零时自行停止）。 */
     private fun ensureSessionService() {
@@ -676,7 +714,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 打开文件页；[from] 非空（从终端 ⋮ 进）时尝试以终端当前目录为起点。 */
     fun openFiles(host: Host, from: TermSession? = null) {
-        filesController.open(host, resolveJump(host), from)
+        val route = routeOf(host.id)
+        val ok = route as? Route.Ok
+        filesController.open(ok?.host ?: host, ok?.jump, ok?.network, from, route.refusalText(getApplication()))
     }
 
     fun closeFiles() = filesController.close()

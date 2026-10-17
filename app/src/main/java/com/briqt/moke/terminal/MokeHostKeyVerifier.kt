@@ -20,10 +20,12 @@ class MokeHostKeyVerifier(
     private val known: KnownHosts,
     private val context: Context,
     private val onMessage: (String) -> Unit,
+    /** 经网络到达时的指纹命名空间（网络 id）；null = 直连，沿用旧键。 */
+    private val namespace: String? = null,
 ) : HostKeyVerifier {
 
     override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
-        val id = "$hostname:$port"
+        val id = KnownHosts.idOf(hostname, port, namespace)
         val fp = HostKeyFingerprint.of(key)
         val saved = known.stored(id)
         return when (HostKeyFingerprint.check(saved, key)) {

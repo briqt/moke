@@ -432,4 +432,28 @@
     <!-- 终端提醒 -->
     <string name="alert_channel_name">终端提醒</string>
     <string name="menu_terminal_alerts">响铃通知</string>
+    <!-- D10 网络：文案草稿，待第 5 步文案批次确认 -->
+    <string name="route_missing_host">这台主机已经不存在了。</string>
+    <string name="route_missing_jump">它的跳板机已被删除，请编辑主机另选。</string>
+    <string name="route_missing_network">它的网络已被删除，请编辑主机另选。</string>
+    <string name="route_jump_chain">它的跳板机自己又设了跳板机，只支持一级跳板。</string>
+    <string name="route_unreadable_networks">无法打开已保存的网络，请清除应用数据</string>
+    <string name="route_loading">连接列表还在读取，请稍后再试。</string>
+    <string name="net_joining">[moke] 正在接入「%1$s」…</string>
+    <string name="net_via">[moke] 经「%1$s」连接…</string>
+    <string name="net_err_needs_login">「%1$s」未登录。</string>
+    <string name="net_err_login_expired">「%1$s」登录已过期，请重新登录。</string>
+    <string name="net_err_needs_machine_auth">「%1$s」正在等待管理员批准本设备。</string>
+    <string name="net_err_not_ready">「%1$s」暂时连不上控制服务器。</string>
+    <string name="net_err_not_in_tailnet">目标不在「%1$s」中。</string>
+    <string name="net_err_name_not_found">「%1$s」中没有这个名字的设备。</string>
+    <string name="net_err_target_unreachable">目标不可达（对端可能离线）。</string>
+    <string name="net_err_target_refused">目标拒绝了连接。</string>
+    <string name="net_err_timeout">连接超时。</string>
+    <string name="net_err_proxy_unreachable">连不上代理「%1$s」。</string>
+    <string name="net_err_proxy_auth">代理「%1$s」不接受这个用户名或密码。</string>
+    <string name="net_err_proxy_refused">代理「%1$s」拒绝了连接。</string>
+    <string name="net_err_proxy_tls">无法验证代理「%1$s」的证书。</string>
+    <string name="net_err_proxy_no_udp">代理「%1$s」不能转发 UDP，mosh 无法使用。</string>
+    <string name="net_err_internal">网络错误（%1$s）。</string>
 </resources>
