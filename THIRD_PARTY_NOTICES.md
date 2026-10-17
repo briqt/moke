@@ -17,10 +17,10 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 
 ### 字体（打包进 APK）
 - [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)（`res/font/jetbrains_mono.ttf`）——**OFL**，默认等宽主字体，未修改。
-- [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（`res/font/noto_sans_sc.otf`）——**OFL**，默认中文回退。为控制体积，**子集化**为常用汉字（GB2312 + 常用标点，约 2.9MB），非完整字符集。
+- [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（`res/font/noto_sans_sc.otf`）——**OFL**，可选的中文回退。为控制体积，**子集化**为常用汉字（GB2312 + 常用标点，约 2.9MB），非完整字符集。
 - [Noto Sans Symbols 2](https://github.com/notofonts/symbols)（`res/font/noto_sans_symbols2.ttf`）——**OFL**，作**符号回退字体**（合成链末级），补主/回退字体常缺的媒体 / 几何 / 杂项符号等终端字形，未修改。
 - [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts)（`res/font/symbols_nerd_font.ttf`）——**MIT**（nerd-fonts 项目；所含图标集各自的许可见其仓库 `LICENSE`），作 **Nerd 图标回退字体**（合成链末级），补 powerline 分隔符 / devicons / 文件类型图标等私有区字形，取官方 v3.4.0 的 `SymbolsNerdFontMono-Regular.ttf`，未修改。
-- [Maple Mono NF CN](https://github.com/subframe7536/maple-font)（`res/font/maple_mono.ttf`，**仅 `maple` 发行变体**）——**OFL**，maple 变体的默认中文回退（中英等宽 + Nerd 图标，取官方 v7.9 的 NormalNL-NF-CN unhinted Regular 单字重），未修改；standard 变体不打包（见下表可运行期下载）。
+- [Maple Mono NF CN](https://github.com/subframe7536/maple-font)（`res/font/maple_mono.ttf`）——**OFL**，默认中文回退（中英等宽 + Nerd 图标，取官方 v7.9 的 NormalNL-NF-CN unhinted Regular 单字重），未修改。
 
 ### 可下载字体（运行期按需下载，不打包进 APK）
 用户在"设置 · 字体"中可选择下载。均从各项目官方 GitHub Releases 获取，存于 app 私有目录：
@@ -28,7 +28,6 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 | 字体 | 许可 | 来源 |
 |---|---|---|
 | [Fira Code](https://github.com/tonsky/FiraCode) | OFL | 连字编程等宽（Regular） |
-| [Maple Mono NF CN](https://github.com/subframe7536/maple-font) | OFL | 高分屏 unhinted 变体（NormalNL-NF-CN），含中文 2:1 + Nerd 图标 |
 | [Hack](https://github.com/source-foundry/Hack) | MIT-derived (Hack Open Font License) | 经典编程等宽，无连字 |
 | [IBM Plex Mono](https://github.com/IBM/plex) | OFL | 等宽（Regular，来自 google/fonts） |
 | [Source Code Pro](https://github.com/adobe-fonts/source-code-pro) | OFL | 等宽（可变字重，来自 google/fonts） |

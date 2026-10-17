@@ -31,18 +31,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 只构建 standard 变体：maple 变体与它同源（差异仅 BuildConfig 开关 + 内置字体），
-      # 编译等价；maple 的完整构建（含字体获取）在 Release 工作流验证。
+      # 不取内置字体（约 150MB 下载）：缺字体时 debug 照常构建，内置字体的 release 构建在 Release 工作流验证。
       - name: Assemble debug APK
-        run: ./gradlew assembleStandardDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Unit tests
-        # app 带 flavor，没有 testDebugUnitTest 这个任务名，须单独点名，否则只跑到 terminal-* 两个库。
-        run: ./gradlew testDebugUnitTest testStandardDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: moke-debug-apk
-          path: app/build/outputs/apk/standard/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

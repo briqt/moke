@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// 只发一个全功能包：内置 Maple Mono NF CN 并作默认中文回退。字体由 scripts/fetch-maple-font.sh
+// 取得（OFL，约 20MB，不入库）；缺字体时 debug 仍可构建（Maple 改为可下载、默认回退思源黑体），
+// release 直接失败，避免发出不完整的包。
+val mapleFont = file("src/main/res/font/maple_mono.ttf")
+
 android {
     namespace = "com.briqt.moke"
     compileSdk = 37
@@ -17,6 +22,7 @@ android {
         vectorDrawables { useSupportLibrary = true }
         // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
         ndk { abiFilters += "arm64-v8a" }
+        buildConfigField("boolean", "BUNDLE_MAPLE", mapleFont.exists().toString())
     }
 
     signingConfigs {
@@ -49,21 +55,6 @@ android {
                 signingConfigs.getByName("release")
             else
                 signingConfigs.getByName("debug")
-        }
-    }
-
-    // 发行变体：standard = 常规包（中文回退用内置思源黑体子集，体积小）；
-    // maple = 自带 Maple Mono NF CN 并作为默认中文回退（开箱中英等宽，代价是包更大）。
-    // 两者同 applicationId，用户择一安装；产物按文件名区分（见 Release 工作流）。
-    flavorDimensions += "dist"
-    productFlavors {
-        create("standard") {
-            dimension = "dist"
-            buildConfigField("boolean", "BUNDLE_MAPLE", "false")
-        }
-        create("maple") {
-            dimension = "dist"
-            buildConfigField("boolean", "BUNDLE_MAPLE", "true")
         }
     }
 
@@ -133,4 +124,10 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        check(mapleFont.exists()) { "release 需要内置字体，先运行 scripts/fetch-maple-font.sh" }
+    }
 }

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# 为 `maple` 发行变体准备内置字体：从 Maple Mono 官方 Release 下载整包、校验、提取 Regular 单字重，
-# 放到 app/src/maple/res/font/maple_mono.ttf（该文件不入库，见 .gitignore；OFL 许可，可再分发）。
-# standard 变体不需要它。CI 在构建 maple 变体前执行本脚本。
+# 准备内置字体：从 Maple Mono 官方 Release 下载整包、校验、提取 Regular 单字重，
+# 放到 app/src/main/res/font/maple_mono.ttf（该文件不入库，见 .gitignore；OFL 许可，可再分发）。
+# release 构建必须有它（缺失即失败）；debug 可不取。Release 工作流构建前执行本脚本。
 #
 # 用法：./scripts/fetch-maple-font.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEST="$REPO_ROOT/app/src/maple/res/font/maple_mono.ttf"
+DEST="$REPO_ROOT/app/src/main/res/font/maple_mono.ttf"
 WORK="$REPO_ROOT/build/maple-font"
 
 ZIP_URL="https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMonoNormalNL-NF-CN-unhinted.zip"

@@ -12,7 +12,7 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 
 - JDK 17 or newer, Android SDK (compileSdk 37 / build-tools 36)
 - Create `local.properties` at the project root: `sdk.dir=/path/to/Android/sdk`
-- Build: `./gradlew assembleStandardDebug`; test: `./gradlew testDebugUnitTest testStandardDebugUnitTest` (for the `maple` flavor and the mosh native build, see the Build section of the README)
+- Build: `./gradlew assembleDebug`; test: `./gradlew testDebugUnitTest` (for the release and mosh native builds, see the Build section of the README)
 
 ## Conventions
 
@@ -25,8 +25,7 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 - Stable releases use `vX.Y.Z`; pre-releases use a SemVer suffix such as `vX.Y.Z-rc.1`. `versionName` is the tag without the leading `v`.
 - `versionCode` must increase for every distributed APK. A stable release following a pre-release must use a higher `versionCode`, even when both share the same `X.Y.Z`.
 - Tags with a SemVer suffix are published as GitHub Pre-releases and never become Latest. The in-app update check follows GitHub's latest stable release and therefore does not offer pre-releases.
-- Standard and Maple APKs share `com.briqt.moke` and the same stable release signature. Either variant can upgrade the other when its `versionCode` is higher.
-- Before tagging, update `CHANGELOG.md`, run unit tests, assemble the Standard debug APK, and run Android Lint. The release workflow validates that the tag and `versionName` match, builds both signed release variants, and verifies their required native libraries.
+- Before tagging, update `CHANGELOG.md`, run unit tests, assemble the debug APK, and run Android Lint. The release workflow validates that the tag and `versionName` match, builds the signed release APK, and verifies its native libraries and bundled font.
 
 ## License
 
