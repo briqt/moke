@@ -3,6 +3,8 @@ package com.briqt.moke.net
 import com.briqt.moke.data.NetworkEntry
 import java.io.DataInputStream
 import java.io.IOException
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -33,13 +35,15 @@ class NetworkSocket(private val manager: NetworkManager, private val network: Ne
         // 名字保持未解析；字面 IP 也按原样交给网络（由网络判定是否可达/在 tailnet 内）。
         val host = if (target.isUnresolved) target.hostString else target.address.hostAddress
         val ticket = manager.openDial(network)
-        var connected = false
         try {
             super.connect(InetSocketAddress(InetAddress.getByName(ticket.host), ticket.port), timeout)
-            connected = true
+            // 回环 SOCKS 握手不能无限阻塞：进程被冻结或 Go 侧异常时，否则会一直占着这张租约。
+            soTimeout = HANDSHAKE_TIMEOUT_MS
             handshake(ticket, host, target.port)
+            soTimeout = 0
         } catch (t: Throwable) {
-            if (!connected) manager.cancelDial(ticket)
+            // 无论回环 TCP 是否连上，失败后都要归还凭据，否则租约会一直把网络实例钉住。
+            manager.cancelDial(ticket)
             runCatching { close() }
             throw t
         }
@@ -58,9 +62,7 @@ class NetworkSocket(private val manager: NetworkManager, private val network: Ne
         out.flush()
         val auth = ByteArray(2).also { inp.readFully(it) }
         if (auth[1].toInt() != 0) throw IOException("loopback SOCKS rejected the credentials")
-        val name = host.toByteArray()
-        if (name.isEmpty() || name.size > 255) throw IOException("invalid target host")
-        out.write(byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + byteArrayOf((port shr 8).toByte(), port.toByte()))
+        out.write(socksTarget(host, port))
         out.flush()
         val head = ByteArray(4).also { inp.readFully(it) }
         if (head[1].toInt() != 0) {
@@ -75,6 +77,36 @@ class NetworkSocket(private val manager: NetworkManager, private val network: Ne
             else -> throw IOException("invalid SOCKS address type")
         }
         inp.readFully(ByteArray(skip + 2))
+    }
+
+    companion object {
+        private const val HANDSHAKE_TIMEOUT_MS = 30_000
+        private val IPV4 = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
+
+        /**
+         * SOCKS5 CONNECT 的目标地址。字面 IP 用 ATYP=1/4 上送，名字用 ATYP=3 交给网络解析：
+         * 旧实现一律按域名编码，IPv6 字面量（含 `:`）会被回环 SOCKS 拒绝并报成 INTERNAL。
+         */
+        internal fun socksTarget(host: String, port: Int): ByteArray {
+            val head = when {
+                host.contains(':') -> {
+                    val a = InetAddress.getByName(host)
+                    if (a !is Inet6Address) throw IOException("invalid IPv6 target")
+                    byteArrayOf(5, 1, 0, 4) + a.address
+                }
+                IPV4.matches(host) -> {
+                    val a = InetAddress.getByName(host)
+                    if (a !is Inet4Address) throw IOException("invalid IPv4 target")
+                    byteArrayOf(5, 1, 0, 1) + a.address
+                }
+                else -> {
+                    val name = host.toByteArray()
+                    if (name.isEmpty() || name.size > 255) throw IOException("invalid target host")
+                    byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name
+                }
+            }
+            return head + byteArrayOf((port shr 8).toByte(), port.toByte())
+        }
     }
 }
 

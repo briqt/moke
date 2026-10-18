@@ -3,6 +3,7 @@ package com.briqt.moke.terminal.sftp
 import android.content.Context
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.net.NetworkException
 import com.briqt.moke.terminal.SshConnector
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
@@ -120,12 +121,16 @@ class SftpSession(
     private fun statType(path: String): Boolean =
         client().stat(path).mode.type == FileMode.Type.DIRECTORY
 
-    fun stat(path: String): RemoteStat? = runCatching {
+    fun stat(path: String): RemoteStat? = try {
         withReconnect {
             val a = it.stat(path)
             RemoteStat(a.size, a.mtime, a.mode.type == FileMode.Type.DIRECTORY)
         }
-    }.getOrNull()
+    } catch (t: Throwable) {
+        // 「文件不存在」可以返回 null；网络/登录/代理失败必须原样抛出，否则会被报成「远端文件不存在」。
+        if (t is NetworkException || t.cause is NetworkException) throw t
+        null
+    }
 
     fun mkdir(path: String) = withReconnect { it.mkdir(path) }
 

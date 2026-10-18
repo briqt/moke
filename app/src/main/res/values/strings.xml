@@ -458,6 +458,7 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="net_err_proxy_refused">The proxy “%1$s” refused the connection.</string>
     <string name="net_err_proxy_tls">The certificate of the proxy “%1$s” could not be verified.</string>
     <string name="net_err_proxy_no_udp">The proxy “%1$s” cannot carry UDP, so mosh cannot use it.</string>
+    <string name="net_err_busy">“%1$s” is still in use. Close the sessions using it first.</string>
     <string name="net_err_internal">Network error (%1$s).</string>
     <!-- 网络（tailnet / 代理）：设置入口、网络页、表单、主机编辑、连接前检查 -->
     <string name="menu_network">Network</string>

@@ -161,14 +161,15 @@ class SshTransport(
                     }
                 }
                 session.onTransportFinished(0)
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                // 捕获 Throwable（含类加载/OOM 等 Error），保证任何建连失败都只报错，不会让会话永远停在「正在连接」。
                 if (!established) {
                     // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
-                    (e as? NetworkException)?.let(onNetworkError)
-                    session.onTransportConnectFailed(e.connectFailureText(appContext))
+                    (t as? NetworkException)?.let(onNetworkError)
+                    session.onTransportConnectFailed(t.connectFailureText(appContext))
                 } else {
                     // 连上之后才断的：是"中断"，不是"连接失败"。
-                    val msg = ("\r\n" + appContext.localized(R.string.ssh_connection_lost, e.message ?: "") + "\r\n").toByteArray()
+                    val msg = ("\r\n" + appContext.localized(R.string.ssh_connection_lost, t.message ?: "") + "\r\n").toByteArray()
                     session.processToEmulator(msg, msg.size)
                     session.onTransportFinished(1)
                 }

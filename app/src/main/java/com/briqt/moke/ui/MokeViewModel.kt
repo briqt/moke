@@ -101,6 +101,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val networksState: StateFlow<ListState<NetworkEntry>> = networkStore.state
         .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
 
+    /** 最近一次已接受的网络配置：连续保存时 StateFlow 可能还没刷新，不能用它判断「改了什么」。 */
+    private val lastSavedNetworks = HashMap<String, NetworkEntry>()
+
     /**
      * 存量凭据解不开（Keystore 密钥失效，典型是整机备份恢复到新机）。
      * 连接页据此说清原因——否则用户只看到一个空列表，会以为数据自己没了。
@@ -420,7 +423,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         )
         // 登录流程：节点进入 Running 即完成（浏览器授权、认证密钥、管理员批准都走到这里）。
         val flows = _loginFlows.value
-        val done = flows.keys.filter { id -> status[id]?.state == "Running" }
+        val done = flows.keys.filter { id -> status[id]?.let { it.state == "Running" && !it.expired } == true }
         if (done.isNotEmpty()) {
             done.forEach { id -> list.firstOrNull { it.id == id }?.let { nm.endLogin(it) } }
             if (done.any { flows[it]?.url?.isNotEmpty() == true }) _loginCompleted.value = done.first()
@@ -433,12 +436,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * @return 保存后的条目（版本可能已加一）。
      */
     fun saveNetwork(entry: NetworkEntry): NetworkEntry {
-        val old = networks.value.firstOrNull { it.id == entry.id }
+        val old = synchronized(lastSavedNetworks) {
+            lastSavedNetworks[entry.id] ?: networks.value.firstOrNull { it.id == entry.id }
+        }
         val bumped = if (old != null && entry.kind == NetworkKind.PROXY && proxyChanged(old, entry)) {
             entry.copy(revision = old.revision + 1)
         } else {
             entry.copy(revision = old?.revision ?: entry.revision)
         }
+        synchronized(lastSavedNetworks) { lastSavedNetworks[entry.id] = bumped }
         viewModelScope.launch {
             networkStore.update { list ->
                 if (list.any { it.id == bumped.id }) list.map { if (it.id == bumped.id) bumped else it } else list + bumped
@@ -532,6 +538,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun preflight(host: Host): Preflight {
         val route = routeOf(host.id)
         if (route is Route.Missing && route.what != MissingKind.HOST) {
+            return Preflight.Refused(route.refusalText(getApplication()).orEmpty())
+        }
+        // 列表还在读 / 解不开：等待或明确说「读不出来」，绝不能当成「已删除」或放行去连接。
+        if (route is Route.Loading || route is Route.Unreadable) {
             return Preflight.Refused(route.refusalText(getApplication()).orEmpty())
         }
         val net = (route as? Route.Ok)?.network ?: return Preflight.Ok
@@ -717,6 +727,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         val ok = route as? Route.Ok
         val session = sessions.openTmux(
             source, target, ok?.jump, ok?.network, route.refusalText(getApplication()), detachOthers,
+            host = ok?.host ?: source.host,
         )
         ensureSessionService()
         rememberTmuxSession(source.host, target.name)

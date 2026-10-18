@@ -439,8 +439,23 @@ func (b *bridge) loginURL(id string) (string, error) {
 	if err != nil {
 		return "", codes.Boundary("read login state", err, codes.Internal, n.secrets...)
 	}
+	// Running + expired is a real state: the node key expired while the node kept running.
+	// Log out first so the control plane accepts a fresh interactive login; otherwise the UI
+	// would wait forever for an AuthURL that never comes.
 	if s.State != "NeedsLogin" {
-		return "", nil
+		if !s.Expired {
+			return "", nil
+		}
+		if err := n.node.Logout(ctx); err != nil {
+			return "", codes.Boundary("log out expired node", err, codes.Internal, n.secrets...)
+		}
+		s, err = n.node.Snapshot(ctx)
+		if err != nil {
+			return "", codes.Boundary("read login state after logout", err, codes.Internal, n.secrets...)
+		}
+		if s.State != "NeedsLogin" {
+			return "", codes.New(codes.NotReady, "node is "+s.State)
+		}
 	}
 	if s.AuthURL == "" {
 		if err := n.node.StartLogin(ctx); err != nil {

@@ -271,17 +271,19 @@ class SessionManager(context: Context) {
         refusal: String? = null,
         detachOthers: Boolean = false,
         term: String? = null,
+        /** 最近一次按 ID 解析出的主机配置；来源会话可能还持有编辑前的旧快照。 */
+        host: Host = source.host,
     ): TermSession {
         if (!detachOthers) {
             _sessions.value.firstOrNull {
-                it.host.id == source.host.id &&
+                it.host.id == host.id &&
                     (it.remoteTmuxName.value == target.name || it.remoteTmuxId.value == target.id) &&
                     it.alive.value
             }?.let { return it }
         }
 
         return open(
-            host = source.host,
+            host = host,
             jumpHost = jumpHost,
             network = network,
             refusal = refusal,

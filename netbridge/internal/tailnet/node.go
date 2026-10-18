@@ -212,7 +212,36 @@ func (n *Node) dialer() (*tsdial.Dialer, error) {
 }
 
 // plan resolves target on this tailnet for network ("tcp" or "udp").
+//
+// Right after login the control plane's netmap may not include the target yet. Treat
+// NOT_IN_TAILNET / NAME_NOT_FOUND as transient for a short grace period, so the first
+// connection after login does not fail with a misleading error.
 func (n *Node) plan(ctx context.Context, target, network string) (netip.AddrPort, *ipnstate.Status, *tsdial.Dialer, error) {
+	deadline := time.Now().Add(netmapGrace)
+	for {
+		ap, st, d, err := n.planOnce(ctx, target, network)
+		if err == nil || time.Now().After(deadline) || !transientTarget(err) {
+			return ap, st, d, err
+		}
+		select {
+		case <-ctx.Done():
+			return ap, st, d, err
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+const netmapGrace = 3 * time.Second
+
+func transientTarget(err error) bool {
+	var e *codes.Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.Code == codes.NotInTailnet || e.Code == codes.NameNotFound
+}
+
+func (n *Node) planOnce(ctx context.Context, target, network string) (netip.AddrPort, *ipnstate.Status, *tsdial.Dialer, error) {
 	client, err := n.server.LocalClient()
 	if err != nil {
 		return netip.AddrPort{}, nil, nil, err

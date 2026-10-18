@@ -110,7 +110,11 @@ class MoshTransport(
                 serverPid = MoshBootstrap.parsePid(bootstrap.stderr)
                 val connect = MoshBootstrap.parse(bootstrap.stdout)
                     ?: throw IllegalStateException(
-                        appContext.localized(R.string.mosh_bootstrap_unparsed, bootstrap.stdout.trim())
+                        appContext.localized(
+                            R.string.mosh_bootstrap_unparsed,
+                            listOf(bootstrap.stdout, bootstrap.stderr).filter { it.isNotBlank() }
+                                .joinToString("\n").trim(),
+                        )
                     )
                 relay.get()?.let { networks.startRelay(it, udpNetwork!!, connect.port, connect.key) }
                 feed(session, appContext.localized(R.string.mosh_client_starting, connect.port) + "\r\n")
@@ -142,6 +146,17 @@ class MoshTransport(
                 )
                 ptyFd = fd
                 pid = pidArr[0]
+                // close() 可能恰好发生在「检查 closed」与 createSubprocess 之间：子进程已经起来，
+                // 但关闭路径没看到 pid。这里补一次检查，别留下本地 client 与远端 server。
+                if (closed) {
+                    if (pid > 0) runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+                    runCatching { ParcelFileDescriptor.adoptFd(fd).close() }
+                    ptyFd = -1
+                    releaseRelay()
+                    serverPid?.let { killOrphanServer(it) }
+                    finish(session, 1)
+                    return@Thread
+                }
                 if (pid > 0) onEstablished?.invoke()
                 val descriptor = ParcelFileDescriptor.adoptFd(fd)
                 pfd = descriptor
@@ -216,6 +231,9 @@ class MoshTransport(
                 // createSubprocess 成功后仍由 waiter 收口；引导/创建阶段失败才在这里结束。
                 if (pid > 0) {
                     runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+                    releaseRelay()
+                    // 引导已起了 mosh-server 却没能接上：经 SSH 结束它，不留到 24h 超时。
+                    serverPid?.let { killOrphanServer(it) }
                     return@Thread
                 }
                 releaseRelay()

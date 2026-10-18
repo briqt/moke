@@ -25,6 +25,7 @@ fun NetworkException.describe(context: Context): String {
         "PROXY_REFUSED" -> R.string.net_err_proxy_refused
         "PROXY_TLS" -> R.string.net_err_proxy_tls
         "PROXY_NO_UDP" -> R.string.net_err_proxy_no_udp
+        "BUSY" -> R.string.net_err_busy
         else -> return context.localized(R.string.net_err_internal, code)
     }
     return context.localized(id, name)

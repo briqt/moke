@@ -72,6 +72,12 @@ class NetworkManager(context: Context) {
      * 本地状态文件却还在；记住它，界面才不会把已失效的登录显示成「已登录」。下次 Running 时清除。
      */
     private val knownExpired = HashSet<String>()
+
+    /**
+     * 已退出登录、但节点仍有连接（Go 拒绝停止）的网络。状态文件不能立刻删：节点还在用；
+     * 等空闲回收停成后由 [reapIdle] 删除，避免「本地已删、Go 里还在跑」。
+     */
+    private val pendingDelete = HashSet<String>()
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "moke-net-idle").apply { isDaemon = true } }
     private val ifaceThread = Executors.newSingleThreadExecutor { r -> Thread(r, "moke-net-ifaces").apply { isDaemon = true } }
 
@@ -228,10 +234,21 @@ class NetworkManager(context: Context) {
         if (e.kind != NetworkKind.TAILSCALE || !isRunning(e)) return null
         val o = runCatching { JSONObject(Netbridge.nodeStatus(instanceId(e))) }.getOrNull() ?: return null
         val ips = o.optJSONArray("ips")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
-        if (o.optString("state") == "Running" && !o.optBoolean("expired")) synchronized(lock) { knownExpired.remove(e.id) }
+        val state = o.optString("state")
+        val expired = o.optBoolean("expired")
+        if (state == "Running") {
+            if (expired) {
+                // 运行中也能得知过期（界面 2 s 轮询、连接失败都会走到这里）：节点随后空闲停掉时，
+                // 界面不能翻回「已登录」。
+                synchronized(lock) { knownExpired.add(e.id) }
+            } else {
+                synchronized(lock) { knownExpired.remove(e.id) }
+                markLoggedIn(e)
+            }
+        }
         return NodeStatus(
-            state = o.optString("state"), ips = ips, tailnet = o.optString("tailnet"), loginName = o.optString("loginName"),
-            expired = o.optBoolean("expired"), everLoggedIn = o.optBoolean("haveNodeKey"),
+            state = state, ips = ips, tailnet = o.optString("tailnet"), loginName = o.optString("loginName"),
+            expired = expired, everLoggedIn = o.optBoolean("haveNodeKey"),
             leases = o.optInt("leases"),
         )
     }
@@ -239,11 +256,33 @@ class NetworkManager(context: Context) {
     fun isRunning(e: NetworkEntry): Boolean = synchronized(lock) { instanceId(e) in running }
 
     /**
-     * 本地可知的登录状态：有节点状态 = 登录过且没退出（是否已过期要运行起来才知道）。
-     * 不加载 Go、不启动网络，可在界面上随时调用。
+     * 本地可知的登录状态：登录成功（观察到 Running 且未过期）后写的标记 = 登录过且没退出
+     * （是否已过期要运行起来才知道）。不能用节点状态目录里「有文件」判断：tsnet 一启动
+     * 就会写 `_machinekey`，浏览器里取消授权也会留下它。不加载 Go、不启动网络。
      */
     fun hasLoggedIn(e: NetworkEntry): Boolean =
+        e.kind == NetworkKind.TAILSCALE && loginMarker(e.id).exists()
+
+    /** 本地有没有该网络的节点状态（含未完成登录的残留），退出登录时据此决定要不要启动 Go。 */
+    private fun hasState(e: NetworkEntry): Boolean =
         e.kind == NetworkKind.TAILSCALE && runCatching { stateStore.files.hasAny(e.id) }.getOrDefault(false)
+
+    private fun loginMarker(id: String) = File(app.noBackupFilesDir, "tailnet-login/$id")
+
+    /** 记下「这个网络确实登录成功过」；每 2 s 的状态轮询只做一次文件存在判断。 */
+    private fun markLoggedIn(e: NetworkEntry) {
+        if (e.kind != NetworkKind.TAILSCALE) return
+        val f = loginMarker(e.id)
+        if (f.exists()) return
+        runCatching {
+            f.parentFile?.mkdirs()
+            f.writeText("1")
+        }
+    }
+
+    private fun clearLoggedIn(id: String) {
+        loginMarker(id).delete()
+    }
 
     /** 登录流程结束（成功、取消或离开页面）：不再额外保持节点，回到按租约回收。 */
     fun endLogin(e: NetworkEntry) {
@@ -264,9 +303,21 @@ class NetworkManager(context: Context) {
         synchronized(lock) {
             val id = instanceId(e)
             if (authKey.isNotEmpty() && id in running) {
-                // 认证密钥只在节点启动时生效：已运行的节点先停（此时它不可能承载连接）。
-                runCatching { Netbridge.stop(id) }
+                // 认证密钥只在节点启动时生效：已运行的节点先停。停不下（仍有连接）时不能假装停过——
+                // 否则下一步会拿到 ALREADY_STARTED，密钥被静默忽略。
+                if (!runCatching { Netbridge.stop(id) }.isSuccess) {
+                    throw NetworkException("BUSY", e, "network is still in use")
+                }
                 running.remove(id)
+            }
+            if (authKey.isNotEmpty()) {
+                // tsnet ignores an auth key when a node key already exists (it logs "Ignoring authkey").
+                // An auth-key login is a fresh registration: drop the old identity first, otherwise the
+                // node runs with a stale/logged-out key and the tailnet has no usable netmap.
+                clearLoggedIn(e.id)
+                knownExpired.remove(e.id)
+                stateStore.files.deleteNetwork(e.id)
+                File(app.noBackupFilesDir, "tailnet/${e.id}").deleteRecursively()
             }
             if (id !in running) {
                 try {
@@ -274,6 +325,7 @@ class NetworkManager(context: Context) {
                 } catch (t: Throwable) {
                     val ex = NetworkException.from(t, e)
                     if (ex.code != "ALREADY_STARTED") throw ex
+                    if (authKey.isNotEmpty()) throw NetworkException("BUSY", e, "network is already running")
                 }
             }
             running[id] = SystemClock.elapsedRealtime()
@@ -291,8 +343,9 @@ class NetworkManager(context: Context) {
         var loggedOut = true
         // 从没运行过的代理、从没登录过的 tailnet：没有要停的、也没有要退出的，不为此加载 Go。
         val idle = synchronized(lock) { running.keys.none { it == e.id || it.startsWith("${e.id}.r") } && e.id !in loginHolds }
-        if (idle && (e.kind == NetworkKind.PROXY || !hasLoggedIn(e))) {
+        if (idle && (e.kind == NetworkKind.PROXY || !hasState(e))) {
             if (e.kind == NetworkKind.TAILSCALE) {
+                clearLoggedIn(e.id)
                 stateStore.files.deleteNetwork(e.id)
                 File(app.noBackupFilesDir, "tailnet/${e.id}").deleteRecursively()
             }
@@ -311,11 +364,18 @@ class NetworkManager(context: Context) {
             loginHolds.remove(e.id)
             knownExpired.remove(e.id)
             for (id in ids + listOf(e.id)) {
-                // 仍有连接（BUSY）时 Go 不停：留在表里，等连接结束后由空闲回收停掉。
-                if (runCatching { Netbridge.stop(id) }.isSuccess) running.remove(id)
+                // 仍有连接（BUSY）时 Go 不停：留在表里，等连接结束后由空闲回收停掉并清理状态。
+                if (runCatching { Netbridge.stop(id) }.isSuccess) {
+                    running.remove(id)
+                } else if (e.kind == NetworkKind.TAILSCALE && id == e.id) {
+                    pendingDelete.add(e.id)
+                }
             }
         }
-        if (e.kind == NetworkKind.TAILSCALE) {
+        // 登录标记立即清掉：界面不能再显示「已登录」。节点状态文件要等节点真正停下再删，
+        // 否则 Go 仍在使用一个已被删掉的状态目录（运行中还会把它重新写出来）。
+        clearLoggedIn(e.id)
+        if (e.kind == NetworkKind.TAILSCALE && synchronized(lock) { e.id !in pendingDelete }) {
             stateStore.files.deleteNetwork(e.id)
             File(app.noBackupFilesDir, "tailnet/${e.id}").deleteRecursively()
         }
@@ -325,6 +385,8 @@ class NetworkManager(context: Context) {
     /** 空闲回收：没有租约满 [IDLE_STOP_MS] 的实例停止；仍有连接的由 Go 拒绝（BUSY），下次再看。 */
     private fun reapIdle() {
         val now = SystemClock.elapsedRealtime()
+        // 未被消费的一次性凭据 60 s 后过期；不先清扫，leases 会一直 > 0，实例永远停不下来。
+        runCatching { Netbridge.sweepTickets() }
         val candidates = synchronized(lock) { running.toMap() }
         for ((id, lastBusy) in candidates) {
             val held = synchronized(lock) { (loginHolds[id] ?: 0L) > now }
@@ -337,7 +399,14 @@ class NetworkManager(context: Context) {
             if (now - lastBusy < IDLE_STOP_MS) continue
             synchronized(lock) {
                 if (running[id] != lastBusy) return@synchronized
-                if (runCatching { Netbridge.stop(id) }.isSuccess) running.remove(id)
+                if (runCatching { Netbridge.stop(id) }.isSuccess) {
+                    running.remove(id)
+                    if (pendingDelete.remove(id)) {
+                        clearLoggedIn(id)
+                        stateStore.files.deleteNetwork(id)
+                        File(app.noBackupFilesDir, "tailnet/$id").deleteRecursively()
+                    }
+                }
             }
         }
     }

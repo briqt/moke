@@ -383,11 +383,13 @@ private fun ConnectionsContent(
     val errorColor = MaterialTheme.colorScheme.error
     val neutral = MaterialTheme.colorScheme.onSurfaceVariant
     val routeBadge: (Host) -> BadgeSpec? = { h ->
-        val net = networks.firstOrNull { it.id == h.networkId }
+        // 有跳板机时第一跳实际走的是跳板机的网络（F2），卡片要标真正在用的那个。
+        val jump = hosts.firstOrNull { it.id == h.jumpHostId }
+        val effective = if (h.jumpHostId.isNotBlank()) jump else h
+        val net = networks.firstOrNull { it.id == effective?.networkId }
         when {
-            h.jumpHostId.isNotBlank() && h.jumpHostId !in hostIds -> BadgeSpec(deletedJump, errorColor)
-            h.jumpHostId.isNotBlank() -> null
-            h.networkId.isBlank() -> null
+            h.jumpHostId.isNotBlank() && jump == null -> BadgeSpec(deletedJump, errorColor)
+            effective == null || effective.networkId.isBlank() -> null
             net == null -> BadgeSpec(deletedNetwork, errorColor)
             net.kind == NetworkKind.TAILSCALE && networkLive.loggedIn[net.id] == false -> BadgeSpec("${net.name} · $notLoggedIn", errorColor)
             net.kind == NetworkKind.TAILSCALE && net.id in networkLive.expired -> BadgeSpec("${net.name} · $expiredLabel", errorColor)

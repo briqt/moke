@@ -94,6 +94,10 @@ func Stop(id string) error { return defaultBridge.stop(id) }
 // Leases is how many connections, pending dials and relays use network id.
 func Leases(id string) int { return defaultBridge.leaseCount(id) }
 
+// SweepTickets releases dial tickets that were never consumed and have expired. The idle reaper
+// calls it so an abandoned ticket cannot pin a network instance forever.
+func SweepTickets() { defaultBridge.sweepTickets() }
+
 type statusJSON struct {
 	ID        string   `json:"id"`
 	State     string   `json:"state"`

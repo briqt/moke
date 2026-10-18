@@ -454,6 +454,7 @@
     <string name="net_err_proxy_refused">代理「%1$s」拒绝了连接。</string>
     <string name="net_err_proxy_tls">无法验证代理「%1$s」的证书。</string>
     <string name="net_err_proxy_no_udp">代理「%1$s」不能转发 UDP，mosh 无法使用。</string>
+    <string name="net_err_busy">「%1$s」仍在使用中，请先关闭使用它的会话。</string>
     <string name="net_err_internal">网络错误（%1$s）。</string>
     <!-- 网络（tailnet / 代理）：设置入口、网络页、表单、主机编辑、连接前检查 -->
     <string name="menu_network">网络</string>
