@@ -2,7 +2,7 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.2.0-rc.1]
 
 ### 新增
 - **网络接入**（设置 → 网络）：主机可经 SOCKS5 / SOCKS4 / HTTP / HTTPS 代理，或内置 Tailscale（官方 / 自建控制面，可同时多个 tailnet）连接；mosh 同样可用。每台主机在编辑页单独选择网络。
