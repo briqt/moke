@@ -50,8 +50,13 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 | [sshj](https://github.com/hierynomus/sshj) | Apache-2.0 | SSH 传输 |
 | [Bouncy Castle](https://www.bouncycastle.org/) (`bcprov-jdk18on`, `bcpkix-jdk18on`) | MIT-style (Bouncy Castle License) | 加密算法（sshj 依赖） |
 | [SLF4J](https://www.slf4j.org/) (`slf4j-api`) | MIT | 日志接口（sshj 依赖） |
-| AndroidX / Jetpack Compose / Material3 | Apache-2.0 | UI 框架 |
+| [Tailscale](https://tailscale.com/) (`tailscale.com`) | BSD-3-Clause | 内置用户态 tailnet 节点（经 gomobile 编入 `libgojni.so`） |
+| [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto) | BSD-3-Clause | mosh 中继数据报的 AES-OCB 认证 |
+| Go 运行时与 `golang.org/x/*` | BSD-3-Clause | 网络桥接（netbridge） |
+| AndroidX / Jetpack Compose / Material3（含 AndroidX Browser / Custom Tabs） | Apache-2.0 | UI 框架与浏览器登录 |
 | Kotlin 标准库与协程 | Apache-2.0 | 语言运行时 |
+
+netbridge 的其余 Go 依赖随 `netbridge/go.mod` 锁定，完整版本见 `netbridge/go.sum`；各模块许可见其仓库（例如 `github.com/tailscale/wireguard-go` 为 MIT、`gvisor.dev/gvisor` 为 Apache-2.0）。
 
 ## mosh native
 

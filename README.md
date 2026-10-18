@@ -20,13 +20,14 @@ Moke is a native SSH / mosh terminal for Android. It connects to remote servers 
 
 - **SSH**: password / private-key (PEM) auth; TOFU host-key verification with fingerprint confirmation on first connection (matching `ssh-keygen -lf`); jump host (ProxyJump); per-host startup command (e.g. pick cmd, PowerShell or WSL on a Windows host); run-on-login command; keep-alive heartbeat.
 - **Port forwarding**: forward a remote port to the phone (loopback only) and open remote services such as a dev server in the browser; works for SSH and mosh sessions; optional per-host ports forwarded on connect.
+- **Networks**: reach hosts through HTTP / HTTPS / SOCKS4 / SOCKS5 proxies, or join Tailscale tailnets with the built-in userspace client — no separate Tailscale app and no system VPN slot. Official and self-hosted control servers are supported, several tailnets can be online at once, and hosts can be reached by tailnet address or device name; mosh works too. Each host chooses its own network, and proxy credentials and tailnet login state are encrypted with the Android Keystore.
 - **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (survives screen-off and network switches); closing a session also shuts down the remote `mosh-server`.
 - **tmux**: a panel to attach / create / rename / detach / kill remote sessions; optionally attach automatically on connect; optionally let tmux handle swipe scrolling.
 - **Files**: browse remote folders over SFTP (SSH and mosh hosts); upload / download with resume; transfers keep running in the background; send a file's path to the terminal.
 - **Sessions & hosts**: multiple sessions stay resident, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; clear ended sessions; copy connect command.
 - **Terminal**: two rows of customizable extra keys plus an expandable full keyboard (editing keys, F1–F12, Ctrl shortcuts), with hold-to-lock modifiers; text-block input; tap a link to open or copy it, and forward-and-open local links in one step; bell and notification alerts (OSC 9 / 777); three keyboard modes (character / standard / IME first) for comfortable CJK input; copy & paste, including remote clipboard writes (OSC 52); pinch-to-zoom; swipe-to-scroll in full-screen TUIs with a selectable mode, plus jump-to-latest; a top status bar (protocol / host / latency).
 - **Appearance**: live preview; light / dark / follow-system theme with separate terminal color schemes for each; font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback).
-- **Security, languages & updates**: credentials are encrypted with the Android Keystore (AES-GCM) before being stored and are excluded from system backups; bilingual English / 中文, following the system language by default and switchable in Settings; in-app update check (optionally including pre-releases).
+- **Security, languages & updates**: connection credentials, proxy passwords and tailnet login state are encrypted with the Android Keystore (AES-GCM) before being stored and are excluded from system backups; bilingual English / 中文, following the system language by default and switchable in Settings; in-app update check (optionally including pre-releases).
 
 ## Screenshots
 
@@ -49,15 +50,21 @@ Download `moke-vX.Y.Z.apk` from [Releases](https://github.com/briqt/moke/release
 
 ## Build
 
-Requires JDK 17 or newer + Android SDK (compileSdk 37 / build-tools 36). Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
+Requires JDK 17 or newer + Android SDK (compileSdk 37 / build-tools 36); the network bridge also needs Go 1.27.2 and Android NDK r30. Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
 
 ```bash
+# the network bridge is required by every build (Go 1.27.2 + NDK r30)
+ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-netbridge.sh
+
 ./gradlew assembleDebug        # debug APK
 ./gradlew testDebugUnitTest    # unit tests
-./scripts/fetch-maple-font.sh && ./gradlew assembleRelease   # release needs the bundled font first
+
+# release also needs the mosh native artifacts and the bundled font
+ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-mosh-native.sh
+./scripts/fetch-maple-font.sh && ./gradlew assembleRelease
 ```
 
-The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r30 is required, and the GPLv3 binaries are not checked in.
+The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r30 is required, and the GPLv3 binaries are not checked in. The network bridge is built by [`scripts/build-netbridge.sh`](scripts/build-netbridge.sh); its Go, gomobile and Tailscale versions are pinned in `netbridge/go.mod`.
 
 ## Feedback
 
@@ -67,7 +74,7 @@ Community discussion: [学AI，linuxdo](https://linux.do/)
 
 ## Acknowledgements & third-party
 
-The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/termux-app](https://github.com/termux/termux-app) (Apache-2.0, originally from [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)). SSH transport uses [sshj](https://github.com/hierynomus/sshj). The mosh native component is based on [mobile-shell/mosh](https://github.com/mobile-shell/mosh) (GPLv3) and [rjyo/mosh-android](https://github.com/rjyo/mosh-android). The bundled Chinese font is a subset of [Noto Sans SC](https://github.com/notofonts/noto-cjk) (OFL). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.
+The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/termux-app](https://github.com/termux/termux-app) (Apache-2.0, originally from [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)). SSH transport uses [sshj](https://github.com/hierynomus/sshj). The mosh native component is based on [mobile-shell/mosh](https://github.com/mobile-shell/mosh) (GPLv3) and [rjyo/mosh-android](https://github.com/rjyo/mosh-android). The network layer runs [Tailscale](https://tailscale.com/) (BSD-3-Clause) as a userspace library, and the mosh relay uses [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto). Bundled Chinese fonts are OFL-licensed. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.
 
 ## License
 

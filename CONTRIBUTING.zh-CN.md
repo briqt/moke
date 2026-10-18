@@ -12,7 +12,8 @@
 
 - JDK 17 及以上、Android SDK（compileSdk 37 / build-tools 36）
 - 在项目根创建 `local.properties`：`sdk.dir=/path/to/Android/sdk`
-- 构建：`./gradlew assembleDebug`；测试：`./gradlew testDebugUnitTest`（release 与 mosh native 的构建见 README「构建」一节）
+- 构建网络桥接：`ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-netbridge.sh`
+- 构建：`./gradlew assembleDebug`；测试：`./gradlew testDebugUnitTest`（release、mosh native 与内置字体的构建见 README「构建」一节）
 
 ## 约定
 

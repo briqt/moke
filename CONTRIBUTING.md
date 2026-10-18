@@ -12,7 +12,8 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 
 - JDK 17 or newer, Android SDK (compileSdk 37 / build-tools 36)
 - Create `local.properties` at the project root: `sdk.dir=/path/to/Android/sdk`
-- Build: `./gradlew assembleDebug`; test: `./gradlew testDebugUnitTest` (for the release and mosh native builds, see the Build section of the README)
+- Build the network bridge: `ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-netbridge.sh`
+- Build: `./gradlew assembleDebug`; test: `./gradlew testDebugUnitTest` (for the release, mosh native and bundled font builds, see the Build section of the README)
 
 ## Conventions
 
