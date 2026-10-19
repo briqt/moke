@@ -1,65 +1,66 @@
 # 第三方组件与许可
 
-moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护者。
+以下组件保留各自的版权与许可。本文是组件说明，不替代各项目的完整许可文本。
 
-## Vendored（源码内置）
+## 内置终端源码
 
-### terminal-emulator / terminal-view
-- 来源：[termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-emulator`、`terminal-view` 模块
-- 上游来源：[Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)（Jack Palevich 等）
-- 许可：**Apache License 2.0**
-- 修改说明（均为加法式、向后兼容；逐项见各模块的 `README.md`）：
-  - `terminal-view`：`TerminalRenderer` 增加可选行距倍数 / 字间距（em）参数，`TerminalView` 增加 `setFontSpacing(...)`；
-    `TerminalView` 增加全屏程序内的滑动处理与滚屏回调，新增 `MokeScroll.java`（滑动决策）；文本选择工具条去掉无作用的 "More…" 项。
-  - `terminal-emulator`：将 `TerminalSession.java` 改写为传输无关（面向新增的 `TerminalTransport.java`，不再 fork 本地 shell）；
-    保留 `JNI.java` 与 `src/main/jni/termux.c`（PTY 子进程，`JNI` 改为 public），用于以独立子进程运行 `mosh-client`；
-    `TerminalEmulator.java` 识别 DECSET 1003 并新增 `isBracketedPasteMode()`。其余文件未修改。
+`terminal-emulator/` 与 `terminal-view/` 来自 [termux/termux-app](https://github.com/termux/termux-app)，源自 [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)（Jack Palevich 等），采用 **Apache License 2.0**，全文见 [LICENSE-APACHE-2.0.txt](LICENSE-APACHE-2.0.txt)。
 
-### 字体（打包进 APK）
-- [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)（`res/font/jetbrains_mono.ttf`）——**OFL**，默认等宽主字体，未修改。
-- [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk)（`res/font/noto_sans_sc.otf`）——**OFL**，可选的中文回退。为控制体积，**子集化**为常用汉字（GB2312 + 常用标点，约 2.9MB），非完整字符集。
-- [Noto Sans Symbols 2](https://github.com/notofonts/symbols)（`res/font/noto_sans_symbols2.ttf`）——**OFL**，作**符号回退字体**（合成链末级），补主/回退字体常缺的媒体 / 几何 / 杂项符号等终端字形，未修改。
-- [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts)（`res/font/symbols_nerd_font.ttf`）——**MIT**（nerd-fonts 项目；所含图标集各自的许可见其仓库 `LICENSE`），作 **Nerd 图标回退字体**（合成链末级），补 powerline 分隔符 / devicons / 文件类型图标等私有区字形，取官方 v3.4.0 的 `SymbolsNerdFontMono-Regular.ttf`，未修改。
-- [Maple Mono NF CN](https://github.com/subframe7536/maple-font)（`res/font/maple_mono.ttf`）——**OFL**，默认中文回退（中英等宽 + Nerd 图标，取官方 v7.9 的 NormalNL-NF-CN unhinted Regular 单字重），未修改。
+本项目修改了会话传输、PTY JNI、鼠标与粘贴模式查询、终端通知、排版与滑动处理。具体修改见 [terminal-emulator/README.md](terminal-emulator/README.md) 与 [terminal-view/README.md](terminal-view/README.md)。
 
-### 可下载字体（运行期按需下载，不打包进 APK）
-用户在"设置 · 字体"中可选择下载。均从各项目官方 GitHub Releases 获取，存于 app 私有目录：
+## 随 APK 分发的字体
 
-| 字体 | 许可 | 来源 |
+字体位于 `app/src/main/res/font/`。
+
+| 字体 | 文件 | 许可与修改 |
 |---|---|---|
-| [Fira Code](https://github.com/tonsky/FiraCode) | OFL | 连字编程等宽（Regular） |
-| [Hack](https://github.com/source-foundry/Hack) | MIT-derived (Hack Open Font License) | 经典编程等宽，无连字 |
-| [IBM Plex Mono](https://github.com/IBM/plex) | OFL | 等宽（Regular，来自 google/fonts） |
-| [Source Code Pro](https://github.com/adobe-fonts/source-code-pro) | OFL | 等宽（可变字重，来自 google/fonts） |
-| [Roboto Mono](https://github.com/googlefonts/RobotoMono) | Apache-2.0 | 等宽（可变字重，来自 google/fonts） |
-| [Ubuntu Mono](https://design.ubuntu.com/font) | UFL | 等宽（Regular，来自 google/fonts） |
-| [Inconsolata](https://github.com/googlefonts/Inconsolata) | OFL | 等宽（可变字重，来自 google/fonts） |
-| [Space Mono](https://github.com/googlefonts/spacemono) | OFL | 等宽（Regular，来自 google/fonts） |
-| [Anonymous Pro](https://www.marksimonson.com/fonts/view/anonymous-pro) | OFL | 等宽（Regular，来自 google/fonts） |
-| [Cascadia Code](https://github.com/microsoft/cascadia-code) | OFL | 连字等宽（可变字重，来自 google/fonts） |
-| [JetBrainsMono Nerd Font](https://github.com/ryanoasis/nerd-fonts) | OFL（图标集见 nerd-fonts） | JetBrains Mono + Nerd 图标（Regular） |
-| [Victor Mono](https://github.com/rubjo/victor-mono) | OFL | 连字 + 草书斜体（可变字重，来自 google/fonts） |
-| [DejaVu Sans Mono](https://github.com/dejavu-fonts/dejavu-fonts) | Bitstream Vera License | 字形覆盖广的等宽（Regular，官方 Release） |
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | `jetbrains_mono.ttf` | SIL OFL 1.1，未修改 |
+| [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk) | `noto_sans_sc.otf` | SIL OFL 1.1；子集化为 GB2312 汉字与常用标点，非完整字符集 |
+| [Noto Sans Symbols 2](https://github.com/notofonts/symbols) | `noto_sans_symbols2.ttf` | SIL OFL 1.1，未修改；符号回退 |
+| [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) | `symbols_nerd_font.ttf` | nerd-fonts 项目为 MIT，所含图标集另有各自许可；取官方 v3.4.0 Regular，未修改 |
+| [Maple Mono NF CN](https://github.com/subframe7536/maple-font) | `maple_mono.ttf` | SIL OFL 1.1；官方 v7.9 NormalNL-NF-CN unhinted Regular，未修改；发布包内置，Debug 未准备时可下载 |
 
-用户在"设置 · 字体 · 上传本地字体"导入的 TTF / OTF 文件仅存于设备本地、不随 APK 分发，其许可由用户自行负责。
+含 Nerd 图标的字体还须遵守上游列明的图标集许可，见 [nerd-fonts LICENSE](https://github.com/ryanoasis/nerd-fonts/blob/master/LICENSE)。
 
-## 运行期依赖（构建时拉取，未内置源码）
+## 按需下载的字体
+
+这些字体不随 APK 分发，用户可在字体设置中下载，文件存于应用私有目录。下载来源包括项目官方仓库、GitHub Releases 和 `google/fonts`；具体文件与校验值见 [FontCatalog.kt](app/src/main/java/com/briqt/moke/terminal/FontCatalog.kt)。
+
+| 字体 | 许可 | 获取来源 |
+|---|---|---|
+| [Fira Code](https://github.com/tonsky/FiraCode) | SIL OFL 1.1 | 官方 Release |
+| [Hack](https://github.com/source-foundry/Hack) | MIT-derived（Hack Open Font License） | 官方 Release |
+| [IBM Plex Mono](https://github.com/IBM/plex) | SIL OFL 1.1 | google/fonts |
+| [Source Code Pro](https://github.com/adobe-fonts/source-code-pro) | SIL OFL 1.1 | google/fonts |
+| [Roboto Mono](https://github.com/googlefonts/RobotoMono) | [SIL OFL 1.1](https://github.com/google/fonts/blob/main/ofl/robotomono/OFL.txt) | google/fonts |
+| [Ubuntu Mono](https://design.ubuntu.com/font) | Ubuntu Font Licence（UFL） | google/fonts |
+| [Inconsolata](https://github.com/googlefonts/Inconsolata) | SIL OFL 1.1 | google/fonts |
+| [Space Mono](https://github.com/googlefonts/spacemono) | SIL OFL 1.1 | google/fonts |
+| [Anonymous Pro](https://www.marksimonson.com/fonts/view/anonymous-pro) | SIL OFL 1.1 | google/fonts |
+| [Cascadia Code](https://github.com/microsoft/cascadia-code) | SIL OFL 1.1 | google/fonts |
+| [JetBrainsMono Nerd Font](https://github.com/ryanoasis/nerd-fonts) | SIL OFL 1.1；图标集许可另见上游 | nerd-fonts 官方仓库 |
+| [Victor Mono](https://github.com/rubjo/victor-mono) | SIL OFL 1.1 | google/fonts |
+| [DejaVu Sans Mono](https://github.com/dejavu-fonts/dejavu-fonts) | Bitstream Vera License | 官方 Release |
+
+用户导入的 TTF / OTF 仅存于设备本地，不随 APK 分发；其许可由用户自行负责。
+
+## 应用依赖
 
 | 组件 | 许可 | 用途 |
 |---|---|---|
 | [sshj](https://github.com/hierynomus/sshj) | Apache-2.0 | SSH 传输 |
-| [Bouncy Castle](https://www.bouncycastle.org/) (`bcprov-jdk18on`, `bcpkix-jdk18on`) | MIT-style (Bouncy Castle License) | 加密算法（sshj 依赖） |
-| [SLF4J](https://www.slf4j.org/) (`slf4j-api`) | MIT | 日志接口（sshj 依赖） |
-| [Tailscale](https://tailscale.com/) (`tailscale.com`) | BSD-3-Clause | 内置用户态 tailnet 节点（经 gomobile 编入 `libgojni.so`） |
-| [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto) | BSD-3-Clause | mosh 中继数据报的 AES-OCB 认证 |
-| Go 运行时与 `golang.org/x/*` | BSD-3-Clause | 网络桥接（netbridge） |
-| AndroidX / Jetpack Compose / Material3（含 AndroidX Browser / Custom Tabs） | Apache-2.0 | UI 框架与浏览器登录 |
+| [Bouncy Castle](https://www.bouncycastle.org/)（`bcprov-jdk18on`、`bcpkix-jdk18on`） | MIT-style（Bouncy Castle License） | 加密算法 |
+| [SLF4J](https://www.slf4j.org/)（`slf4j-api`） | MIT | 日志接口 |
+| [Tailscale](https://github.com/tailscale/tailscale)（`tailscale.com`） | BSD-3-Clause | 用户态 tailnet 节点 |
+| [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto) | BSD-3-Clause | mosh 中继 AES-OCB 认证 |
+| Go 运行时与 `golang.org/x/*` | BSD-3-Clause | 网络桥接 |
+| AndroidX / Jetpack Compose / Material3（含 AndroidX Browser） | Apache-2.0 | Android 界面与浏览器登录 |
 | Kotlin 标准库与协程 | Apache-2.0 | 语言运行时 |
 
-netbridge 的其余 Go 依赖随 `netbridge/go.mod` 锁定，完整版本见 `netbridge/go.sum`；各模块许可见其仓库（例如 `github.com/tailscale/wireguard-go` 为 MIT、`gvisor.dev/gvisor` 为 Apache-2.0）。
+Android 依赖版本见 `gradle/libs.versions.toml`；Go 依赖的选定版本见 `netbridge/go.mod`，校验值见 `netbridge/go.sum`。其他 Go 模块保留各自许可，例如 `github.com/tailscale/wireguard-go` 为 MIT、`gvisor.dev/gvisor` 为 Apache-2.0。
 
-## mosh native
+## mosh native 与分发义务
 
-mosh 集成：`libmosh-client.so`（mosh 1.4.0 前端 + [rjyo/mosh-android](https://github.com/rjyo/mosh-android) 预编译静态库）
-作为**独立可执行二进制**（GPLv3），以独立子进程 + PTY/管道 IPC 运行，**不与产品层链接**。
-二进制不入库，由 `scripts/build-mosh-native.sh` 从公开源码复现。分发含该二进制的 APK 须随附对应 GPLv3 源码；商业分发前请法务确认。
+`libmosh-client.so` 来自 [mobile-shell/mosh](https://github.com/mobile-shell/mosh) 1.4.0 前端与 [rjyo/mosh-android](https://github.com/rjyo/mosh-android) 预编译静态库，采用 **GPLv3**。它是通过 PTY 运行的独立可执行文件，不与应用产品层链接。构建入口为 `scripts/build-mosh-native.sh`，二进制不入库。
+
+分发含 GPL 组件的 APK 或其他二进制时，须按适用 GPL 条款提供与所分发产物对应的完整源码，包括修改、必要构建脚本及 GPL 要求涵盖的链接依赖源码，并保留版权和许可通知。引用上游仓库或提供预编译库下载地址，不能代替对应源码义务；链接依赖仍须遵守各自许可。产品层的许可另见 [LICENSE](LICENSE) 与 [COPYRIGHT.md](COPYRIGHT.md)。

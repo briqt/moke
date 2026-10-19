@@ -29,4 +29,7 @@ app/src/main/res/font/maple_mono.ttf
 
 # netbridge（Go）AAR：由 scripts/build-netbridge.sh 生成（不入库）
 app/libs/netbridge.aar
+# AAR 与内容指纹的不可变生成目录；netbridge.aar 原子指向一个完整生成。
+app/libs/netbridge-artifacts/
+app/libs/netbridge.aar.fingerprint
 app/libs/netbridge-sources.jar

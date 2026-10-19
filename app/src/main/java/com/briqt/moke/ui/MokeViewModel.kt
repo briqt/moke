@@ -29,6 +29,8 @@ import com.briqt.moke.data.MissingKind
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.NetworkStore
+import com.briqt.moke.data.StoreFailure
+import com.briqt.moke.data.StoreResult
 import com.briqt.moke.data.Route
 import com.briqt.moke.data.clearDanglingJumps
 import com.briqt.moke.data.ScrollMode
@@ -37,8 +39,12 @@ import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
 import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.data.hostsUsingNetwork
 import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.NetworkManager
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
+import com.briqt.moke.net.recovery
 import com.briqt.moke.net.describe
 import com.briqt.moke.net.refusalText
 import com.briqt.moke.terminal.FontCatalog
@@ -50,7 +56,12 @@ import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateInfo
 import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,24 +102,21 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** [sessionId] 非空 = 指明要回到哪个会话（终端提醒）；为空 = 按会话数决定落点（保活通知）。 */
     data class OpenSessionsRequest(val sessionId: String?)
 
-    val hosts: StateFlow<List<Host>> = store.hosts
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** 主机 / 网络列表的三态（加载中、解不开、已读到）：连接前据此解析路由，不把「没读完」当「已删除」。 */
-    private val hostsState: StateFlow<ListState<Host>> = store.state
+    /** 主机 / 网络列表的三态（加载中、解不开、已读到）。 */
+    val hostsState: StateFlow<ListState<Host>> = store.state
         .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
+    val hosts: StateFlow<List<Host>> = hostsState
+        .map { (it as? ListState.Ready)?.items.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val networkStore = NetworkStore(app)
     val networksState: StateFlow<ListState<NetworkEntry>> = networkStore.state
         .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
-
-    /** 最近一次已接受的网络配置：连续保存时 StateFlow 可能还没刷新，不能用它判断「改了什么」。 */
-    private val lastSavedNetworks = HashMap<String, NetworkEntry>()
 
     /**
      * 存量凭据解不开（Keystore 密钥失效，典型是整机备份恢复到新机）。
      * 连接页据此说清原因——否则用户只看到一个空列表，会以为数据自己没了。
      */
-    val credentialsUnreadable: StateFlow<Boolean> = store.unreadable
+    val credentialsUnreadable: StateFlow<Boolean> = hostsState.map { it is ListState.Unreadable }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** 用户选的配色：关闭联动时即最终生效者；开启联动后是「深色模式用」那一套。 */
@@ -242,15 +250,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 修复 rc.1 可能把运行态 `tmux attach-session -t '$N'` 污染进保存连接的问题。 */
     private fun repairLegacyTmuxLoginCommands() = viewModelScope.launch(Dispatchers.IO) {
-        val current = store.hosts.first()
-        val repaired = current.map { host ->
-            if (Tmux.isLegacyInjectedLoginCommand(host.loginCommand)) {
-                host.copy(loginCommand = "")
-            } else {
-                host
-            }
+        store.updateAll { current ->
+            current.map { host ->
+                if (Tmux.isLegacyInjectedLoginCommand(host.loginCommand)) host.copy(loginCommand = "") else host
+            }.takeIf { it != current }
         }
-        if (repaired != current) store.save(repaired)
     }
 
     /**
@@ -323,10 +327,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val importSuccess: StateFlow<String?> = _importSuccess.asStateFlow()
     fun clearImportSuccess() { _importSuccess.value = null }
 
-    fun save(host: Host) = viewModelScope.launch { store.upsert(host, hosts.value) }
+    suspend fun saveHost(host: Host, editing: Boolean): StoreResult<Host> = store.commit(host, editing)
+
+    fun save(host: Host) = viewModelScope.launch {
+        val result = saveHost(host, hosts.value.any { it.id == host.id })
+        if (result is StoreResult.Failed) _networkNotice.value = str(storeFailureMessage(result.reason))
+    }
 
     fun delete(host: Host) = viewModelScope.launch {
-        store.delete(host, hosts.value)
+        val removed = store.remove(host.id)
+        if (removed is StoreResult.Failed) {
+            _networkNotice.value = str(storeFailureMessage(removed.reason))
+            return@launch
+        }
         // 同时忘记指纹：否则服务器换密钥后"删除重建连接"依然连不上（指纹按 host:port 存，与条目无关）。
         if (hosts.value.none {
                 it.id != host.id && it.host == host.host && it.port == host.port && it.fingerprintNamespace == host.fingerprintNamespace
@@ -343,7 +356,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val networkManager get() = getApplication<MokeApplication>().networks
 
     /** 已保存的网络（读不出来或还在读时为空；那两种情况由 [networksState] 区分）。 */
-    val networks: StateFlow<List<NetworkEntry>> = networkStore.state
+    val networks: StateFlow<List<NetworkEntry>> = networksState
         .map { (it as? ListState.Ready)?.items.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -362,21 +375,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val _networkLive = MutableStateFlow(NetworkLive())
     val networkLive: StateFlow<NetworkLive> = _networkLive.asStateFlow()
 
-    /** 进行中的 tailnet 登录：网络 id → 登录流程状态。 */
-    data class LoginFlow(val url: String = "", val error: String? = null, val busy: Boolean = true)
+    data class LoginFlow(val url: String = "", val error: String? = null, val busy: Boolean = true, val attempt: Long = 0)
+    data class LoginUrlRequest(val networkId: String, val attempt: Long, val url: String)
 
-    private val _loginFlows = MutableStateFlow<Map<String, LoginFlow>>(emptyMap())
-    val loginFlows: StateFlow<Map<String, LoginFlow>> = _loginFlows.asStateFlow()
-
-    /** 要在浏览器（Custom Tabs）里打开的授权页；界面打开后调 [consumeLoginUrl]。 */
-    private val _loginUrl = MutableStateFlow<String?>(null)
-    val loginUrl: StateFlow<String?> = _loginUrl.asStateFlow()
-    fun consumeLoginUrl() { _loginUrl.value = null }
-
-    /** 登录在浏览器里完成：界面据此把应用带回前台（一次性）。 */
-    private val _loginCompleted = MutableStateFlow<String?>(null)
-    val loginCompleted: StateFlow<String?> = _loginCompleted.asStateFlow()
-    fun consumeLoginCompleted() { _loginCompleted.value = null }
+    private val networkLogins by lazy {
+        NetworkLoginController(viewModelScope, ::saveNetwork, object : NetworkLoginBackend {
+            override fun hold(entry: NetworkEntry, attempt: Long) = networkManager.holdLogin(entry, attempt)
+            override fun begin(entry: NetworkEntry, authKey: String, attempt: Long): String = networkManager.beginLogin(entry, authKey, attempt)
+            override fun end(entry: NetworkEntry, attempt: Long) = networkManager.endLogin(entry, attempt)
+        }) { t -> (t as? NetworkException)?.describe(getApplication()) ?: str(R.string.store_failure_io) }
+    }
+    val loginFlows: StateFlow<Map<String, LoginFlow>> get() = networkLogins.flows
+    val loginUrl: StateFlow<LoginUrlRequest?> get() = networkLogins.url
+    fun consumeLoginUrl(request: LoginUrlRequest): String? = networkLogins.consume(request)
 
     /** 网络操作的一次性提示（如「已退出，但没能通知控制服务器」）。 */
     private val _networkNotice = MutableStateFlow<String?>(null)
@@ -405,29 +416,40 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 不在网络页面时也要知道「未登录」（设置行、主机卡片、连接前检查）：刷新一次本地状态。 */
     fun refreshNetworksOnce() = viewModelScope.launch(Dispatchers.IO) { refreshNetworkLive() }
 
-    private fun refreshNetworkLive() {
-        val list = networks.value
-        val nm = networkManager
-        val status = HashMap<String, NetworkManager.NodeStatus>()
-        val leases = HashMap<String, Int>()
-        for (e in list) {
-            if (!nm.isRunning(e)) continue
-            runCatching { nm.status(e) }.getOrNull()?.let { status[e.id] = it }
-            leases[e.id] = runCatching { nm.leases(e) }.getOrDefault(0)
-        }
-        _networkLive.value = NetworkLive(
-            loggedIn = list.filter { it.kind == NetworkKind.TAILSCALE }.associate { it.id to nm.hasLoggedIn(it) },
-            status = status,
-            leases = leases,
-            expired = list.filter { nm.isKnownExpired(it) }.map { it.id }.toSet(),
-        )
-        // 登录流程：节点进入 Running 即完成（浏览器授权、认证密钥、管理员批准都走到这里）。
-        val flows = _loginFlows.value
-        val done = flows.keys.filter { id -> status[id]?.let { it.state == "Running" && !it.expired } == true }
-        if (done.isNotEmpty()) {
-            done.forEach { id -> list.firstOrNull { it.id == id }?.let { nm.endLogin(it) } }
-            if (done.any { flows[it]?.url?.isNotEmpty() == true }) _loginCompleted.value = done.first()
-            _loginFlows.update { it - done.toSet() }
+    fun retryNetworkReads() {
+        networkStore.refresh()
+        store.refresh()
+        refreshNetworksOnce()
+    }
+
+    private suspend fun refreshNetworkLive() = coroutineScope {
+        val list = (networksState.value as? ListState.Ready)?.items ?: return@coroutineScope
+        val ids = list.map { it.id }.toSet()
+        _networkLive.update { live -> live.copy(
+            loggedIn = live.loggedIn.filterKeys { it in ids },
+            status = live.status.filterKeys { it in ids },
+            leases = live.leases.filterKeys { it in ids },
+            expired = live.expired.intersect(ids),
+        ) }
+        // Each entry publishes independently: one slow node must not delay another entry's local marker.
+        for (entry in list) launch(Dispatchers.IO) {
+            val nm = networkManager
+            val loggedIn = if (entry.kind == NetworkKind.TAILSCALE) runCatching { nm.hasLoggedIn(entry) }.getOrNull() else null
+            val status = if (nm.isRunning(entry)) runCatching { nm.status(entry) }.getOrNull() else null
+            val leases = if (nm.isRunning(entry)) runCatching { nm.refreshLeases(entry) }.getOrDefault(0) else 0
+            if ((networksState.value as? ListState.Ready)?.items?.firstOrNull { it.id == entry.id } != entry) return@launch
+            val currentMarker = nm.loggedInSnapshot(entry) ?: loggedIn
+            val currentStatus = status?.takeUnless { it.state == "Running" && currentMarker == false }
+            _networkLive.update { live -> live.copy(
+                loggedIn = if (currentMarker == null) live.loggedIn - entry.id else live.loggedIn + (entry.id to currentMarker),
+                status = if (currentStatus == null) live.status - entry.id else live.status + (entry.id to currentStatus),
+                leases = live.leases + (entry.id to leases),
+                expired = if (nm.isKnownExpired(entry)) live.expired + entry.id else live.expired - entry.id,
+            ) }
+            val flow = loginFlows.value[entry.id]
+            if (flow != null && currentStatus?.let { it.state == "Running" && !it.expired } == true) {
+                networkLogins.complete(entry, flow.attempt)
+            }
         }
     }
 
@@ -435,81 +457,54 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * 保存网络。代理的连接参数变了就升版本：之后的新连接用新实例，已连着的留在旧实例上直到结束。
      * @return 保存后的条目（版本可能已加一）。
      */
-    fun saveNetwork(entry: NetworkEntry): NetworkEntry {
-        val old = synchronized(lastSavedNetworks) {
-            lastSavedNetworks[entry.id] ?: networks.value.firstOrNull { it.id == entry.id }
-        }
-        val bumped = if (old != null && entry.kind == NetworkKind.PROXY && proxyChanged(old, entry)) {
-            entry.copy(revision = old.revision + 1)
-        } else {
-            entry.copy(revision = old?.revision ?: entry.revision)
-        }
-        synchronized(lastSavedNetworks) { lastSavedNetworks[entry.id] = bumped }
-        viewModelScope.launch {
-            networkStore.update { list ->
-                if (list.any { it.id == bumped.id }) list.map { if (it.id == bumped.id) bumped else it } else list + bumped
+    suspend fun saveNetwork(entry: NetworkEntry, editing: Boolean): StoreResult<NetworkEntry> {
+        val old = networks.value.firstOrNull { it.id == entry.id }
+        val result = networkStore.commit(entry, editing)
+        if (result is StoreResult.Saved) {
+            if (old != null && result.value.revision != old.revision && networkManager.leases(old) > 0) {
+                _networkNotice.value = str(R.string.network_saved_sessions_unaffected)
             }
-            refreshNetworkLive()
-        }
-        if (old != null && bumped.revision != old.revision && networkManager.leases(old) > 0) {
-            _networkNotice.value = str(R.string.network_saved_sessions_unaffected)
-        }
-        return bumped
-    }
-
-    private fun proxyChanged(a: NetworkEntry, b: NetworkEntry) =
-        a.proxyType != b.proxyType || a.proxyHost != b.proxyHost || a.proxyPort != b.proxyPort ||
-            a.username != b.username || a.password != b.password || a.extraCaPem != b.extraCaPem
-
-    /** 开始 tailnet 登录（先保存条目）。[authKey] 为空 = 浏览器登录。 */
-    fun loginTailnet(entry: NetworkEntry, authKey: String = "") {
-        val saved = saveNetwork(entry)
-        _loginFlows.update { it + (saved.id to LoginFlow()) }
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val url = networkManager.beginLogin(saved, authKey.trim())
-                _loginFlows.update { it + (saved.id to LoginFlow(url = url, busy = url.isEmpty())) }
-                if (url.isNotEmpty()) _loginUrl.value = url
-            } catch (t: Throwable) {
-                networkManager.endLogin(saved)
-                val text = (t as? NetworkException)?.describe(getApplication()) ?: t.message ?: t.javaClass.simpleName
-                _loginFlows.update { it + (saved.id to LoginFlow(error = text, busy = false)) }
+            if (old != null && old.kind == NetworkKind.TAILSCALE && old.deviceName != entry.deviceName && networkManager.isRunning(old)) {
+                _networkNotice.value = str(R.string.network_saved_device_name_next_start)
             }
-            refreshNetworkLive()
+            refreshNetworksOnce()
         }
+        return result
     }
 
-    /** 重新打开授权页（用户把浏览器关了还没授权）。 */
-    fun reopenLoginUrl(id: String) {
-        _loginFlows.value[id]?.url?.takeIf { it.isNotEmpty() }?.let { _loginUrl.value = it }
-    }
+    suspend fun loginTailnet(entry: NetworkEntry, authKey: String, editing: Boolean): StoreResult<NetworkEntry> =
+        networkLogins.login(entry, authKey, editing)
 
-    /** 放弃这次登录：不再保持节点运行（空闲后自动停止）。 */
-    fun cancelLogin(entry: NetworkEntry) {
-        networkManager.endLogin(entry)
-        _loginFlows.update { it - entry.id }
-    }
+    fun reopenLoginUrl(id: String) = networkLogins.reopen(id)
+    fun cancelLogin(entry: NetworkEntry) = networkLogins.cancel(entry)
 
-    /** 退出登录：尽力通知控制服务器，必定清除本机的节点状态；条目保留为「未登录」。 */
-    fun logoutTailnet(entry: NetworkEntry) {
+    suspend fun logoutTailnet(entry: NetworkEntry): StoreResult<Unit> = viewModelScope.async {
+        cancelLogin(entry)
         closeSessionsUsing(entry.id)
-        _loginFlows.update { it - entry.id }
-        viewModelScope.launch(Dispatchers.IO) {
+        forgetNetwork(entry)
+    }.await()
+
+    suspend fun deleteNetwork(entry: NetworkEntry): StoreResult<Unit> = viewModelScope.async {
+        when (val removed = networkStore.remove(entry.id)) {
+            is StoreResult.Failed -> removed
+            is StoreResult.Saved -> {
+                cancelLogin(entry)
+                closeSessionsUsing(entry.id)
+                forgetNetwork(entry)
+            }
+        }
+    }.await()
+
+    private suspend fun forgetNetwork(entry: NetworkEntry): StoreResult<Unit> = withContext(Dispatchers.IO) {
+        try {
             val ok = networkManager.forget(entry)
             if (!ok) _networkNotice.value = str(R.string.network_logout_offline, entry.name)
             refreshNetworkLive()
-        }
-    }
-
-    /** 删除网络：断开在用它的会话、清掉节点状态（tailnet 尽力退出登录），条目移除。 */
-    fun deleteNetwork(entry: NetworkEntry) {
-        closeSessionsUsing(entry.id)
-        _loginFlows.update { it - entry.id }
-        viewModelScope.launch {
-            networkStore.update { list -> list.filterNot { it.id == entry.id } }
-            val ok = kotlinx.coroutines.withContext(Dispatchers.IO) { networkManager.forget(entry) }
-            if (!ok) _networkNotice.value = str(R.string.network_logout_offline, entry.name)
-            refreshNetworkLive()
+            StoreResult.Saved(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
         }
     }
 
@@ -517,8 +512,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         sessions.sessions.value.filter { it.network?.id == networkId }.forEach { sessions.close(it.id) }
     }
 
-    /** 直接选用这个网络的主机数（经跳板机时目标的网络不生效，但引用仍在，删除后同样失效）。 */
-    fun hostsUsing(networkId: String): Int = hosts.value.count { it.networkId == networkId }
+    /** 当前连接路径依赖此网络的主机数，包含跳板依赖，不把被覆盖的配置引用当作断连。 */
+    fun hostsUsing(networkId: String): Int = hostsUsingNetwork(networkId, hostsState.value, networksState.value)
 
     /** 选用它、且确实会经它跑 mosh 的主机数（不经跳板机）。 */
     fun moshHostsUsing(networkId: String): Int =
@@ -532,25 +527,26 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     sealed interface Preflight {
         data object Ok : Preflight
         data class NeedsLogin(val network: NetworkEntry, val expired: Boolean) : Preflight
-        data class Refused(val reason: String) : Preflight
+        data class Refused(val reason: String, val recovery: NetworkRecovery? = null) : Preflight
     }
 
     fun preflight(host: Host): Preflight {
         val route = routeOf(host.id)
-        if (route is Route.Missing && route.what != MissingKind.HOST) {
-            return Preflight.Refused(route.refusalText(getApplication()).orEmpty())
-        }
-        // 列表还在读 / 解不开：等待或明确说「读不出来」，绝不能当成「已删除」或放行去连接。
-        if (route is Route.Loading || route is Route.Unreadable) {
-            return Preflight.Refused(route.refusalText(getApplication()).orEmpty())
-        }
-        val net = (route as? Route.Ok)?.network ?: return Preflight.Ok
-        // 已知失效的登录（本次运行中连接时得知）不论节点还在不在跑都先去登录；从没登录过的只在没跑时判断
-        // （正在登录中的节点会在跑）。
-        if (net.kind == NetworkKind.TAILSCALE &&
-            (networkManager.isKnownExpired(net) || (!networkManager.isRunning(net) && !networkManager.hasLoggedIn(net)))
-        ) {
-            return Preflight.NeedsLogin(net, expired = networkManager.isKnownExpired(net))
+        if (route !is Route.Ok) return Preflight.Refused(route.refusalText(getApplication()).orEmpty(), route.recovery)
+        val net = route.network ?: return Preflight.Ok
+        if (net.kind == NetworkKind.TAILSCALE) {
+            val expired = networkManager.isKnownExpired(net)
+            if (expired) return Preflight.NeedsLogin(net, expired = true)
+            if (!networkManager.isRunning(net)) {
+                when (networkManager.loggedInSnapshot(net)) {
+                    false -> return Preflight.NeedsLogin(net, expired = false)
+                    null -> {
+                        refreshNetworksOnce()
+                        return Preflight.Refused(str(R.string.net_state_checking), NetworkRecovery(RecoveryKind.RETRY))
+                    }
+                    true -> Unit
+                }
+            }
         }
         return Preflight.Ok
     }
@@ -594,7 +590,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 手动拖动重排：持久化新的连接顺序（组内拖动 / 无分组平铺拖动均走此处）。 */
-    fun reorderHosts(newOrder: List<Host>) = viewModelScope.launch { store.save(newOrder) }
+    fun reorderHosts(newOrder: List<Host>) = viewModelScope.launch {
+        if (!runCatching { store.reorder(newOrder.map { it.id }) }.getOrDefault(false)) {
+            _networkNotice.value = str(R.string.store_failure_io)
+        }
+    }
 
     /** 拖动重排会话（仅内存，无持久化）。 */
     fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
@@ -669,38 +669,37 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 执行管理命令，显示远端错误；成功后在同一个串行临界区内回刷。 */
-    private fun tmuxAction(
+    private fun tmuxAction(ts: TermSession, cmd: String, onSuccess: () -> Unit = {}) =
+        viewModelScope.launch { tmuxActionNow(ts, cmd, onSuccess) }
+
+    private suspend fun tmuxActionNow(
         ts: TermSession,
         cmd: String,
         onSuccess: () -> Unit = {},
-    ) = viewModelScope.launch(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         ts.tmuxMutex.withLock {
             val before = ts.tmuxState.value
             ts.tmuxState.value = before.copy(busy = true, message = null)
             val out = runCatching { ts.transport.exec(Tmux.actionCmd(cmd)) }.getOrNull()
             val result = out?.let(Tmux::parseAction)
-            when {
-                out == null -> ts.tmuxState.value = before.copy(
-                    busy = false,
-                    message = str(R.string.tmux_control_unavailable),
-                )
-                result == null -> ts.tmuxState.value = before.copy(
-                    busy = false,
-                    message = str(R.string.tmux_invalid_response),
-                )
-                !result.ok -> ts.tmuxState.value = before.copy(
-                    busy = false,
-                    message = result.output.ifBlank { str(R.string.tmux_action_failed) }.take(500),
-                )
-                else -> {
-                    onSuccess()
-                    refreshTmuxLocked(ts, retryUntilReady = false)
-                }
+            val failure = when {
+                out == null -> str(R.string.tmux_control_unavailable)
+                result == null -> str(R.string.tmux_invalid_response)
+                !result.ok -> result.output.ifBlank { str(R.string.tmux_action_failed) }.take(500)
+                else -> null
+            }
+            if (failure != null) {
+                ts.tmuxState.value = before.copy(busy = false, message = failure)
+                false
+            } else {
+                onSuccess()
+                refreshTmuxLocked(ts, retryUntilReady = false)
+                true
             }
         }
     }
-    fun tmuxNew(ts: TermSession, name: String) = tmuxAction(ts, Tmux.newCmd(name))
-    fun tmuxRename(ts: TermSession, id: String, name: String) = tmuxAction(ts, Tmux.renameCmd(id, name)) {
+    suspend fun tmuxNew(ts: TermSession, name: String): Boolean = tmuxActionNow(ts, Tmux.newCmd(name))
+    suspend fun tmuxRename(ts: TermSession, id: String, name: String): Boolean = tmuxActionNow(ts, Tmux.renameCmd(id, name)) {
         sessions.renameTmuxAssociation(ts.host.id, id, name)
     }
     fun tmuxDetach(ts: TermSession, id: String) = tmuxAction(ts, Tmux.detachCmd(id)) {
@@ -728,7 +727,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         val session = sessions.openTmux(
             source, target, ok?.jump, ok?.network, route.refusalText(getApplication()), detachOthers,
             host = ok?.host ?: source.host,
-        )
+        ).also { it.recovery.value = route.recovery }
         ensureSessionService()
         rememberTmuxSession(source.host, target.name)
         confirmTmuxAttach(session, target.name)
@@ -796,7 +795,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             remoteTmuxId = source.remoteTmuxId.value,
             remoteTmuxName = source.remoteTmuxName.value,
             startupCommand = source.startupCommand,
-        )
+        ).also { it.recovery.value = route.recovery }
         ensureSessionService()
         // 重连同样要核对是否真的附上了。漏掉这一步，新会话的 tmuxAttached 恒为 null：
         // detach 后提示会退化成「会话已结束」，而 tmux 真的没附上时顶栏还继续标着 tmux ——
@@ -838,7 +837,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             refusal = route.refusalText(getApplication()),
             remoteTmuxName = remembered,
             startupCommand = remembered?.let { Tmux.attachOrCreateCommand(it) },
-        )
+        ).also { it.recovery.value = route.recovery }
         ensureSessionService()
         if (remembered != null) {
             confirmTmuxAttach(ts, remembered)
@@ -888,7 +887,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             network = ok?.network,
             refusal = route.refusalText(getApplication()),
             carryFrom = src,
-        ).id
+        ).also { it.recovery.value = route.recovery }.id
         ensureSessionService()
         return newId
     }
@@ -898,6 +897,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * 不再像过去那样把被删除的跳板机静默当成直连。
      */
     private fun routeOf(hostId: String): Route = resolveRoute(hostId, hostsState.value, networksState.value)
+
+    private suspend fun storedRouteOf(hostId: String): Route = withContext(Dispatchers.IO) {
+        resolveRoute(hostId, store.state.first(), networkStore.state.first())
+    }
 
     /** 拉起前台服务：退后台/关屏时保活会话（服务在会话归零时自行停止）。 */
     private fun ensureSessionService() {
@@ -923,7 +926,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         mgr.onUploadDone = { hostId, dir ->
             viewModelScope.launch {
                 val st = filesState.value
-                if (st.host?.id == hostId && st.path == dir) filesController.refresh()
+                if (st.host?.id == hostId && st.path == dir && filesController.canAutoRefresh && pendingUploadTarget == null && _uploadConflict.value == null) {
+                    refreshFiles(auto = true)
+                }
             }
         }
     }
@@ -940,17 +945,46 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 打开文件页；[from] 非空（从终端 ⋮ 进）时尝试以终端当前目录为起点。 */
     fun openFiles(host: Host, from: TermSession? = null) {
+        invalidateUploadSelection()
         val route = routeOf(host.id)
         val ok = route as? Route.Ok
-        filesController.open(ok?.host ?: host, ok?.jump, ok?.network, from, route.refusalText(getApplication()))
+        filesController.open(ok?.host ?: host, ok?.jump, ok?.network, from, route.refusalText(getApplication()), route.recovery)
     }
 
-    fun closeFiles() = filesController.close()
-    fun filesNavigate(path: String) = filesController.navigate(path)
-    fun filesUp() = filesController.up()
-    fun filesRefresh() = filesController.refresh()
-    fun filesGoto(path: String) = filesController.goto(path)
-    fun filesMkdir(name: String) = filesController.mkdir(name)
+    private fun invalidateUploadSelection() {
+        pendingUploadTarget = null
+        _uploadConflict.value = null
+    }
+    fun closeFiles() { invalidateUploadSelection(); filesController.close() }
+    suspend fun filesPauseForRecovery() { invalidateUploadSelection(); filesController.pauseForRecovery() }
+    fun filesNavigate(path: String) { invalidateUploadSelection(); filesController.navigate(path) }
+    fun filesUp() { invalidateUploadSelection(); filesController.up() }
+    fun filesRefresh() { invalidateUploadSelection(); refreshFiles(auto = false) }
+
+    private fun refreshFiles(auto: Boolean) = viewModelScope.launch {
+        val before = filesState.value
+        val host = before.host ?: return@launch
+        if (auto && !filesController.canAutoRefresh) return@launch
+        val target = if (auto) filesController.captureUploadTarget() else null
+        val route = storedRouteOf(host.id)
+        if (filesState.value !== before) return@launch
+        if (auto && (target == null || route !is Route.Ok || !target.destination.matches(route))) return@launch
+        val ok = route as? Route.Ok
+        filesController.retry(ok?.host ?: host, ok?.jump, ok?.network, route.refusalText(getApplication()), route.recovery)
+    }
+
+    suspend fun filesResumeForRecovery(hostId: String) {
+        val before = filesState.value
+        val host = before.host?.takeIf { it.id == hostId } ?: return
+        val route = storedRouteOf(hostId)
+        currentCoroutineContext().ensureActive()
+        if (filesState.value !== before) return
+        val ok = route as? Route.Ok
+        filesController.resume(ok?.host ?: host, ok?.jump, ok?.network, route.refusalText(getApplication()), route.recovery)
+    }
+
+    suspend fun filesGoto(path: String): Boolean { invalidateUploadSelection(); return filesController.goto(path) }
+    suspend fun filesMkdir(name: String): Boolean { invalidateUploadSelection(); return filesController.mkdir(name) }
     fun filesClearError() = filesController.clearError()
     fun setFilesSort(s: FilesSort) = viewModelScope.launch { settings.setFilesSort(s) }
     fun setFilesShowHidden(on: Boolean) = viewModelScope.launch { settings.setFilesShowHidden(on) }
@@ -962,27 +996,56 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val _uploadConflict = MutableStateFlow<UploadConflict?>(null)
     val uploadConflict: StateFlow<UploadConflict?> = _uploadConflict.asStateFlow()
 
-    /** 选好文件后先查远端是否已有同名：有就先问，没有就直接传。 */
-    fun uploadHere(uris: List<android.net.Uri>) = viewModelScope.launch {
-        if (filesState.value.host == null || filesState.value.path.isBlank()) return@launch
-        val names = uris.map { displayNameOfUri(it) }
-        val clash = filesController.existingNames(names)
-        if (clash.isEmpty()) startUpload(uris) else _uploadConflict.value = UploadConflict(uris, clash)
+    private var pendingUploadTarget: UploadTarget? = null
+
+    /** Capture before the document picker: its result cannot choose a different page or directory. */
+    fun prepareUpload(): Boolean {
+        _uploadConflict.value = null
+        pendingUploadTarget = filesController.captureUploadTarget()
+        return pendingUploadTarget != null
+    }
+
+    fun uploadHere(uris: List<android.net.Uri>) {
+        val target = pendingUploadTarget
+        pendingUploadTarget = null
+        if (uris.isEmpty() || target == null) return
+        viewModelScope.launch {
+            val names = withContext(Dispatchers.IO) { uris.map { displayNameOfUri(it) } }
+            if (!filesController.isUploadTargetCurrent(target)) {
+                _networkNotice.value = str(R.string.files_upload_location_changed)
+                return@launch
+            }
+            if (names.distinct().size != names.size) {
+                _networkNotice.value = str(R.string.files_upload_duplicate_name)
+                return@launch
+            }
+            val inspection = filesController.inspectUpload(target, names) ?: return@launch
+            if (inspection.clashes.isEmpty()) startUpload(uris, inspection, confirmed = false)
+            else _uploadConflict.value = UploadConflict(uris, inspection.clashes, inspection)
+        }
     }
 
     fun confirmUploadOverwrite() {
         val pending = _uploadConflict.value ?: return
         _uploadConflict.value = null
-        startUpload(pending.uris)
+        val inspection = pending.inspection ?: return
+        viewModelScope.launch { startUpload(pending.uris, inspection, confirmed = true) }
     }
 
     fun dismissUploadConflict() { _uploadConflict.value = null }
 
-    private fun startUpload(uris: List<android.net.Uri>) {
-        val host = filesState.value.host ?: return
-        val dir = filesState.value.path.ifBlank { return }
-        transfers.enqueueUpload(host, uris, dir)
-        ensureTransferService()
+    private suspend fun startUpload(uris: List<android.net.Uri>, inspection: UploadInspection, confirmed: Boolean) {
+        val target = inspection.target
+        val route = storedRouteOf(target.host.id)
+        if (!filesController.isUploadTargetCurrent(target) || route !is Route.Ok || !target.destination.matches(route)) {
+            _networkNotice.value = str(R.string.files_upload_location_changed)
+            return
+        }
+        val added = transfers.enqueueUpload(
+            target.host, uris, target.directory, names = inspection.names, destination = target.destination,
+            overwriteNames = if (confirmed) inspection.clashes.toSet() else emptySet(),
+        )
+        if (added) ensureTransferService() else _networkNotice.value = str(R.string.files_upload_name_invalid)
     }
 
     /** SAF URI 的显示名（拿不到就退回最后一段路径，与传输层同一口径）。 */

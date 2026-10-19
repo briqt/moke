@@ -101,7 +101,7 @@ object FontCatalog {
         ),
         FontSpec(
             id = "roboto_mono", name = "Roboto Mono", nameZh = "Roboto Mono",
-            license = "Apache", cjk = false, bundled = false,
+            license = "OFL", cjk = false, bundled = false,
             url = "https://raw.githubusercontent.com/google/fonts/main/ofl/robotomono/RobotoMono%5Bwght%5D.ttf",
             archive = false, entryHint = "", approxBytes = 183_700L,
             sha256 = "66a80e79d17e4c7cabd162e2916578a4cc08fd19eef6e2a643305eae9c567b2b",

@@ -45,6 +45,9 @@ fun TmuxPickerDialog(
     onPlainShell: () -> Unit,
 ) {
     var newName by remember { mutableStateOf(defaultName) }
+    var submitted by remember { mutableStateOf(false) }
+    val validName = FormValidation.tmuxName(newName)
+    fun submit() { submitted = true; if (validName) onPick(newName.trim()) }
 
     AlertDialog(
         onDismissRequest = onPlainShell,
@@ -70,12 +73,13 @@ fun TmuxPickerDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .clickable { onPick(s.name) }
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(s.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(s.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(end = 8.dp))
                         Text(
                             pluralStringResource(R.plurals.tmux_windows, s.windows, s.windows) +
                                 " · " +
@@ -87,24 +91,18 @@ fun TmuxPickerDialog(
                 }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text(stringResource(R.string.tmux_name_hint)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(
-                        onGo = { newName.trim().takeIf { it.isNotEmpty() }?.let(onPick) },
-                    ),
+                FormTextField(
+                    value = newName, onValueChange = { newName = it }, label = stringResource(R.string.tmux_name_hint),
+                    error = if (!validName) stringResource(R.string.tmux_name_invalid) else null, submitted = submitted,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go), keyboardActions = KeyboardActions(onGo = { submit() }),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { newName.trim().takeIf { it.isNotEmpty() }?.let(onPick) },
-                enabled = newName.isNotBlank(),
-            ) { Text(stringResource(R.string.tmux_new)) }
+                onClick = { submit() },
+            ) { Text(stringResource(R.string.action_create)) }
         },
         dismissButton = {
             TextButton(onClick = onPlainShell) { Text(stringResource(R.string.tmux_plain_shell)) }

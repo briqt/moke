@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -63,9 +65,12 @@ import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.FilesSort
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.terminal.sftp.RemoteEntry
 import com.briqt.moke.terminal.sftp.RemotePath
 import com.briqt.moke.terminal.sftp.TransferState
@@ -73,6 +78,7 @@ import com.briqt.moke.terminal.sftp.TransferTask
 import com.briqt.moke.ui.theme.MokeMono
 import java.text.SimpleDateFormat
 import java.util.Date
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -91,8 +97,8 @@ fun FilesScreen(
     onNavigate: (String) -> Unit,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
-    onGoto: (String) -> Unit,
-    onMkdir: (String) -> Unit,
+    onGoto: suspend (String) -> Boolean,
+    onMkdir: suspend (String) -> Boolean,
     onSort: (FilesSort) -> Unit,
     onShowHidden: (Boolean) -> Unit,
     onUpload: (List<Uri>) -> Unit,
@@ -109,6 +115,10 @@ fun FilesScreen(
     onTaskRemove: (String) -> Unit,
     onClearFinished: () -> Unit,
     onBack: () -> Unit,
+    onRecover: (NetworkRecovery) -> Unit = { recovery ->
+        recovery.network?.takeIf { recovery.kind == RecoveryKind.LOGIN_NETWORK }?.let(onLoginNetwork)
+    },
+    onBeforePickUpload: () -> Boolean = { true },
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -120,7 +130,7 @@ fun FilesScreen(
 
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris -> if (uris.isNotEmpty()) onUpload(uris) }
+    ) { uris -> onUpload(uris) }
 
     val visible = remember(state.entries, sort, showHidden) {
         sortEntries(state.entries, sort, showHidden)
@@ -222,11 +232,11 @@ fun FilesScreen(
             }
         },
         floatingActionButton = {
-            if (state.host != null && !state.loading) {
+            if (state.canUpload) {
                 ExtendedFloatingActionButton(
                     text = { Text(stringResource(R.string.files_upload_here)) },
                     icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
-                    onClick = { uploadLauncher.launch(arrayOf("*/*")) },
+                    onClick = { if (onBeforePickUpload()) uploadLauncher.launch(arrayOf("*/*")) },
                 )
             }
         },
@@ -236,7 +246,8 @@ fun FilesScreen(
             HorizontalDivider()
 
             if (state.error.isNotBlank()) {
-                ErrorBanner(state.error, onClearError, state.loginNetwork?.let { n -> { onLoginNetwork(n) } })
+                val recovery = state.recovery ?: state.loginNetwork?.let { NetworkRecovery(RecoveryKind.LOGIN_NETWORK, it) }
+                ErrorBanner(state.error, onClearError, recovery, onRecover)
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -298,7 +309,10 @@ fun FilesScreen(
             title = stringResource(R.string.files_new_folder),
             label = stringResource(R.string.files_folder_name),
             initial = "",
-            onConfirm = { mkdirOpen = false; if (it.isNotBlank()) onMkdir(it) },
+            action = stringResource(R.string.action_create),
+            invalidMessage = stringResource(R.string.files_folder_name_invalid),
+            validate = ::validDirectoryName,
+            onConfirm = onMkdir,
             onDismiss = { mkdirOpen = false },
         )
     }
@@ -308,7 +322,11 @@ fun FilesScreen(
             title = stringResource(R.string.files_goto),
             label = stringResource(R.string.files_goto_hint),
             initial = state.path,
-            onConfirm = { gotoOpen = false; if (it.isNotBlank()) onGoto(it) },
+            action = stringResource(R.string.action_go),
+            invalidMessage = stringResource(R.string.files_path_invalid),
+            validate = ::validRemotePath,
+            imeAction = ImeAction.Go,
+            onConfirm = onGoto,
             onDismiss = { gotoOpen = false },
         )
     }
@@ -400,7 +418,7 @@ private fun Crumbs(path: String, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun ErrorBanner(message: String, onDismiss: () -> Unit, onLogin: (() -> Unit)? = null) {
+private fun ErrorBanner(message: String, onDismiss: () -> Unit, recovery: NetworkRecovery?, onRecover: (NetworkRecovery) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
@@ -412,9 +430,16 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit, onLogin: (() -> 
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f),
             )
-            if (onLogin != null) {
-                TextButton(onClick = onLogin) {
-                    Text(stringResource(R.string.action_login), color = MaterialTheme.colorScheme.onErrorContainer)
+            if (recovery != null) {
+                val label = when (recovery.kind) {
+                    RecoveryKind.LOGIN_NETWORK -> R.string.action_login
+                    RecoveryKind.VIEW_NETWORK -> R.string.action_view_network
+                    RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
+                    RecoveryKind.EDIT_HOST -> R.string.host_edit_title
+                    RecoveryKind.RETRY -> R.string.action_retry
+                }
+                TextButton(onClick = { onRecover(recovery) }) {
+                    Text(stringResource(label), color = MaterialTheme.colorScheme.onErrorContainer)
                 }
             }
             IconButton(onClick = onDismiss) {
@@ -654,7 +679,7 @@ private fun stateLabel(t: TransferTask): String = when (t.state) {
     TransferState.RUNNING -> t.fraction?.let { "${(it * 100).toInt()}%" } ?: ""
     TransferState.DONE -> stringResource(R.string.files_transfer_done)
     TransferState.CANCELLED -> stringResource(R.string.files_transfer_cancelled)
-    TransferState.FAILED -> t.error.ifBlank { stringResource(R.string.files_transfer_cancelled) }
+    TransferState.FAILED -> stringResource(R.string.files_transfer_failed)
 }
 
 @Composable
@@ -662,23 +687,51 @@ private fun TextPrompt(
     title: String,
     label: String,
     initial: String,
-    onConfirm: (String) -> Unit,
+    action: String,
+    invalidMessage: String,
+    validate: (String) -> Boolean,
+    imeAction: ImeAction = ImeAction.Done,
+    onConfirm: suspend (String) -> Boolean,
     onDismiss: () -> Unit,
 ) {
     var text by remember { mutableStateOf(initial) }
+    var submitted by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val error = if (submitted && !validate(text)) invalidMessage else if (failed) stringResource(R.string.form_action_failed) else null
+    fun submit() {
+        if (busy) return
+        submitted = true
+        if (!validate(text)) return
+        busy = true
+        failed = false
+        scope.launch {
+            try {
+                if (onConfirm(text)) onDismiss() else failed = true
+            } catch (t: CancellationException) { throw t }
+            catch (_: Throwable) { failed = true }
+            finally { busy = false }
+        }
+    }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
         title = { Text(title) },
         text = {
             OutlinedTextField(
                 value = text,
-                onValueChange = { text = it },
+                onValueChange = { text = it; failed = false },
+                enabled = !busy,
                 label = { Text(label) },
+                isError = error != null,
+                supportingText = error?.let { message -> { Text(message) } },
+                keyboardOptions = KeyboardOptions(imeAction = imeAction),
+                keyboardActions = KeyboardActions(onAny = { submit() }),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
-        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text(stringResource(R.string.action_ok)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        confirmButton = { TextButton(onClick = { submit() }, enabled = !busy) { Text(action) } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

@@ -15,11 +15,30 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 )
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // gatedConn drops everything it reads while paused (a path outage toward the client).
 type gatedConn struct {
@@ -86,14 +105,17 @@ func TestRealMoshThroughRelay(t *testing.T) {
 	client := exec.Command("script", "-qfec", "stty rows 24 cols 80; exec mosh-client 127.0.0.1 "+strconv.Itoa(info.LocalPort), "/dev/null")
 	client.Env = append(os.Environ(), "MOSH_KEY="+m[2], "TERM=xterm-256color", "LANG=C.UTF-8")
 	client.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var screen bytes.Buffer
+	var screen lockedBuffer
 	client.Stdout = &screen
 	if err := client.Start(); err != nil {
 		t.Fatal(err)
 	}
 	// script(1) starts mosh-client in a session of its own.
-	defer exec.Command("pkill", "-KILL", "-f", "^mosh-client 127.0.0.1 "+strconv.Itoa(info.LocalPort)+"$").Run()
-	defer syscall.Kill(-client.Process.Pid, syscall.SIGKILL)
+	defer func() {
+		_ = exec.Command("pkill", "-KILL", "-f", "^mosh-client 127.0.0.1 "+strconv.Itoa(info.LocalPort)+"$").Run()
+		_ = syscall.Kill(-client.Process.Pid, syscall.SIGKILL)
+		_ = client.Wait()
+	}()
 
 	flow := func() [4]int64 { return relays.Flow() }
 	defer func() {
@@ -131,7 +153,7 @@ func TestRealMoshThroughRelay(t *testing.T) {
 	if relays.Rejected() != 2 {
 		t.Fatalf("rejected = %d after the hop; genuine datagrams were dropped", relays.Rejected())
 	}
-	if !bytes.Contains(screen.Bytes(), []byte("20")) {
-		t.Fatalf("no server output reached the client screen (%d bytes)", screen.Len())
+	if output := screen.String(); !strings.Contains(output, "20") {
+		t.Fatalf("no server output reached the client screen (%d bytes)", len(output))
 	}
 }

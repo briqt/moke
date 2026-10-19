@@ -701,6 +701,10 @@ func (b *bridge) openUDPRelay(configJSON string) (relay.Info, error) {
 		}
 		network = relay.Network{ID: n.id, IPs: n.node.IPs(), ListenPacket: n.node.ListenPacket}
 	}
+	// The registered session owns this exact network's lease. Its one closing
+	// owner returns it after socket shutdown, including bulk closes; looking up
+	// the network again by ID could release a replacement network instead.
+	network.Closed = func() { b.release(n) }
 	info, err := b.relays.Open(c, network)
 	if err != nil {
 		b.release(n)
@@ -716,15 +720,5 @@ func (b *bridge) startUDPRelay(id string, port int, key string) error {
 }
 
 func (b *bridge) closeUDPRelay(id string) error {
-	networkID, ok := b.relays.NetworkOf(id)
-	err := b.relays.Close(id)
-	if ok {
-		b.mu.Lock()
-		n := b.networks[networkID]
-		b.mu.Unlock()
-		if n != nil {
-			b.release(n)
-		}
-	}
-	return codes.Boundary("close UDP relay", err, codes.Internal)
+	return codes.Boundary("close UDP relay", b.relays.Close(id), codes.Internal)
 }

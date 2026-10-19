@@ -11,6 +11,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -27,10 +33,14 @@ import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.ListState
 import com.briqt.moke.data.NetworkKind
+import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.terminal.Tmux
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
 
 /** 底部导航分区。 */
 enum class HomeTab { Connections, Sessions, Settings }
@@ -41,7 +51,7 @@ enum class HomeTab { Connections, Sessions, Settings }
  */
 sealed interface Screen {
     data object Home : Screen
-    data class Edit(val host: Host?) : Screen
+    data class Edit(val host: Host?, val back: Screen = Home) : Screen
     data class Terminal(val sessionId: String) : Screen
     data object Appearance : Screen
     data object TerminalSettings : Screen
@@ -51,8 +61,8 @@ sealed interface Screen {
     /** 设置 → 网络（tailnet 与代理）。 */
     data object Networks : Screen
 
-    /** 网络表单；[networkId] 为空 = 新建。[back] 是关闭后回到的页面（网络页、终端、文件页、连接列表）。 */
-    data class NetworkEdit(val kind: NetworkKind, val networkId: String?, val back: Screen) : Screen
+    /** Keep the opening snapshot: a read failure must not turn an existing editor into a new entry. */
+    data class NetworkEdit(val kind: NetworkKind, val entry: NetworkEntry?, val back: Screen) : Screen
 
     /**
      * 远端文件页。[sessionId] 非空表示从终端 ⋮ 进来的——只有那种情况才拿得到"终端当前目录"，
@@ -65,8 +75,18 @@ sealed interface Screen {
 fun MokeApp(vm: MokeViewModel = viewModel()) {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var homeTab by remember { mutableStateOf(HomeTab.Connections) }
+    val navigationScope = rememberCoroutineScope()
+    var pendingFilesReturn by remember { mutableStateOf<Pair<Screen, Job>?>(null) }
+    LaunchedEffect(screen) {
+        pendingFilesReturn?.takeIf { it.first !== screen }?.let { pending ->
+            pendingFilesReturn = null
+            pending.second.cancel()
+        }
+    }
 
     val hosts by vm.hosts.collectAsState()
+    val hostsState by vm.hostsState.collectAsState()
+    val networksState by vm.networksState.collectAsState()
     val credentialsUnreadable by vm.credentialsUnreadable.collectAsState()
     val sessions by vm.sessions.sessions.collectAsState()
     val hostGroupOrder by vm.hostGroupOrder.collectAsState()
@@ -112,25 +132,43 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val networkLive by vm.networkLive.collectAsState()
     val loginFlows by vm.loginFlows.collectAsState()
     val loginUrl by vm.loginUrl.collectAsState()
-    val loginCompleted by vm.loginCompleted.collectAsState()
     val networkNotice by vm.networkNotice.collectAsState()
     val context = LocalContext.current
 
-    // tailnet 登录：授权页交给 Custom Tabs；在浏览器里授权完成后把 moke 带回前台（做不到时用户手动返回，状态照样刷新）。
-    LaunchedEffect(loginUrl) {
-        val url = loginUrl ?: return@LaunchedEffect
-        vm.consumeLoginUrl()
-        openLoginPage(context, url)
+    fun returnTo(target: Screen) {
+        if (target is Screen.Files) {
+            if (pendingFilesReturn?.second?.isActive == true) return
+            val source = screen
+            lateinit var job: Job
+            job = navigationScope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    // Reattach only: returning must not list or replay the failed operation.
+                    vm.filesResumeForRecovery(target.hostId)
+                    currentCoroutineContext().ensureActive()
+                    if (screen === source) screen = target
+                } finally {
+                    if (pendingFilesReturn?.second === job) pendingFilesReturn = null
+                }
+            }
+            pendingFilesReturn = source to job
+            job.start()
+        } else if (target is Screen.Terminal && vm.sessions.get(target.sessionId) == null) {
+            screen = Screen.Home
+            homeTab = HomeTab.Sessions
+        } else screen = target
     }
-    LaunchedEffect(loginCompleted) {
-        loginCompleted ?: return@LaunchedEffect
-        vm.consumeLoginCompleted()
-        runCatching {
-            context.startActivity(
-                android.content.Intent(context, com.briqt.moke.MainActivity::class.java)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            )
-        }
+    fun editHost(host: Host, back: Screen = Screen.Home) {
+        val latest = (hostsState as? ListState.Ready)?.items?.firstOrNull { it.id == host.id } ?: host
+        screen = Screen.Edit(latest, back)
+    }
+    fun openNetworkRecovery(recovery: NetworkRecovery, back: Screen) {
+        recovery.network?.let { entry -> screen = Screen.NetworkEdit(entry.kind, entry, back) }
+    }
+
+    // Browser results are tied to the current request; returning to the app remains a user action.
+    LaunchedEffect(loginUrl) {
+        val request = loginUrl ?: return@LaunchedEffect
+        vm.consumeLoginUrl(request)?.let { openLoginPage(context, it) }
     }
     LaunchedEffect(networkNotice) {
         val text = networkNotice ?: return@LaunchedEffect
@@ -143,10 +181,10 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     }
 
     /** 绑定好 ViewModel 的网络表单：网络页路由与主机编辑的全屏层共用。 */
-    val networkEditor: @Composable (NetworkKind, String?, (String?) -> Unit) -> Unit = { kind, id, onClose ->
+    val networkEditor: @Composable (NetworkKind, NetworkEntry?, (String?) -> Unit) -> Unit = { kind, entry, onClose ->
         NetworkEditScreen(
             kind = kind,
-            initial = id?.let { nid -> networks.firstOrNull { it.id == nid } },
+            initial = entry,
             networks = networks,
             live = networkLive,
             loginFlows = loginFlows,
@@ -161,12 +199,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onLogout = vm::logoutTailnet,
             onDelete = vm::deleteNetwork,
             onClose = onClose,
+            networkState = networksState,
+            onRetryNetworks = vm::retryNetworkReads,
         )
     }
 
     // 点后台保活通知：只有一个会话就直接进它，多个就进会话列表；停在文件页的先断开 SFTP。
-    LaunchedEffect(openSessionsRequest) {
+    LaunchedEffect(openSessionsRequest, screen) {
         val req = openSessionsRequest ?: return@LaunchedEffect
+        // Queue notification navigation until editing finishes instead of discarding a draft.
+        if (screen is Screen.Edit || screen is Screen.NetworkEdit) return@LaunchedEffect
         if (screen is Screen.Files) vm.closeFiles()
         val list = vm.sessions.sessions.value
         val target = req.sessionId?.takeIf { id -> list.any { it.id == id } }
@@ -182,7 +224,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     }
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
-    val backEnabled = screen !is Screen.Home || homeTab != HomeTab.Connections
+    val backEnabled = screen !is Screen.Edit && screen !is Screen.NetworkEdit &&
+        (screen !is Screen.Home || homeTab != HomeTab.Connections)
     // 打开文件页：断开旧的（若有）并按新主机建连；从终端进时带上会话以取当前目录。
     val openFiles: (Host, String?) -> Unit = { host, sessionId ->
         vm.openFiles(host, sessionId?.let { vm.sessions.get(it) })
@@ -195,13 +238,12 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             is Screen.TerminalSettings -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.Networks -> { screen = Screen.Home; homeTab = HomeTab.Settings }
-            is Screen.NetworkEdit -> screen = (screen as Screen.NetworkEdit).back
-            is Screen.Edit -> screen = Screen.Home
+            is Screen.NetworkEdit, is Screen.Edit -> Unit // Their editor shell owns every leave request.
             is Screen.Terminal -> screen = Screen.Home
             // 从终端进来的回终端，从连接列表进来的回列表；离开即断开那条 SFTP 连接。
             is Screen.Files -> {
                 vm.closeFiles()
-                screen = (screen as Screen.Files).sessionId?.let { Screen.Terminal(it) } ?: Screen.Home
+                returnTo((screen as Screen.Files).sessionId?.let { Screen.Terminal(it) } ?: Screen.Home)
             }
             is Screen.Home -> homeTab = HomeTab.Connections
         }
@@ -248,23 +290,36 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             networkLive = networkLive,
             onOpenNetworks = { screen = Screen.Networks },
             preflight = vm::preflight,
-            onLoginNetwork = { screen = Screen.NetworkEdit(NetworkKind.TAILSCALE, it.id, Screen.Home) },
+            onLoginNetwork = { screen = Screen.NetworkEdit(NetworkKind.TAILSCALE, it, Screen.Home) },
+            hostsState = hostsState,
+            networkState = networksState,
+            onRetryReads = vm::retryNetworkReads,
+            onRecover = { host, recovery ->
+                when (recovery.kind) {
+                    RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> openNetworkRecovery(recovery, Screen.Home)
+                    RecoveryKind.EDIT_HOST -> editHost(host)
+                    RecoveryKind.RETRY -> vm.retryNetworkReads()
+                }
+            },
         )
 
-        is Screen.Edit -> HostEditScreen(
-            initial = s.host,
-            allHosts = hosts,
-            onSave = {
-                vm.save(it)
-                screen = Screen.Home
-            },
-            onCancel = { screen = Screen.Home },
-            savedFingerprint = s.host?.let { vm.savedFingerprint(it) },
-            onClearFingerprint = { h, p -> vm.clearFingerprint((s.host ?: Host()).copy(host = h, port = p)) },
-            networks = networks,
-            networkLive = networkLive,
-            networkEditor = { kind, onClose -> networkEditor(kind, null, onClose) },
-        )
+        is Screen.Edit -> key(s.host?.id ?: "new-host") {
+            HostEditScreen(
+                initial = s.host,
+                allHosts = hosts,
+                onSave = { vm.saveHost(it, editing = s.host != null) },
+                onSaved = { if (screen == s) returnTo(s.back) },
+                onCancel = { if (screen == s) returnTo(s.back) },
+                savedFingerprint = vm::savedFingerprint,
+                onClearFingerprint = vm::clearFingerprint,
+                networks = networks,
+                networkLive = networkLive,
+                networkState = networksState,
+                hostStoreState = hostsState,
+                onRetryNetworks = vm::retryNetworkReads,
+                networkEditor = { kind, onClose -> networkEditor(kind, null, onClose) },
+            )
+        }
 
         is Screen.Networks -> NetworksScreen(
             networks = networks,
@@ -272,12 +327,14 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             loginFlows = loginFlows,
             onWatch = vm::watchNetworks,
             onAdd = { kind -> screen = Screen.NetworkEdit(kind, null, Screen.Networks) },
-            onOpen = { e -> screen = Screen.NetworkEdit(e.kind, e.id, Screen.Networks) },
+            onOpen = { e -> screen = Screen.NetworkEdit(e.kind, e, Screen.Networks) },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+            networkState = networksState,
+            onRetry = vm::retryNetworkReads,
         )
 
-        is Screen.NetworkEdit -> key(s.networkId ?: s.kind.name) {
-            networkEditor(s.kind, s.networkId) { screen = s.back }
+        is Screen.NetworkEdit -> key(s.entry?.id ?: s.kind.name) {
+            networkEditor(s.kind, s.entry) { if (screen == s) returnTo(s.back) }
         }
 
         is Screen.Terminal -> {
@@ -295,6 +352,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         TerminalAlerts.visibleSessionId = s.sessionId
                         TerminalAlerts.cancel(appContext, s.sessionId)
                         onDispose { if (TerminalAlerts.visibleSessionId == s.sessionId) TerminalAlerts.visibleSessionId = null }
+                    }
+                    val reconnect = {
+                        vm.retryNetworkReads()
+                        val newId = vm.reconnectSession(ts)
+                        vm.closeSession(ts.id)
+                        screen = Screen.Terminal(newId)
+                    }
+                    val editFailedHost = {
+                        vm.closeSession(ts.id)
+                        editHost(ts.host)
                     }
                     TerminalScreen(
                         ts = ts,
@@ -314,23 +381,22 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         keepScreenOn = keepScreenOn,
                         resolveTypeface = vm.fonts::resolveTypeface,
                         onBack = { screen = Screen.Home },
-                        onReconnect = {
-                            val newId = vm.reconnectSession(ts)
-                            vm.closeSession(ts.id)
-                            screen = Screen.Terminal(newId)
-                        },
+                        onReconnect = reconnect,
                         onClose = {
                             vm.closeSession(ts.id)
                             screen = Screen.Home; homeTab = HomeTab.Sessions
                         },
                         // 连接失败 → 改配置：失败的会话只有一行报错，关掉它，编辑的是主机的**最新**配置
                         // （ts.host 是打开那一刻的快照）。
-                        onEditHost = {
-                            val latest = hosts.firstOrNull { it.id == ts.host.id } ?: ts.host
-                            vm.closeSession(ts.id)
-                            screen = Screen.Edit(latest)
+                        onEditHost = editFailedHost,
+                        onLoginNetwork = { n -> screen = Screen.NetworkEdit(n.kind, n, Screen.Terminal(ts.id)) },
+                        onRecover = { recovery ->
+                            when (recovery.kind) {
+                                RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> openNetworkRecovery(recovery, Screen.Terminal(ts.id))
+                                RecoveryKind.EDIT_HOST -> editFailedHost()
+                                RecoveryKind.RETRY -> reconnect()
+                            }
                         },
-                        onLoginNetwork = { n -> screen = Screen.NetworkEdit(n.kind, n.id, Screen.Terminal(ts.id)) },
                         onFontSize = { vm.setFontSize(it) },
                         onKeyboardMode = { vm.setKeyboardMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
@@ -437,6 +503,25 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
         is Screen.Files -> {
             val filesState by vm.filesState.collectAsState()
+            val filesScope = rememberCoroutineScope()
+            var recovering by remember(s) { mutableStateOf(false) }
+            val recoverFiles: (NetworkRecovery) -> Unit = { recovery ->
+                if (!recovering) {
+                    recovering = true
+                    filesScope.launch {
+                        try {
+                            // Release the old SFTP lease before login can start a replacement identity.
+                            vm.filesPauseForRecovery()
+                            if (screen != s) return@launch
+                            when (recovery.kind) {
+                                RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> openNetworkRecovery(recovery, s)
+                                RecoveryKind.EDIT_HOST -> filesState.host?.let { editHost(it, s) }
+                                RecoveryKind.RETRY -> { vm.retryNetworkReads(); vm.filesRefresh() }
+                            }
+                        } finally { recovering = false }
+                    }
+                }
+            }
             val tasks by vm.transfers.tasks.collectAsState()
             val sort by vm.filesSort.collectAsState()
             val showHidden by vm.filesShowHidden.collectAsState()
@@ -471,6 +556,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 onSort = { vm.setFilesSort(it) },
                 onShowHidden = { vm.setFilesShowHidden(it) },
                 onUpload = { vm.uploadHere(it) },
+                onBeforePickUpload = vm::prepareUpload,
                 overwrite = uploadConflict,
                 onOverwriteConfirm = { vm.confirmUploadOverwrite() },
                 onOverwriteCancel = { vm.dismissUploadConflict() },
@@ -480,22 +566,23 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                     vm.download(entry, saved?.let { android.net.Uri.parse(it) })
                 },
                 onPickDownloadDir = { treePicker.launch(null) },
-                onSendToTerminal = s.sessionId?.let { id ->
+                onSendToTerminal = s.sessionId?.takeIf { vm.sessions.get(it) != null }?.let { id ->
                     { path: String ->
                         vm.sendToTerminal(id, path)
                         vm.closeFiles()
-                        screen = Screen.Terminal(id)
+                        returnTo(Screen.Terminal(id))
                     }
                 },
                 onClearError = { vm.filesClearError() },
-                onLoginNetwork = { n -> screen = Screen.NetworkEdit(n.kind, n.id, s) },
+                onLoginNetwork = { n -> recoverFiles(NetworkRecovery(RecoveryKind.LOGIN_NETWORK, n)) },
+                onRecover = recoverFiles,
                 onTaskResume = { vm.resumeTransfer(it) },
                 onTaskCancel = { vm.cancelTransfer(it) },
                 onTaskRemove = { vm.removeTransfer(it) },
                 onClearFinished = { vm.clearFinishedTransfers() },
                 onBack = {
                     vm.closeFiles()
-                    screen = s.sessionId?.let { Screen.Terminal(it) } ?: Screen.Home
+                    returnTo(s.sessionId?.let { Screen.Terminal(it) } ?: Screen.Home)
                 },
             )
         }

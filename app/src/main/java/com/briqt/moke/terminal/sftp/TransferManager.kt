@@ -18,6 +18,7 @@ import com.briqt.moke.data.Route
 import com.briqt.moke.data.resolveRoute
 import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.refusalText
+import net.schmizz.sshj.sftp.SFTPException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,8 +27,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import java.io.InputStream
 
 /**
@@ -38,7 +42,8 @@ import java.io.InputStream
  *
  * 生存期与 app 进程一致（挂在 Application 上），配合 [com.briqt.moke.terminal.MokeTransferService]
  * 的前台通知在退后台/关屏时继续传。任务表持久化在 [TransferStore]：进程被杀后重进应用，
- * 中断的任务会以「已中断」出现并可继续（能续就从断点续，续不了就从 0 重来，绝不静默拼坏文件）。
+ * 中断的任务会以「已中断」出现。下载可继续；上传目标/覆盖授权仅留内存，重启后须从文件页重新选择，
+ * 不能按可能已更改的主机配置续写未知目标。
  */
 class TransferManager(context: Context, private val hostStore: HostStore) {
 
@@ -55,6 +60,9 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     private val cancelling = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var pump: Job? = null
     private val pumpLock = Any()
+    private data class UploadPermission(val destination: UploadDestination, val allowOverwrite: Boolean)
+    // A restored task has no implicit overwrite permission. Existing task JSON stays unchanged.
+    private val uploadPermissions = ConcurrentHashMap<String, UploadPermission>()
 
     init {
         scope.launch {
@@ -71,9 +79,17 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     // ---------- 入队 ----------
 
     /** 上传本地文档（SAF URI）到远端目录。 */
-    fun enqueueUpload(host: Host, uris: List<Uri>, remoteDir: String) {
-        val added = uris.map { uri ->
-            val (name, size) = queryNameSize(uri)
+    suspend fun enqueueUpload(
+        host: Host, uris: List<Uri>, remoteDir: String,
+        names: List<String>? = null, destination: UploadDestination,
+        overwriteNames: Set<String> = emptySet(),
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (names != null && names.size != uris.size) return@withContext false
+        val metadata = uris.map { queryNameSize(it) }
+        val checkedNames = names ?: metadata.map { it.first }
+        if (checkedNames.any { !validUploadName(it) } || checkedNames.distinct().size != checkedNames.size) return@withContext false
+        val added = uris.mapIndexed { index, uri ->
+            val name = checkedNames[index]
             TransferTask(
                 hostId = host.id,
                 hostLabel = host.displayName,
@@ -81,11 +97,12 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                 remotePath = RemotePath.join(remoteDir, name),
                 name = name,
                 localUri = uri.toString(),
-                total = size,
+                total = metadata[index].second,
                 createdAt = System.currentTimeMillis(),
-            )
+            ).also { uploadPermissions[it.id] = UploadPermission(destination, name in overwriteNames) }
         }
         addAll(added)
+        true
     }
 
     /**
@@ -135,11 +152,13 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     fun remove(id: String) {
         cancelling += id
         _tasks.update { list -> list.filterNot { it.id == id } }
+        uploadPermissions.remove(id)
         persist()
     }
 
     fun clearFinished() {
-        _tasks.update { list -> list.filter { it.active || it.state == TransferState.FAILED } }
+        val before = _tasks.getAndUpdate { list -> list.filter { it.active || it.state == TransferState.FAILED } }
+        before.filterNot { it.active || it.state == TransferState.FAILED }.forEach { uploadPermissions.remove(it.id) }
         persist()
     }
 
@@ -201,12 +220,24 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             return
         }
 
+        val permission = uploadPermissions[task.id]
+        if (task.direction == TransferDirection.UPLOAD && !uploadDestinationMatches(permission?.destination, route)) {
+            val message = if (permission == null) R.string.transfer_destination_unverified else R.string.transfer_destination_changed
+            update(task.id) { it.copy(state = TransferState.FAILED, error = appContext.localized(message)) }
+            persist()
+            return
+        }
+        if (current(task.id) == null || cancelling.contains(task.id)) {
+            if (current(task.id) != null) finish(task.id)
+            cancelling -= task.id
+            return
+        }
         update(task.id) { it.copy(state = TransferState.RUNNING, error = "") }
         val session = SftpSession(route.host, route.jump, appContext, route.network)
         try {
             when (task.direction) {
                 TransferDirection.DOWNLOAD -> runDownload(task, session)
-                TransferDirection.UPLOAD -> runUpload(task, session)
+                TransferDirection.UPLOAD -> runUpload(task, session, permission?.allowOverwrite == true)
             }
         } catch (t: Throwable) {
             val cancelled = cancelling.contains(task.id)
@@ -280,25 +311,37 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         finish(task.id)
     }
 
-    private fun runUpload(task: TransferTask, session: SftpSession) {
+    private fun runUpload(task: TransferTask, session: SftpSession, allowOverwrite: Boolean) {
         val source = Uri.parse(task.localUri)
         val localSize = queryNameSize(source).second
-        val remoteExisting = session.stat(task.remotePath)?.size ?: 0L
-        val resume = TransferTask.canResumeUpload(task, remoteExisting, localSize)
+        val remote = session.stat(task.remotePath)
+        val resume = TransferTask.canResumeUpload(task, remote?.size ?: 0L, localSize)
         val offset = if (resume) task.done else 0L
-
+        if (offset == 0L && remote != null && !allowOverwrite) {
+            throw IllegalStateException(appContext.localized(R.string.transfer_overwrite_required))
+        }
+        if (cancelling.contains(task.id)) { finish(task.id); return }
         update(task.id) { it.copy(done = offset, total = localSize) }
         val input = resolver.openInputStream(source)
             ?: throw IllegalStateException(appContext.localized(R.string.transfer_local_unreadable))
-        val pos = input.use { stream ->
-            if (offset > 0L) skipExactly(stream, offset)
-            session.upload(
-                source = stream,
-                remote = task.remotePath,
-                offset = offset,
-                onProgress = { progress(task.id, it) },
-                cancelled = { cancelling.contains(task.id) },
-            )
+        val pos = try {
+            input.use { stream ->
+                if (offset > 0L) skipExactly(stream, offset)
+                session.upload(
+                    source = stream,
+                    remote = task.remotePath,
+                    offset = offset,
+                    onProgress = { progress(task.id, it) },
+                    cancelled = { cancelling.contains(task.id) || current(task.id) == null },
+                    allowOverwrite = allowOverwrite,
+                )
+            }
+        } catch (t: SFTPException) {
+            // EXCL closes the check/open race. A newly appeared file still requires explicit consent.
+            if (offset == 0L && !allowOverwrite && runCatching { session.stat(task.remotePath) != null }.getOrDefault(false)) {
+                throw IllegalStateException(appContext.localized(R.string.transfer_overwrite_required), t)
+            }
+            throw t
         }
         // 上传续传要求「远端已有字节数 == 我们记的 done」**完全相等**，而 progress 是节流的：
         // 不把真实落点写回去，取消后 done 恒小于远端实际大小，续传判定必不成立 → 每次都从 0 重传。
@@ -330,6 +373,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             update(id) { it.copy(state = TransferState.CANCELLED) }
         } else {
             update(id) { it.copy(state = TransferState.DONE, done = if (it.total >= 0) it.total else it.done) }
+            uploadPermissions.remove(id)
             // 上传成功要通知上层：文件页看的是一次性拉取的列表快照，不刷新的话刚传上去的文件
             // 根本不出现，用户看不到任何痕迹，只能理解成"传失败了"。
             current(id)

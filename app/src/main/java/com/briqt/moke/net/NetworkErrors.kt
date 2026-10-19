@@ -26,17 +26,18 @@ fun NetworkException.describe(context: Context): String {
         "PROXY_TLS" -> R.string.net_err_proxy_tls
         "PROXY_NO_UDP" -> R.string.net_err_proxy_no_udp
         "BUSY" -> R.string.net_err_busy
+        "CONTROL_CHANGED" -> R.string.net_err_control_changed
         else -> return context.localized(R.string.net_err_internal, code)
     }
     return context.localized(id, name)
 }
 
-/** 这些失败要先去登录网络（失败条据此给出「登录」）。 */
-val NetworkException.needsLogin: Boolean get() = code in setOf("NEEDS_LOGIN", "LOGIN_EXPIRED", "NEEDS_MACHINE_AUTH")
+/** Waiting for approval is a view action, not another login attempt. */
+val NetworkException.needsLogin: Boolean get() = recovery?.kind == RecoveryKind.LOGIN_NETWORK
 
 /** 连接失败的统一说法：网络错误说人话，其余沿用原消息。 */
 fun Throwable.connectFailureText(context: Context): String =
-    (this as? NetworkException)?.describe(context) ?: message ?: javaClass.simpleName
+    networkException()?.describe(context) ?: message ?: javaClass.simpleName
 
 /** 不能连的路由为什么不能连。 */
 fun Route.refusalText(context: Context): String? = when (this) {

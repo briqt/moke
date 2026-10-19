@@ -16,11 +16,11 @@ MOSH_TAG="mosh-1.4.0"
 RJYO_URL="https://github.com/rjyo/mosh-android/releases/download/v1.0.0/mosh-android-libs-v1.0.0.tar.gz"
 
 # 定位 NDK
-NDK="${ANDROID_NDK:-}"
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}"
 if [ -z "$NDK" ]; then
   NDK="$(ls -d "$HOME"/android-sdk/ndk/30.* 2>/dev/null | head -1 || true)"
 fi
-[ -n "$NDK" ] && [ -d "$NDK" ] || { echo "找不到 NDK，请设置 ANDROID_NDK"; exit 1; }
+[ -n "$NDK" ] && [ -d "$NDK" ] || { echo "找不到 NDK，请设置 ANDROID_NDK_HOME 或 ANDROID_NDK"; exit 1; }
 HOSTTAG="$(uname | tr '[:upper:]' '[:lower:]')-x86_64"
 TC="$NDK/toolchains/llvm/prebuilt/$HOSTTAG"
 

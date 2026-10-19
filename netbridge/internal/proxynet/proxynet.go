@@ -8,6 +8,7 @@ package proxynet
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -20,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +49,9 @@ type Config struct {
 	// Roots is the trust store for HTTPS proxies (the app supplies the platform's
 	// anchors); nil falls back to Go's system pool. TLSRootsPEM adds to it.
 	Roots *x509.CertPool `json:"-"`
+
+	// resolver is an optional infrastructure DNS resolver (never for targets).
+	resolver *net.Resolver
 }
 
 const handshakeTimeout = 15 * time.Second
@@ -109,7 +114,11 @@ func (c Config) DialTCP(ctx context.Context, target string) (net.Conn, error) {
 }
 
 func (c Config) dialProxy(ctx context.Context) (net.Conn, error) {
-	conn, err := (&net.Dialer{Timeout: handshakeTimeout}).DialContext(ctx, "tcp", c.address())
+	// Include infrastructure DNS, TCP and TLS in the same bounded operation,
+	// even if the caller supplied a context without a deadline.
+	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{Timeout: handshakeTimeout, Resolver: c.resolver}).DialContext(ctx, "tcp", c.address())
 	if err != nil {
 		code := codes.ProxyUnreachable
 		if codes.Classify(err, code) == codes.Timeout {
@@ -151,10 +160,21 @@ func withDeadline(ctx context.Context, conn net.Conn, handshake func() error) er
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	conn.SetDeadline(deadline)
-	stop := context.AfterFunc(ctx, func() { conn.SetDeadline(time.Unix(1, 0)) })
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		conn.SetDeadline(time.Unix(1, 0))
+		close(finished)
+	})
 	err := handshake()
-	if !stop() && err == nil {
+	if !stop() {
+		// Do not let a late cancellation callback overwrite the cleared
+		// deadline on a connection that is about to become a tunnel.
+		<-finished
+	}
+	if err == nil {
 		err = ctx.Err()
 	}
 	conn.SetDeadline(time.Time{})
@@ -183,22 +203,21 @@ func (c Config) dialHTTP(ctx context.Context, target string) (net.Conn, error) {
 		if _, err := io.WriteString(conn, request+"\r\n"); err != nil {
 			return err
 		}
-		response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+		status, err := readConnectStatus(reader)
 		if err != nil {
 			return err
 		}
-		response.Body.Close()
 		switch {
-		case response.StatusCode == http.StatusProxyAuthRequired:
+		case status == http.StatusProxyAuthRequired:
 			return codes.New(codes.ProxyAuth, "proxy requires authentication: HTTP 407")
-		case response.StatusCode == http.StatusUnauthorized:
+		case status == http.StatusUnauthorized:
 			// The target is never reached before a 2xx, so a 401 is the proxy's own
 			// answer: tinyproxy rejects wrong credentials with 401 instead of 407.
 			return codes.New(codes.ProxyAuth, "proxy rejected the credentials: HTTP 401")
-		case response.StatusCode == http.StatusGatewayTimeout:
+		case status == http.StatusGatewayTimeout:
 			return codes.New(codes.Timeout, "proxy CONNECT timed out: HTTP 504")
-		case response.StatusCode/100 != 2:
-			return codes.New(codes.ProxyRefused, fmt.Sprintf("proxy CONNECT refused: HTTP %d", response.StatusCode))
+		case status/100 != 2:
+			return codes.New(codes.ProxyRefused, fmt.Sprintf("proxy CONNECT refused: HTTP %d", status))
 		}
 		return nil
 	})
@@ -207,6 +226,51 @@ func (c Config) dialHTTP(ctx context.Context, target string) (net.Conn, error) {
 		return nil, err
 	}
 	return &bufferedConn{Conn: conn, reader: reader}, nil
+}
+
+const maxConnectHeader = 64 << 10
+
+// readConnectStatus reads only the bounded status/header block, never a body.
+// RFC 9110 §9.3.6 requires ignoring Content-Length and Transfer-Encoding on a
+// successful CONNECT, even when their values would be invalid body framing.
+// Parsing them with http.ReadResponse on the socket can reject valid tunnels;
+// closing its Body can consume the server's banner or wait for a nonexistent body.
+func readConnectStatus(reader *bufio.Reader) (int, error) {
+	var header []byte
+	lineStart := 0
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(header)+len(part) > maxConnectHeader {
+			return 0, errors.New("proxy CONNECT response headers too large")
+		}
+		header = append(header, part...)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		line := header[lineStart:]
+		if bytes.Equal(line, []byte("\r\n")) || bytes.Equal(line, []byte("\n")) {
+			break
+		}
+		lineStart = len(header)
+	}
+	text := textproto.NewReader(bufio.NewReader(bytes.NewReader(header)))
+	statusLine, err := text.ReadLine()
+	if err != nil {
+		return 0, err
+	}
+	// Let net/http validate the status line without asking it to interpret any
+	// proxy body-framing fields. The synthetic response has no network reader.
+	response, err := http.ReadResponse(bufio.NewReader(strings.NewReader(statusLine+"\r\n\r\n")), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		return 0, err
+	}
+	if _, err := text.ReadMIMEHeader(); err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
 }
 
 func (c Config) dialSOCKS4(ctx context.Context, host string, port int) (net.Conn, error) {
@@ -340,11 +404,13 @@ func (c Config) AssociateUDP(ctx context.Context) (*Association, error) {
 	if !c.SupportsUDP() {
 		return nil, ErrUDPUnsupported
 	}
+	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
 	control, err := c.dialProxy(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var relay netip.AddrPort
+	var endpoint socksAddr
 	err = withDeadline(ctx, control, func() error {
 		if err := socks5Greeting(control, c.Username, c.Password); err != nil {
 			return err
@@ -367,27 +433,35 @@ func (c Config) AssociateUDP(ctx context.Context) (*Association, error) {
 		if err != nil {
 			return err
 		}
-		relay = addr
+		if addr.port == 0 {
+			return errors.New("SOCKS5 UDP relay has zero port")
+		}
+		endpoint = addr
 		return nil
 	})
 	if err != nil {
 		control.Close()
 		return nil, err
 	}
-	// A wildcard BND.ADDR means "the proxy's own address" (common behind NAT).
-	if !relay.Addr().IsValid() || relay.Addr().IsUnspecified() {
+	// Only a literal wildcard means "the proxy's own address" (common behind
+	// NAT). A BND domain names separate proxy infrastructure, not the target:
+	// resolve it under ctx, and never substitute the control IP on DNS failure.
+	if endpoint.ip.IsUnspecified() {
 		remote, ok := control.RemoteAddr().(*net.TCPAddr)
-		if !ok {
+		if !ok || !remote.AddrPort().Addr().IsValid() {
 			control.Close()
 			return nil, errors.New("cannot determine proxy UDP relay address")
 		}
-		relay = netip.AddrPortFrom(remote.AddrPort().Addr().Unmap(), relay.Port())
+		endpoint.ip = remote.AddrPort().Addr().Unmap()
 	}
-	udp, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(relay))
+	conn, err := (&net.Dialer{Resolver: c.resolver}).DialContext(ctx, "udp", endpoint.String())
 	if err != nil {
 		control.Close()
 		return nil, err
 	}
+	udp := conn.(*net.UDPConn)
+	remote := udp.RemoteAddr().(*net.UDPAddr).AddrPort()
+	relay := netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 	a := &Association{control: control, udp: udp, relay: relay, done: make(chan struct{})}
 	go func() {
 		// Any byte or EOF on the control connection ends the association.
@@ -429,8 +503,24 @@ func socks5Greeting(conn net.Conn, user, password string) error {
 	return nil
 }
 
-func readSOCKSAddr(r io.Reader, atyp byte) (netip.AddrPort, error) {
-	var ip netip.Addr
+// socksAddr retains ATYP=3 names instead of conflating them with wildcards.
+// Only a UDP relay endpoint is resolved locally; CONNECT replies are discarded.
+type socksAddr struct {
+	ip   netip.Addr
+	host string
+	port uint16
+}
+
+func (a socksAddr) String() string {
+	host := a.host
+	if a.ip.IsValid() {
+		host = a.ip.String()
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(a.port)))
+}
+
+func readSOCKSAddr(r io.Reader, atyp byte) (socksAddr, error) {
+	var addr socksAddr
 	switch atyp {
 	case 1, 4:
 		size := 4
@@ -439,27 +529,32 @@ func readSOCKSAddr(r io.Reader, atyp byte) (netip.AddrPort, error) {
 		}
 		buf := make([]byte, size)
 		if _, err := io.ReadFull(r, buf); err != nil {
-			return netip.AddrPort{}, err
+			return socksAddr{}, err
 		}
-		ip, _ = netip.AddrFromSlice(buf)
+		addr.ip, _ = netip.AddrFromSlice(buf)
+		addr.ip = addr.ip.Unmap()
 	case 3:
 		var n [1]byte
 		if _, err := io.ReadFull(r, n[:]); err != nil {
-			return netip.AddrPort{}, err
+			return socksAddr{}, err
 		}
 		name := make([]byte, n[0])
 		if _, err := io.ReadFull(r, name); err != nil {
-			return netip.AddrPort{}, err
+			return socksAddr{}, err
 		}
-		// A relay named by host name is not resolved here; treat as unspecified.
+		addr.host = string(name)
+		if addr.host == "" || strings.ContainsAny(addr.host, "\x00\r\n /\\@[]:") {
+			return socksAddr{}, errors.New("invalid SOCKS5 host name")
+		}
 	default:
-		return netip.AddrPort{}, errors.New("invalid SOCKS5 address type")
+		return socksAddr{}, errors.New("invalid SOCKS5 address type")
 	}
 	var port [2]byte
 	if _, err := io.ReadFull(r, port[:]); err != nil {
-		return netip.AddrPort{}, err
+		return socksAddr{}, err
 	}
-	return netip.AddrPortFrom(ip.Unmap(), binary.BigEndian.Uint16(port[:])), nil
+	addr.port = binary.BigEndian.Uint16(port[:])
+	return addr, nil
 }
 
 func (a *Association) WriteTo(p []byte, addr net.Addr) (int, error) {
@@ -527,10 +622,10 @@ func (a *Association) ReadFrom(p []byte) (int, net.Addr, error) {
 			return copy(p, buf[end+2:n]), from, nil
 		}
 		from, err := readSOCKSAddr(reader, buf[3])
-		if err != nil || !from.Addr().IsValid() {
+		if err != nil || !from.ip.IsValid() {
 			continue
 		}
-		return copy(p, reader.data), net.UDPAddrFromAddrPort(from), nil
+		return copy(p, reader.data), net.UDPAddrFromAddrPort(netip.AddrPortFrom(from.ip, from.port)), nil
 	}
 }
 

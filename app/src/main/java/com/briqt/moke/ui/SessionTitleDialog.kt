@@ -1,6 +1,9 @@
 package com.briqt.moke.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,6 +41,9 @@ fun SessionTitleDialog(
                 singleLine = true,
                 label = { Text(hint) },
                 textStyle = MaterialTheme.typography.bodyMedium,
+                supportingText = { Text(stringResource(R.string.session_title_default_hint)) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onConfirm(text) }),
                 modifier = Modifier.fillMaxWidth(),
             )
         },

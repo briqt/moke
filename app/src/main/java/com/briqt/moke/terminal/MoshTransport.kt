@@ -11,6 +11,7 @@ import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.UdpRelay
 import com.briqt.moke.net.connectFailureText
+import com.briqt.moke.net.networkException
 import com.termux.terminal.JNI
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
@@ -60,24 +61,30 @@ class MoshTransport(
     private val appContext = context.applicationContext
     private val nativeLibDir = appContext.applicationInfo.nativeLibraryDir
 
-    private var pfd: ParcelFileDescriptor? = null
-    private var ptyFd: Int = -1
-    private var pid: Int = -1
-    private var out: FileOutputStream? = null
+    @Volatile private var child: MoshChildProcess? = null
+    @Volatile private var out: FileOutputStream? = null
+    @Volatile private var loginThread: Thread? = null
     private val writeExec = Executors.newSingleThreadExecutor()
-    @Volatile private var closed = false
-    @Volatile private var childExited = false
-    private val finishReported = AtomicBoolean(false)
+    private val resources = TransportResources()
+    private val closed get() = resources.closed
+    private val childExited get() = child?.exited == true
+    private val auxiliaryStopped = AtomicBoolean()
+    private val server = MoshServerProcess(::killOrphanServer)
+    private val nativeOps = object : MoshProcessOps {
+        override fun waitFor(pid: Int) = JNI.waitFor(pid)
+        override fun kill(pid: Int) = android.system.Os.kill(pid, android.system.OsConstants.SIGKILL)
+        override fun closeFd(fd: Int) = JNI.close(fd)
+    }
 
     /** 经网络时 mosh 的 UDP 中继（占网络的一份租约）；会话结束时归还，只归还一次。 */
     private val relay = AtomicReference<UdpRelay?>(null)
     private val networks get() = (appContext as MokeApplication).networks
 
-    private fun releaseRelay() {
-        relay.getAndSet(null)?.let { networks.closeRelay(it) }
-    }
-
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
+        if (!resources.start()) {
+            if (closed && !resources.started) finish(session, 0)
+            return
+        }
         Thread({
             try {
                 // 0) 先确认随包 native 组件在位——缺失时给出可读提示并结束，
@@ -101,13 +108,20 @@ class MoshTransport(
                     } else {
                         host.host // SOCKS5 代理自行解析（ATYP=3）。
                     }
-                    relay.set(networks.openRelay(udpNetwork, target))
+                    val acquired = networks.openRelay(udpNetwork, target)
+                    relay.set(acquired)
+                    resources.own(acquired) {
+                        relay.compareAndSet(it, null)
+                        networks.closeRelay(it)
+                    }
                 }
 
                 // 1) SSH 引导：执行 mosh-server new，解析 MOSH CONNECT
                 feed(session, "\r\n" + appContext.localized(R.string.mosh_bootstrapping) + "\r\n")
+                check(!closed) { "session closed during bootstrap" }
                 val bootstrap = sshBootstrap()
-                serverPid = MoshBootstrap.parsePid(bootstrap.stderr)
+                server.register(MoshBootstrap.parsePid(bootstrap.stderr))
+                check(!closed) { "session closed during bootstrap" }
                 val connect = MoshBootstrap.parse(bootstrap.stdout)
                     ?: throw IllegalStateException(
                         appContext.localized(
@@ -144,53 +158,40 @@ class MoshTransport(
                     arrayOf("mosh-client", clientHost, clientPort.toString()),
                     env, pidArr, rows, columns, cellWidthPixels, cellHeightPixels,
                 )
-                ptyFd = fd
-                pid = pidArr[0]
-                // close() 可能恰好发生在「检查 closed」与 createSubprocess 之间：子进程已经起来，
-                // 但关闭路径没看到 pid。这里补一次检查，别留下本地 client 与远端 server。
-                if (closed) {
-                    if (pid > 0) runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
-                    runCatching { ParcelFileDescriptor.adoptFd(fd).close() }
-                    ptyFd = -1
-                    releaseRelay()
-                    serverPid?.let { killOrphanServer(it) }
-                    finish(session, 1)
+                // Positive pid ownership starts here, BEFORE adoptFd, streams, callbacks or closed checks.
+                // Even if close won while native create was running, own() kills/closes the late child;
+                // the already-running unique waiter still reaps it and reports completion.
+                val process = MoshChildProcess.start(pidArr[0], fd, nativeOps, server::cleanup) { code ->
+                    runCatching {
+                        if (code == 0 && resources.established) server.disarm() else server.cleanup()
+                    }
+                    resources.stop().invoke()
+                    stopAuxiliaryWork()
+                    finish(session, code)
+                }
+                child = process
+                resources.own(process) { it.forceClose() }
+                val descriptor = process.adopt { ParcelFileDescriptor.adoptFd(it) }
+                out = FileOutputStream(descriptor.fileDescriptor)
+                if (!resources.establish { onEstablished?.invoke() }) {
+                    process.forceClose()
                     return@Thread
                 }
-                if (pid > 0) onEstablished?.invoke()
-                val descriptor = ParcelFileDescriptor.adoptFd(fd)
-                pfd = descriptor
-                out = FileOutputStream(descriptor.fileDescriptor)
-
-                // waitpid 是子进程退出状态的唯一真相来源，也是唯一负责结束 TerminalSession 的路径。
-                // PTY 读端在 Android/Linux 上会以 EIO 表示 slave 已关闭，不能再据此判定连接失败。
-                val childPid = pid
-                Thread({
-                    val code = try {
-                        JNI.waitFor(childPid)
-                    } catch (_: Throwable) {
-                        if (closed) 0 else 1
-                    }
-                    childExited = true
-                    releaseRelay()
-                    finish(session, code)
-                    runCatching { pfd?.close() }
-                    ptyFd = -1
-                }, "moke-mosh-waiter").start()
 
                 // 连接成功后自动执行命令：mosh 握手需片刻，延迟发送再触发回车。
                 // 与 SSH 侧一致：tmux 覆盖时不注入，主机自配启动命令时仍注入。
                 if (startupCommand == null && host.loginCommand.isNotBlank()) {
-                    Thread({
+                    loginThread = Thread({
                         runCatching {
                             Thread.sleep(1500)
+                            if (closed) return@runCatching
                             // 换行用 CR（真实回车），与 SSH/附加键/文本段一致；多行逐行执行。
                             val payload = host.loginCommand.replace("\r\n", "\n").replace("\n", "\r")
                                 .let { if (it.endsWith("\r")) it else it + "\r" }
                             out?.write(payload.toByteArray(StandardCharsets.UTF_8))
                             out?.flush()
                         }
-                    }, "moke-mosh-login").start()
+                    }, "moke-mosh-login").also { it.start() }
                 }
 
                 // 3) 读线程：PTY -> emulator
@@ -212,14 +213,12 @@ class MoshTransport(
                             ) + "\r\n",
                         )
                         // 非挂断型 PTY 读错误无法继续桥接；终止子进程，由 waiter 上报真实退出码。
-                        if (pid > 0) {
-                            runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
-                        }
+                        process.forceClose()
                     }
                 }
             } catch (e: Throwable) {
                 // 捕获 Throwable（含 UnsatisfiedLinkError 等 Error），保证任何 native/引导失败都只是终端里报错，绝不闪退。
-                if (!closed && !childExited && pid > 0) {
+                if (!closed && !childExited && child != null) runCatching {
                     feed(
                         session,
                         "\r\n" + appContext.localized(
@@ -228,20 +227,17 @@ class MoshTransport(
                         ) + "\r\n",
                     )
                 }
-                // createSubprocess 成功后仍由 waiter 收口；引导/创建阶段失败才在这里结束。
-                if (pid > 0) {
-                    runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
-                    releaseRelay()
-                    // 引导已起了 mosh-server 却没能接上：经 SSH 结束它，不留到 24h 超时。
-                    serverPid?.let { killOrphanServer(it) }
+                val wasClosed = closed
+                runCatching { server.cleanup() }
+                resources.stop().invoke()
+                stopAuxiliaryWork()
+                // Positive pid: only its waiter finishes the session, including every initialization failure.
+                child?.let {
+                    it.forceClose()
                     return@Thread
                 }
-                releaseRelay()
-                // 引导已起了 mosh-server 却没能接上：经 SSH 结束它，不留到 24h 超时。
-                serverPid?.let { killOrphanServer(it) }
-                if (!closed) {
-                    // mosh-client 还没起来（引导 SSH 连不上 / mosh-server 回应无法解析）：属于"连接失败"。
-                    (e as? NetworkException)?.let(onNetworkError)
+                if (!wasClosed) {
+                    e.networkException()?.let(onNetworkError)
                     failConnect(session, e.connectFailureText(appContext))
                 } else {
                     finish(session, 1)
@@ -252,9 +248,6 @@ class MoshTransport(
 
     /** 经网络引导时实际拨的地址（tailnet 内已解析的 IP，与中继同一个）；null = 按主机名。 */
     @Volatile private var bootstrapDialHost: String? = null
-
-    /** 引导起来的 mosh-server 进程号（stderr 里读到的）。 */
-    @Volatile private var serverPid: Int? = null
 
     private class BootstrapOutput(val stdout: String, val stderr: String)
 
@@ -305,7 +298,7 @@ class MoshTransport(
     // ---------- tmux 侧通道：空闲即回收的可复用控制连接 ----------
 
     private val controlLock = ReentrantLock()
-    private var control: SshConnector.Connected? = null
+    @Volatile private var control: SshConnector.Connected? = null
     private var controlIdleSince = 0L
     /** 端口转发借用控制连接的次数（受 [controlLock] 保护）：大于 0 时不做空闲回收。 */
     private var forwardHolds = 0
@@ -362,8 +355,12 @@ class MoshTransport(
         control?.takeIf { it.client.isConnected && it.client.isAuthenticated }?.let { return it.client }
         closeControl()
         val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true)
-        runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
         control = c
+        if (closed) {
+            closeControl()
+            error("transport closed during control connection")
+        }
+        runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
         return c.client
     }
 
@@ -397,51 +394,54 @@ class MoshTransport(
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (closed) return
         val copy = data.copyOfRange(offset, offset + count)
-        writeExec.execute {
-            try { out?.write(copy); out?.flush() } catch (_: Exception) {}
+        runCatching {
+            writeExec.execute {
+                if (!closed) runCatching { out?.write(copy); out?.flush() }
+            }
         }
     }
 
     override fun updateSize(columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
-        if (ptyFd >= 0 && !closed) {
-            runCatching { JNI.setPtyWindowSize(ptyFd, rows, columns, cellWidthPixels, cellHeightPixels) }
+        if (!closed) child?.withFd { fd ->
+            runCatching { JNI.setPtyWindowSize(fd, rows, columns, cellWidthPixels, cellHeightPixels) }
         }
     }
 
+    private val closeRequested = AtomicBoolean()
+
     override fun close() {
-        val child = pid
+        if (!closeRequested.compareAndSet(false, true)) return
+        val cleanup = resources.stop()
+        val process = child
         val stream = out
-        closed = true
-        // 关会话要连远端一起收掉：直接 SIGKILL 只杀本地 mosh-client，远端 mosh-server 按漫游语义
-        // 会把"客户端不见了"当成网络断了继续等下一个客户端——实测每关一个会话就在服务器上留下一个
-        // mosh-server（~4.5MB + 占住一个 UDP 端口），tmux 也一直显示 (attached)，直到主机重启。
-        // 正解是让 mosh-client 走它自己的退出协议（Ctrl-^ 后 '.'，MOSH_ESCAPE_KEY 未改即默认 0x1E），
-        // 它会通知 server 结束。整段跑在 writeExec（后台单线程）上：close 来自 UI，不能阻塞。
-        writeExec.execute {
-            val quitSent = child > 0 && !childExited && stream != null &&
-                runCatching { stream.write(MOSH_QUIT_SEQUENCE); stream.flush(); true }.getOrDefault(false)
-            if (quitSent) {
-                // 等它把 shutdown 发出去并退出；一个 RTT 量级的事，超时就照旧 SIGKILL（不回退风险）。
-                val deadline = System.currentTimeMillis() + QUIT_GRACE_MS
-                while (!childExited && System.currentTimeMillis() < deadline) {
-                    runCatching { Thread.sleep(25) }
-                }
+        stopAuxiliaryWork()
+        // Keep mosh's own quit protocol, but never queue the only closer behind a blocked PTY write.
+        // A separate timeout worker closes/kills even when sending the escape sequence itself blocks.
+        Thread({
+            if (process != null && !process.exited && stream != null) {
+                Thread({
+                    runCatching { stream.write(MOSH_QUIT_SEQUENCE); stream.flush() }
+                }, "moke-mosh-quit").start()
+                runCatching { process.awaitExit(QUIT_GRACE_MS) }
             }
-            runCatching { pfd?.close() }
-            if (child > 0 && !childExited) {
-                runCatching { android.system.Os.kill(child, android.system.OsConstants.SIGKILL) }
+            cleanup()
+            if (process == null) server.cleanup()
+        }, "moke-mosh-close").start()
+    }
+
+    private fun stopAuxiliaryWork() {
+        writeExec.shutdownNow()
+        loginThread?.interrupt()
+        if (!auxiliaryStopped.compareAndSet(false, true)) return
+        // No main-thread sshj I/O or controlLock wait. A late connector checks closed after publishing.
+        Thread({
+            control?.abortSockets()
+            controlLock.withLock {
+                runCatching { reaper?.shutdownNow() }
+                reaper = null
+                closeControl()
             }
-            // 退出握手要经中继送达，所以等它结束才归还（子进程没起来时也在这里收）。
-            releaseRelay()
-        }
-        writeExec.shutdown()
-        // 控制连接与回收线程独立于 PTY，必须一并收掉，否则会话关掉了 TCP 还挂着。
-        runCatching { reaper?.shutdownNow() }
-        reaper = null
-        // 不能就地断开：close 来自主线程，sshj 断开时要往 socket 写 DISCONNECT，主线程网络 I/O 会抛异常、
-        // 异常被吞掉、socket 没关而引用已清空——实测关掉会话后 TCP 一直挂在服务器上。
-        // 正在跑一条命令时，这个线程等它结束再收尾。
-        Thread({ controlLock.withLock { closeControl() } }, "moke-mosh-ctl-close").start()
+        }, "moke-mosh-ctl-close").start()
     }
 
     private fun feed(session: TerminalSession, msg: String) {
@@ -451,15 +451,13 @@ class MoshTransport(
 
     /** 连接建立前失败：按"连接失败"上报（与 [finish] 共用同一个只报一次的闸门）。 */
     private fun failConnect(session: TerminalSession, reason: String?) {
-        if (finishReported.compareAndSet(false, true)) {
-            session.onTransportConnectFailed(reason)
-        }
+        resources.stop().invoke()
+        stopAuxiliaryWork()
+        resources.finish { session.onTransportConnectFailed(reason) }
     }
 
     private fun finish(session: TerminalSession, code: Int) {
-        if (finishReported.compareAndSet(false, true)) {
-            session.onTransportFinished(code)
-        }
+        resources.finish { session.onTransportFinished(code) }
     }
 
     /** 把随包 assets/terminfo 释放到 filesDir/terminfo（幂等），返回该目录供 TERMINFO 使用。 */

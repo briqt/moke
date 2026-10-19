@@ -1,14 +1,18 @@
 package tailnet
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/briqt/moke/netbridge/internal/codes"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/net/tsdial"
 	"tailscale.com/types/key"
 )
 
@@ -75,6 +79,110 @@ func TestResolveTargetRefusesOutsideTailnet(t *testing.T) {
 	expect("github.com:22", codes.NameNotFound)
 	expect("build-box", codes.InvalidArgument)
 	expect("build-box:0", codes.InvalidArgument)
+}
+
+// Exercise the final dial with a real reachable OS socket: a route withdrawal
+// must never turn a previously admitted target into a system-network connection.
+func TestPlannedTCPNeverFallsBackToSystem(t *testing.T) {
+	for _, mode := range []string{"route-withdrawn", "missing-netstack", "cancelled"} {
+		t.Run(mode, func(t *testing.T) {
+			ln, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var systemDials atomic.Int32
+			accepted := make(chan struct{})
+			go func() {
+				defer close(accepted)
+				for {
+					conn, err := ln.Accept()
+					if err != nil {
+						return
+					}
+					systemDials.Add(1)
+					conn.Close()
+				}
+			}()
+			defer func() {
+				ln.Close()
+				<-accepted
+				if got := systemDials.Load(); got != 0 {
+					t.Errorf("system connections = %d, want zero", got)
+				}
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			via := true
+			netstackCalls := 0
+			dialErr := errors.New("userspace route disappeared")
+			d := &tsdial.Dialer{UseNetstackForIP: func(netip.Addr) bool { return via }}
+			d.NetstackDialTCP = func(gotCtx context.Context, got netip.AddrPort) (net.Conn, error) {
+				netstackCalls++
+				if got.String() != ln.Addr().String() || gotCtx != ctx {
+					t.Errorf("changed admitted target/context: %v", got)
+				}
+				return nil, dialErr
+			}
+			d.NetstackDialUDP = d.NetstackDialTCP
+			st := status()
+			ap, err := resolveTarget(st, ln.Addr().String(), "tcp", func(ip netip.Addr) bool {
+				_, routed, err := d.UserDialPlan(ctx, "tcp", netip.AddrPortFrom(ip, 1).String())
+				return err == nil && routed
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			via = false // Deterministic withdrawal between admission and the final dial.
+			wantCode, wantCalls := codes.TargetUnreachable, 1
+			switch mode {
+			case "missing-netstack":
+				d.NetstackDialTCP = nil
+				wantCode, wantCalls = codes.NotReady, 0
+			case "cancelled":
+				cancel()
+				wantCalls = 0
+			}
+			conn, err := dialPlannedTCP(ctx, ap, st, d)
+			if conn != nil {
+				conn.Close()
+				t.Error("admitted target escaped into an OS connection")
+			}
+			if err == nil || codes.Of(err, codes.TargetUnreachable).Code != wantCode {
+				t.Errorf("error = %v, want %s", err, wantCode)
+			}
+			if netstackCalls != wantCalls {
+				t.Errorf("netstack calls = %d, want %d", netstackCalls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestPlannedTCPKeepsUserspaceConnectionAndErrors(t *testing.T) {
+	ap := netip.MustParseAddrPort("100.64.0.2:22")
+	for _, fail := range []bool{false, true} {
+		st := status()
+		for _, peer := range st.Peer {
+			peer.Online = !fail
+		}
+		left, right := net.Pipe()
+		d := &tsdial.Dialer{UseNetstackForIP: func(netip.Addr) bool { return true }}
+		d.NetstackDialTCP = func(context.Context, netip.AddrPort) (net.Conn, error) {
+			if fail {
+				return nil, errors.New("unreachable")
+			}
+			return left, nil
+		}
+		d.NetstackDialUDP = d.NetstackDialTCP
+		conn, err := dialPlannedTCP(context.Background(), ap, st, d)
+		left.Close()
+		right.Close()
+		if !fail && (err != nil || conn != left) {
+			t.Fatalf("userspace connection lost: %v %v", conn, err)
+		}
+		if fail && (err == nil || codes.Of(err, codes.Internal).Detail != "peer is offline") {
+			t.Fatalf("offline classification lost: %v", err)
+		}
+	}
 }
 
 func TestReadiness(t *testing.T) {

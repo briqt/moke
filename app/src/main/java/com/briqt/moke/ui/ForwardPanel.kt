@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import kotlinx.coroutines.CancellationException
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -115,7 +118,14 @@ fun ForwardPanel(
 
     if (adding) {
         AddForwardDialog(
-            onConfirm = { remote, local -> adding = false; start(remote, local) },
+            onConfirm = { remote, local ->
+                pending = pending + remote
+                try {
+                    val success = withContext(Dispatchers.IO) { forwards.start(remote, local) != null }
+                    if (success) adding = false
+                    success
+                } finally { pending = pending - remote }
+            },
             onDismiss = { adding = false },
         )
     }
@@ -163,42 +173,56 @@ private fun ForwardRow(
 }
 
 @Composable
-private fun AddForwardDialog(onConfirm: (Int, Int?) -> Unit, onDismiss: () -> Unit) {
+private fun AddForwardDialog(onConfirm: suspend (Int, Int?) -> Boolean, onDismiss: () -> Unit) {
     var remote by remember { mutableStateOf("") }
     var local by remember { mutableStateOf("") }
-    val remotePort = remote.trim().toIntOrNull()?.takeIf { it in 1..65535 }
-    val localText = local.trim()
-    val localPort = localText.toIntOrNull()?.takeIf { it in 1024..65535 }
-    val localOk = localText.isEmpty() || localPort != null
+    var submitted by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val remoteTarget = remember { EditorTarget() }
+    val localTarget = remember { EditorTarget() }
+    val remotePort = FormValidation.port(remote)
+    val localPort = FormValidation.port(local, 1024)
+    val localOk = local.isBlank() || localPort != null
+    fun submit() {
+        if (submitting) return
+        submitted = true
+        if (remotePort == null || !localOk) {
+            scope.launch { (if (remotePort == null) remoteTarget else localTarget).reveal() }
+            return
+        }
+        submitting = true
+        failed = false
+        scope.launch {
+            try { failed = !onConfirm(remotePort, localPort)
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) { failed = true
+            } finally { submitting = false }
+        }
+    }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!submitting) onDismiss() },
         title = { Text(stringResource(R.string.fwd_add_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = remote,
-                    onValueChange = { remote = it.filter(Char::isDigit).take(5) },
-                    label = { Text(stringResource(R.string.fwd_remote_port)) },
-                    placeholder = { Text("5173") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                OutlinedTextField(
-                    value = local,
-                    onValueChange = { local = it.filter(Char::isDigit).take(5) },
-                    label = { Text(stringResource(R.string.fwd_local_port)) },
-                    supportingText = { Text(stringResource(if (localOk) R.string.fwd_local_port_hint else R.string.fwd_local_port_invalid)) },
-                    isError = !localOk,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
+                FormTextField(remote, { remote = it; failed = false }, stringResource(R.string.fwd_remote_port),
+                    error = if (remotePort == null) stringResource(R.string.form_port_invalid) else null, submitted = submitted,
+                    enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                    modifier = Modifier.editorTarget(remoteTarget))
+                FormTextField(local, { local = it; failed = false }, stringResource(R.string.fwd_local_port),
+                    error = if (!localOk) stringResource(R.string.fwd_local_port_invalid) else null, submitted = submitted,
+                    hint = stringResource(R.string.fwd_local_port_hint), enabled = !submitting,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }), modifier = Modifier.editorTarget(localTarget))
+                if (failed) InfoNote(stringResource(R.string.fwd_open_failed, remotePort ?: 0), error = true)
             }
         },
         confirmButton = {
-            TextButton(enabled = remotePort != null && localOk, onClick = { onConfirm(remotePort!!, localPort) }) {
-                Text(stringResource(R.string.fwd_add))
+            TextButton(enabled = !submitting, onClick = { submit() }) {
+                Text(stringResource(if (submitting) R.string.action_working else R.string.action_add))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(enabled = !submitting, onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

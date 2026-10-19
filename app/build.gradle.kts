@@ -134,7 +134,23 @@ dependencies {
 
 tasks.matching { it.name == "preBuild" }.configureEach {
     doFirst {
-        check(netbridgeAar.exists()) { "缺少 app/libs/netbridge.aar，先运行 scripts/build-netbridge.sh" }
+        // One Bash implementation owns the input/AAR content hashes. This guard
+        // only verifies; it never invokes Go, downloads tools or rebuilds the AAR.
+        val verifier = rootProject.file("scripts/verify-netbridge.sh")
+        val process = try {
+            ProcessBuilder("bash", verifier.absolutePath, "check")
+                .directory(rootProject.projectDir)
+                .redirectErrorStream(true)
+                .start()
+        } catch (error: java.io.IOException) {
+            throw GradleException(
+                "无法校验 netbridge.aar：需要 Bash 和 GNU coreutils。先运行 bash scripts/build-netbridge.sh",
+                error
+            )
+        }
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        check(process.waitFor() == 0) { output }
+        logger.lifecycle(output)
     }
 }
 

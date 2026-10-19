@@ -60,6 +60,7 @@ type fakeNode struct {
 	authURL    string
 	loginCalls int
 	dial       func(ctx context.Context, target string) (net.Conn, error)
+	packet     func() (net.PacketConn, error)
 }
 
 func (f *fakeNode) Start() error {
@@ -99,6 +100,9 @@ func (f *fakeNode) ResolveUDP(_ context.Context, target string) (netip.AddrPort,
 }
 func (f *fakeNode) IPs() []netip.Addr { return []netip.Addr{netip.MustParseAddr("100.64.0.1")} }
 func (f *fakeNode) ListenPacket(string, string) (net.PacketConn, error) {
+	if f.packet != nil {
+		return f.packet()
+	}
 	return net.ListenPacket("udp4", "127.0.0.1:0")
 }
 func (f *fakeNode) InterfacesChanged() { f.changed.Add(1) }
@@ -532,6 +536,164 @@ func TestRelayHoldsLeaseAndStaysInTailnet(t *testing.T) {
 		t.Fatalf("leases %d", tb.leaseCount("home"))
 	}
 	if err := tb.stop("home"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentRelayCloseKeepsLiveConnectionLease(t *testing.T) {
+	tb := newTestBridge(t)
+	echo := echoServer(t)
+	tb.startFake(t, "home", &fakeNode{state: "Running", dial: func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", echo)
+	}})
+	ticket, err := tb.openDial("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := dialVia(t, ticket, "peer:22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for i := 0; i < 100; i++ {
+		if _, err := tb.openUDPRelay(`{"id":"r","networkID":"home","targetHost":"100.64.0.2"}`); err != nil {
+			t.Fatal(err)
+		}
+		gate := make(chan struct{})
+		var ready, done sync.WaitGroup
+		for range 32 {
+			ready.Add(1)
+			done.Add(1)
+			go func() {
+				defer done.Done()
+				ready.Done()
+				<-gate
+				if err := tb.closeUDPRelay("r"); err != nil {
+					t.Errorf("close: %v", err)
+				}
+			}()
+		}
+		ready.Wait()
+		close(gate)
+		done.Wait()
+		if got := tb.leaseCount("home"); got != 1 {
+			t.Fatalf("wave %d: repeated relay close stole live connection lease: %d", i, got)
+		}
+		if codeOf(t, tb.stop("home")) != codes.Busy {
+			t.Fatal("stop did not remain BUSY under a live connection")
+		}
+	}
+	conn.SetDeadline(time.Now().Add(time.Second))
+	conn.Write([]byte("alive"))
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "alive" {
+		t.Fatalf("other connection affected by relay closes: %q, %v", buf, err)
+	}
+}
+
+type blockedPacketClose struct {
+	net.PacketConn
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (c *blockedPacketClose) Close() error {
+	close(c.entered)
+	<-c.gate
+	c.PacketConn.Close()
+	return errors.New("injected close failure")
+}
+
+func TestRelayClosingRetainsLeaseUntilShutdownAndIDReuse(t *testing.T) {
+	tb := newTestBridge(t)
+	udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := &blockedPacketClose{PacketConn: udp, entered: make(chan struct{}), gate: make(chan struct{})}
+	var unblock sync.Once
+	release := func() { unblock.Do(func() { close(blocked.gate) }) }
+	t.Cleanup(func() { release(); tb.relays.CloseAll(); udp.Close() })
+	opens := 0
+	tb.startFake(t, "home", &fakeNode{state: "Running", packet: func() (net.PacketConn, error) {
+		opens++
+		if opens == 1 {
+			return blocked, nil
+		}
+		return net.ListenPacket("udp4", "127.0.0.1:0")
+	}})
+	ticket, err := tb.openDial("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tb.cancelDial(ticket.Username)
+	cfg := `{"id":"r","networkID":"home","targetHost":"100.64.0.2"}`
+	if _, err := tb.openUDPRelay(cfg); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- tb.closeUDPRelay("r") }()
+	select {
+	case <-blocked.entered:
+	case <-time.After(time.Second):
+		t.Fatal("relay never reached socket Close")
+	}
+	if err := tb.closeUDPRelay("r"); err != nil || tb.leaseCount("home") != 2 {
+		t.Fatalf("non-owner released a lease: %v, leases=%d", err, tb.leaseCount("home"))
+	}
+	if codeOf(t, tb.stop("home")) != codes.Busy {
+		t.Fatal("stop cut a relay still shutting down")
+	}
+	if _, err := tb.openUDPRelay(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.startUDPRelay("r", 60000, "AAAAAAAAAAAAAAAAAAAAAA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.relays.CloseAll(); err != nil || tb.leaseCount("home") != 2 {
+		t.Fatalf("replacement/bulk close released wrong owner: %v", err)
+	}
+	release()
+	if err := <-done; err == nil || tb.leaseCount("home") != 1 {
+		t.Fatalf("failed shutdown skipped lease return: %v, leases=%d", err, tb.leaseCount("home"))
+	}
+	if codeOf(t, tb.stop("home")) != codes.Busy {
+		t.Fatal("old relay release stole remaining ticket lease")
+	}
+}
+
+func TestRelayBulkCloseReturnsOnlyOwnedLeases(t *testing.T) {
+	tb := newTestBridge(t)
+	tb.startFake(t, "a", &fakeNode{state: "Running"})
+	tb.startFake(t, "b", &fakeNode{state: "Running"})
+	for _, value := range []struct{ id, network string }{{"r1", "a"}, {"r2", "a"}, {"r3", "b"}} {
+		if _, err := tb.openUDPRelay(fmt.Sprintf(`{"id":%q,"networkID":%q,"targetHost":"100.64.0.2"}`, value.id, value.network)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ticket, err := tb.openDial("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tb.cancelDial(ticket.Username)
+	if err := tb.relays.CloseNetwork("a"); err != nil {
+		t.Fatal(err)
+	}
+	if tb.leaseCount("a") != 1 || tb.leaseCount("b") != 1 {
+		t.Fatalf("bulk close: a=%d b=%d", tb.leaseCount("a"), tb.leaseCount("b"))
+	}
+	if err := tb.relays.CloseAll(); err != nil {
+		t.Fatal(err)
+	}
+	tb.closeUDPRelay("r1")
+	tb.closeUDPRelay("r3")
+	if tb.leaseCount("a") != 1 || tb.leaseCount("b") != 0 {
+		t.Fatalf("repeated/bulk close: a=%d b=%d", tb.leaseCount("a"), tb.leaseCount("b"))
+	}
+	if codeOf(t, tb.stop("a")) != codes.Busy {
+		t.Fatal("bulk close stole a dial ticket lease")
+	}
+	if err := tb.stop("b"); err != nil {
 		t.Fatal(err)
 	}
 }

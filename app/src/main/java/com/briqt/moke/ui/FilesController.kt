@@ -1,20 +1,26 @@
 package com.briqt.moke.ui
 
 import android.content.Context
+import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
-import com.briqt.moke.net.NetworkException
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.net.connectFailureText
-import com.briqt.moke.net.needsLogin
+import com.briqt.moke.net.networkRecovery
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.sftp.RemoteEntry
 import com.briqt.moke.terminal.sftp.RemotePath
 import com.briqt.moke.terminal.sftp.SftpSession
+import com.briqt.moke.terminal.sftp.UploadDestination
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,10 +28,20 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 一次会覆盖远端文件的上传：[names] 是已存在的同名文件，确认后才真正入队。 */
-data class UploadConflict(val uris: List<android.net.Uri>, val names: List<String>)
+/** Captured before the document picker opens. No generated toString may expose connection secrets. */
+class UploadTarget internal constructor(
+    val host: Host,
+    val jumpHost: Host?,
+    val network: NetworkEntry?,
+    val directory: String,
+    val destination: UploadDestination,
+    internal val ticket: FilesWork.Ticket<SftpSession>,
+)
 
-/** 文件页的一屏状态。[terminalPath] 非空表示"终端当前目录"可用（用于 ⋮ 里的回跳）。 */
+class UploadInspection internal constructor(val target: UploadTarget, val names: List<String>, val clashes: List<String>)
+data class UploadConflict(val uris: List<android.net.Uri>, val names: List<String>, val inspection: UploadInspection? = null)
+
+/** A failure never replaces an already displayed directory with a fictional empty listing. */
 data class FilesUiState(
     val host: Host? = null,
     val path: String = "",
@@ -34,130 +50,238 @@ data class FilesUiState(
     val error: String = "",
     val notice: String = "",
     val terminalPath: String = "",
-    /** 失败因网络需要登录：横幅给出「登录」。 */
     val loginNetwork: NetworkEntry? = null,
-)
+    val recovery: NetworkRecovery? = null,
+    /** A lazy browsing connection is attached; this does not imply that SSH has connected yet. */
+    val browsingActive: Boolean = false,
+) {
+    val canUpload: Boolean get() = browsingActive && !loading && path.isNotBlank() && error.isBlank()
+}
 
-/**
- * 文件页的会话与导航。一次打开 = 一条独立 SFTP 连接（见 `设计/文件传输-SFTP.md` §3.3），
- * 离开页面即断开；传输不走这条连接，所以关掉它不会打断正在传的文件。
- */
+/** One independent SFTP connection per open page. Transfers own separate connections. */
 class FilesController(context: Context, private val scope: CoroutineScope) {
-
     private val appContext = context.applicationContext
-
     private val _state = MutableStateFlow(FilesUiState())
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
-
-    private var session: SftpSession? = null
+    private val work = FilesWork<SftpSession>()
     private var job: Job? = null
+    private data class Configuration(val host: Host, val jump: Host?, val network: NetworkEntry?, val refusal: String?, val recovery: NetworkRecovery?)
+    private var configuration: Configuration? = null
+    val isPaused: Boolean get() = _state.value.host != null && !work.isAttached()
+    val canAutoRefresh: Boolean get() = work.isAttached() && _state.value.canUpload
 
-    /**
-     * 打开某台主机的文件页。[from] 非空时尝试取"终端当前目录"作为起点。
-     *
-     * 取当前目录只在 tmux 会话上做得到（`#{pane_current_path}`）：普通登录壳的 cwd 属于那个
-     * shell 进程，侧通道另开的 exec 看不到，硬猜只会给出错误的路径。取不到就落到家目录，
-     * 不假装知道。
-     */
-    fun open(host: Host, jumpHost: Host?, network: NetworkEntry?, from: TermSession?, refusal: String? = null) {
+    fun open(
+        host: Host, jumpHost: Host?, network: NetworkEntry?, from: TermSession?,
+        refusal: String? = null, refusalRecovery: NetworkRecovery? = null,
+    ) {
         close()
-        if (refusal != null) {
-            // 不能连（跳板机/网络已删除等）：直接给出原因，绝不退回直连。
-            _state.value = FilesUiState(host = host, loading = false, error = refusal)
-            return
+        connect(Configuration(host, jumpHost, network, refusal, refusalRecovery), from, preserve = false)
+    }
+
+    /** Caller resolves the route again before retrying; never silently reuse a deleted network. */
+    fun retry(
+        host: Host, jumpHost: Host?, network: NetworkEntry?, refusal: String? = null,
+        refusalRecovery: NetworkRecovery? = null,
+    ) {
+        val preserve = _state.value.host?.id == host.id
+        disconnect()
+        connect(Configuration(host, jumpHost, network, refusal, refusalRecovery), null, preserve)
+    }
+
+    /** Reattach after returning from recovery, without replaying listing or any failed operation. */
+    fun resume(
+        host: Host, jumpHost: Host?, network: NetworkEntry?, refusal: String? = null,
+        refusalRecovery: NetworkRecovery? = null,
+    ) {
+        val previous = _state.value
+        if (previous.host?.id != host.id) return
+        val config = Configuration(host, jumpHost, network, refusal, refusalRecovery)
+        if (configuration == config && work.isAttached()) return
+        disconnect()
+        configuration = config
+        _state.value = previous.copy(
+            host = host, loading = false, error = refusal.orEmpty(),
+            recovery = refusalRecovery.takeIf { refusal != null },
+            loginNetwork = refusalRecovery?.takeIf { refusal != null && it.kind == RecoveryKind.LOGIN_NETWORK }?.network,
+            browsingActive = false,
+        )
+        if (refusal == null) {
+            val ticket = work.attach(SftpSession(host, jumpHost, appContext, network))
+            work.commit(ticket) { _state.update { it.copy(browsingActive = true) } }
         }
-        _state.value = FilesUiState(host = host, loading = true)
+    }
+
+    private fun connect(config: Configuration, from: TermSession?, preserve: Boolean) {
+        configuration = config
+        val previous = if (preserve) _state.value else FilesUiState()
+        _state.value = previous.copy(
+            host = config.host, loading = config.refusal == null, error = config.refusal.orEmpty(), browsingActive = false,
+            recovery = if (config.refusal != null) config.recovery else null,
+            loginNetwork = config.recovery?.takeIf { config.refusal != null && it.kind == RecoveryKind.LOGIN_NETWORK }?.network,
+        )
+        if (config.refusal != null) return
+        val s = SftpSession(config.host, config.jump, appContext, config.network)
+        val ticket = work.attach(s)
+        work.commit(ticket) { _state.update { it.copy(browsingActive = true) } }
         job = scope.launch {
-            val s = SftpSession(host, jumpHost, appContext, network)
-            session = s
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val terminalPath = from?.let { probeTerminalPath(it, s) } ?: ""
-                    val start = terminalPath.ifBlank { s.homePath() }
-                    Triple(start, s.list(start), terminalPath)
-                }
-            }.onSuccess { (start, entries, terminalPath) ->
-                _state.update {
-                    it.copy(
-                        path = start,
-                        entries = entries,
-                        loading = false,
-                        terminalPath = terminalPath,
-                        notice = s.consumeNotice().orEmpty(),
-                    )
-                }
-            }.onFailure { t ->
-                val login = (t as? NetworkException)?.takeIf { it.needsLogin }?.network
-                _state.update { it.copy(loading = false, error = describe(t, s.consumeNotice()), loginNetwork = login) }
+            operation(ticket, { connection ->
+                val terminalPath = from?.let { probeTerminalPath(it, connection) } ?: previous.terminalPath
+                val start = previous.path.ifBlank { terminalPath.ifBlank { connection.homePath() } }
+                Triple(start, connection.list(start), terminalPath)
+            }) { state, (start, entries, terminalPath) ->
+                state.copy(path = start, entries = entries, terminalPath = terminalPath)
             }
         }
     }
 
     fun navigate(path: String) {
-        val s = session ?: return
-        job?.cancel()
-        _state.update { it.copy(loading = true, error = "") }
+        val ticket = beginOperation() ?: return
         job = scope.launch {
-            runCatching { withContext(Dispatchers.IO) { s.list(path) } }
-                .onSuccess { list -> _state.update { it.copy(path = path, entries = list, loading = false) } }
-                // 进不去就留在原地（常见于无权限目录），把原因说清楚，而不是清空成"空目录"。
-                .onFailure { t -> _state.update { it.copy(loading = false, error = describe(t, s.consumeNotice())) } }
+            operation(ticket, { connection ->
+                val target = path.ifBlank { connection.homePath() }
+                target to connection.list(target)
+            }) { state, (target, entries) -> state.copy(path = target, entries = entries) }
         }
     }
 
-    fun refresh() = navigate(_state.value.path)
-
+    /** A background refresh must never resurrect a paused connection using an old configuration. */
+    fun refresh() {
+        if (canAutoRefresh) navigate(_state.value.path)
+    }
     fun up() = navigate(RemotePath.parent(_state.value.path))
 
-    fun mkdir(name: String) {
-        val s = session ?: return
-        val target = RemotePath.join(_state.value.path, name.trim())
-        scope.launch {
-            runCatching { withContext(Dispatchers.IO) { s.mkdir(target) } }
-                .onSuccess { refresh() }
-                .onFailure { t -> _state.update { it.copy(error = describe(t, s.consumeNotice())) } }
+    suspend fun mkdir(name: String): Boolean {
+        val cleaned = name.trim()
+        if (!validDirectoryName(name)) return false
+        val dir = _state.value.path.ifBlank { return false }
+        val ticket = beginOperation() ?: return false
+        return try {
+            val listing = withContext(Dispatchers.IO) {
+                work.execute(ticket) { s ->
+                    s.mkdir(RemotePath.join(dir, cleaned))
+                    // The mutation succeeded. A failed refresh must not invite a duplicate mkdir.
+                    runCatching { s.list(dir) }
+                }
+            }
+            if (listing.isFailure) {
+                fail(ticket, listing.exceptionOrNull()!!)
+                work.current(ticket)
+            } else work.commit(ticket) {
+                _state.update { it.copy(entries = listing.getOrThrow(), loading = false, notice = ticket.page.connection.consumeNotice().orEmpty()) }
+            }
+        } catch (t: CancellationException) { throw t }
+        catch (t: Throwable) { fail(ticket, t); false }
+    }
+
+    /** Canonicalize and list in one operation; failure leaves both the directory and prompt intact. */
+    suspend fun goto(raw: String): Boolean {
+        val cleaned = raw.trim()
+        if (!validRemotePath(raw)) return false
+        val ticket = beginOperation() ?: return false
+        return operation(ticket, { s ->
+            val target = s.canonicalize(cleaned)
+            target to s.list(target)
+        }) { state, (target, entries) -> state.copy(path = target, entries = entries) }
+    }
+
+    private fun beginOperation(): FilesWork.Ticket<SftpSession>? {
+        job?.cancel()
+        job = null
+        val ticket = work.begin() ?: return null
+        work.commit(ticket) { _state.update { it.copy(loading = true, error = "", notice = "", loginNetwork = null, recovery = null) } }
+        return ticket
+    }
+
+    private suspend fun <T> operation(
+        ticket: FilesWork.Ticket<SftpSession>, action: (SftpSession) -> T,
+        success: (FilesUiState, T) -> FilesUiState,
+    ): Boolean = try {
+        val result = withContext(Dispatchers.IO) { work.execute(ticket, action) }
+        work.commit(ticket) {
+            val notice = ticket.page.connection.consumeNotice().orEmpty()
+            _state.update { success(it, result).copy(loading = false, error = "", notice = notice, loginNetwork = null, recovery = null) }
+        }
+    } catch (t: CancellationException) { throw t }
+    catch (t: Throwable) { fail(ticket, t); false }
+
+    /** One error exit for open, navigation, path input and mutation failures. */
+    private fun fail(ticket: FilesWork.Ticket<SftpSession>, t: Throwable) {
+        val recovery = t.networkRecovery()
+        work.commit(ticket) {
+            val notice = ticket.page.connection.consumeNotice()
+            val base = if (t is InvalidUploadNames) appContext.localized(R.string.files_upload_name_invalid)
+                else t.connectFailureText(appContext).ifBlank { t.javaClass.simpleName }
+            _state.update { it.copy(
+                loading = false, error = if (notice.isNullOrBlank()) base else "$notice\n$base", notice = "",
+                recovery = recovery, loginNetwork = recovery?.takeIf { it.kind == RecoveryKind.LOGIN_NETWORK }?.network,
+            ) }
         }
     }
 
-    /** 跳转到用户输入的路径（可含 `~`、相对段，交给远端 canonicalize）。 */
-    fun goto(raw: String) {
-        val s = session ?: return
-        scope.launch {
-            runCatching { withContext(Dispatchers.IO) { s.canonicalize(raw.trim()) } }
-                .onSuccess { navigate(it) }
-                .onFailure { t -> _state.update { it.copy(error = describe(t, s.consumeNotice())) } }
-        }
-    }
+    fun clearError() = _state.update { it.copy(error = "", loginNetwork = null, recovery = null) }
 
-    fun clearError() = _state.update { it.copy(error = "", loginNetwork = null) }
-
-    /**
-     * 当前目录下这些名字里，哪些远端已经有了。
-     *
-     * 上传是**覆盖**语义（SFTP 写入，和 scp 一样），而被覆盖的是服务器上的文件——比本地误覆盖
-     * 代价大得多，所以只要有一个撞名就得先问过用户。查不到会话时返回空（让上传照常进行并在
-     * 传输失败里报错，而不是因为一次探测失败就挡住用户）。
-     */
-    suspend fun existingNames(names: List<String>): List<String> {
-        val s = session ?: return emptyList()
-        val dir = _state.value.path.ifBlank { return emptyList() }
-        return withContext(Dispatchers.IO) {
-            names.filter { name ->
-                runCatching { s.stat(RemotePath.join(dir, name)) }.getOrNull() != null
+    /** Capture before launching the document picker; returning null grants no upload permission. */
+    fun captureUploadTarget(): UploadTarget? {
+        val ticket = work.snapshot() ?: return null
+        var target: UploadTarget? = null
+        work.commit(ticket) {
+            val state = _state.value
+            val config = configuration
+            if (state.canUpload && config != null && config.refusal == null && state.host?.id == config.host.id) {
+                target = UploadTarget(config.host, config.jump, config.network, state.path,
+                    UploadDestination.from(config.host, config.jump, config.network), ticket)
             }
         }
+        return target
+    }
+
+    fun isUploadTargetCurrent(target: UploadTarget): Boolean {
+        var current = false
+        work.commit(target.ticket) {
+            val state = _state.value
+            val config = configuration
+            current = state.canUpload && config != null && config.refusal == null &&
+                state.host?.id == target.host.id && state.path == target.directory &&
+                UploadDestination.from(config.host, config.jump, config.network) == target.destination
+        }
+        return current
+    }
+
+    /** No catch-to-empty fallback: missing files and failed/obsolete inspections are distinct. */
+    suspend fun inspectUpload(target: UploadTarget, names: List<String>): UploadInspection? {
+        if (!isUploadTargetCurrent(target)) return null
+        val captured = names.toList()
+        return try {
+            val clashes = withContext(Dispatchers.IO) {
+                work.inspectNames(target.ticket, captured) { s, name -> s.stat(RemotePath.join(target.directory, name)) != null }
+            } ?: return null
+            if (!isUploadTargetCurrent(target)) null else UploadInspection(target, captured, clashes)
+        } catch (t: CancellationException) { throw t }
+        catch (t: Throwable) { fail(target.ticket, t); null }
+    }
+
+    private fun detach(): FilesWork.Page<SftpSession>? {
+        job?.cancel()
+        job = null
+        return work.detachPage()
+    }
+    private fun disconnect() {
+        detach()?.let { retired -> scope.launch(Dispatchers.IO) { runCatching { retired.connection.close() } } }
+    }
+
+    /** Await the browsing lease's retirement, including resources installed by late blocking IO. */
+    suspend fun pauseForRecovery() {
+        val retired = detach()
+        _state.update { it.copy(loading = false, browsingActive = false) }
+        if (retired != null) withContext(NonCancellable + Dispatchers.IO) { work.closeAndDrain(retired) }
     }
 
     fun close() {
-        job?.cancel()
-        job = null
-        val s = session
-        session = null
+        disconnect()
+        configuration = null
         _state.value = FilesUiState()
-        if (s != null) scope.launch { withContext(Dispatchers.IO) { runCatching { s.close() } } }
     }
 
-    /** 排序：目录永远在前，同类之间按用户选的维度比。 */
     fun sorted(entries: List<RemoteEntry>, sort: FilesSort, showHidden: Boolean): List<RemoteEntry> {
         val visible = if (showHidden) entries else entries.filterNot { it.name.startsWith(".") }
         val cmp = when (sort) {
@@ -172,13 +296,7 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         val name = from.remoteTmuxName.value ?: return ""
         val out = runCatching { from.transport.exec(Tmux.paneCwdCmd(name)) }.getOrNull()?.trim().orEmpty()
         if (out.isBlank() || !out.startsWith("/")) return ""
-        // 只取第一行：display-message 正常只输出一行，异常时可能带告警。
         val path = out.lineSequence().first().trim()
         return runCatching { s.canonicalize(path) }.getOrDefault(path)
-    }
-
-    private fun describe(t: Throwable, notice: String?): String {
-        val base = t.connectFailureText(appContext).takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
-        return if (notice.isNullOrBlank()) base else "$notice\n$base"
     }
 }

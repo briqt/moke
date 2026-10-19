@@ -5,6 +5,9 @@ import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.net.NetworkException
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
+import com.briqt.moke.net.recovery
 import com.briqt.moke.net.needsLogin
 import com.briqt.moke.localized
 import com.termux.terminal.TerminalSession
@@ -92,7 +95,10 @@ class TermSession(
      */
     val connectFailed = MutableStateFlow(false)
 
-    /** 因网络需要登录（未登录、过期、等待批准）而连不上时是哪个网络；失败条据此给出「登录」。 */
+    /** Structured recovery for this failed session; the host is already owned by this session. */
+    val recovery = MutableStateFlow<NetworkRecovery?>(null)
+
+    /** Compatibility field for actual login failures only; approval uses VIEW_NETWORK. */
     val loginNetwork = MutableStateFlow<NetworkEntry?>(null)
 
     /** 本会话上的本地端口转发（SSH 借会话连接，mosh 借控制连接）。 */
@@ -185,7 +191,12 @@ class SessionManager(context: Context) {
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
         // 传输在 TerminalSession 第一次量好尺寸时才启动，那时 ts 已建好。
         var created: TermSession? = null
-        val onNetworkError: (NetworkException) -> Unit = { ex -> if (ex.needsLogin) created?.loginNetwork?.value = ex.network }
+        val onNetworkError: (NetworkException) -> Unit = { ex ->
+            created?.let { current ->
+                current.recovery.value = ex.recovery
+                current.loginNetwork.value = ex.network.takeIf { ex.needsLogin }
+            }
+        }
         val transport = when {
             refusal != null -> RefusedTransport(refusal)
             host.useMosh -> MoshTransport(host, appContext, jumpHost, startupCommand, network, onNetworkError)
@@ -226,6 +237,7 @@ class SessionManager(context: Context) {
         session.sessionStatusText = object : TerminalSession.StatusText {
             override fun connectFailed(reason: String): String {
                 ts.connectFailed.value = true
+                if (ts.recovery.value == null) ts.recovery.value = NetworkRecovery(RecoveryKind.EDIT_HOST)
                 return TerminalSession.statusText.connectFailed(reason)
             }
 

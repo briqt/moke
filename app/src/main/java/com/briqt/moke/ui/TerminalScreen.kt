@@ -86,6 +86,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ScrollMode
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.terminal.KeyId
 import com.briqt.moke.terminal.ModKind
 import com.briqt.moke.terminal.ModState
@@ -104,7 +106,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun TerminalScreen(
     ts: TermSession,
@@ -133,13 +135,20 @@ fun TerminalScreen(
     onKeyboardMode: (KeyboardMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
     onTmuxRefresh: () -> Unit,
-    onTmuxNew: (String) -> Unit,
-    onTmuxRename: (String, String) -> Unit,
+    onTmuxNew: suspend (String) -> Boolean,
+    onTmuxRename: suspend (String, String) -> Boolean,
     onTmuxDetach: (String) -> Unit,
     onTmuxKill: (String) -> Unit,
     onTmuxAttach: (TmuxSession) -> Unit,
     onTmuxTakeOver: (TmuxSession) -> Unit,
     onOpenFiles: () -> Unit,
+    onRecover: (NetworkRecovery) -> Unit = { recovery ->
+        when (recovery.kind) {
+            RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> recovery.network?.let(onLoginNetwork)
+            RecoveryKind.EDIT_HOST -> onEditHost()
+            RecoveryKind.RETRY -> onReconnect()
+        }
+    },
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -149,6 +158,7 @@ fun TerminalScreen(
     val alive by ts.alive.collectAsState()
     val connectFailed by ts.connectFailed.collectAsState()
     val loginNetwork by ts.loginNetwork.collectAsState()
+    val recovery by ts.recovery.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val remoteTmuxName by ts.remoteTmuxName.collectAsState()
@@ -446,37 +456,25 @@ fun TerminalScreen(
 
             if (!alive) {
                 Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp)) {
                         Text(
-                            stringResource(
-                                when {
-                                    connectFailed -> R.string.session_connect_failed
-                                    remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
-                                    remoteTmuxName == null && tmuxAttached == false ->
-                                        R.string.tmux_attach_unconfirmed
-                                    else -> R.string.session_ended
-                                },
-                            ),
+                            stringResource(when {
+                                connectFailed -> R.string.session_connect_failed
+                                remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
+                                remoteTmuxName == null && tmuxAttached == false -> R.string.tmux_attach_unconfirmed
+                                else -> R.string.session_ended
+                            }),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // 连不上多半是地址 / 凭据填错：直接给出改配置的入口；网络需要登录时主机配置没问题，给「登录」。
-                            val login = loginNetwork
-                            if (connectFailed && login != null) {
-                                TextButton(onClick = { onLoginNetwork(login) }) {
-                                    Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-                                    Text("  " + stringResource(R.string.action_login))
-                                }
-                            } else if (connectFailed) {
-                                TextButton(onClick = onEditHost) {
-                                    Icon(Icons.Filled.Edit, contentDescription = null)
-                                    Text("  " + stringResource(R.string.host_edit))
-                                }
+                        androidx.compose.foundation.layout.FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            val action = recovery ?: loginNetwork?.let { NetworkRecovery(RecoveryKind.LOGIN_NETWORK, it) }
+                                ?: if (connectFailed) NetworkRecovery(RecoveryKind.EDIT_HOST) else null
+                            // Retry already has the reconnect action below; never render a duplicate button.
+                            if (connectFailed && action != null && action.kind != RecoveryKind.RETRY) {
+                                TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action.kind))) }
                             }
                             TextButton(onClick = onReconnect) {
                                 Icon(Icons.Filled.Refresh, contentDescription = null)

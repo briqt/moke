@@ -7,6 +7,7 @@ import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.connectFailureText
+import com.briqt.moke.net.networkException
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
@@ -14,6 +15,7 @@ import net.schmizz.sshj.connection.channel.direct.SessionChannel
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * SSH 传输（sshj）：
@@ -44,15 +46,18 @@ class SshTransport(
 
     private val appContext = context.applicationContext
 
-    private var ssh: SSHClient? = null
-    private var jump: SSHClient? = null
-    private var sshSession: SessionChannel? = null
-    private var out: OutputStream? = null
+    @Volatile private var connected: SshConnector.Connected? = null
+    @Volatile private var ssh: SSHClient? = null
+    @Volatile private var sshSession: SessionChannel? = null
+    @Volatile private var out: OutputStream? = null
     private val writeExec = Executors.newSingleThreadExecutor()
-
-    @Volatile private var closed = false
+    private val resources = TransportResources()
+    private val closed get() = resources.closed
     /** shell / exec 通道已经打开：此后的异常是"中断"，此前的是"连接失败"。 */
-    @Volatile private var established = false
+    private val established get() = resources.established
+    @Volatile private var latencyThread: Thread? = null
+    @Volatile private var loginThread: Thread? = null
+    private val closeRequested = AtomicBoolean()
 
     /** 连接建立（shell / exec 通道已开）时回调一次，在传输线程上调用——别在里面做阻塞工作。 */
     var onEstablished: (() -> Unit)? = null
@@ -63,6 +68,10 @@ class SshTransport(
     override fun releaseForwardClient() {}
 
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
+        if (!resources.start()) {
+            if (closed && !resources.started) resources.finish { session.onTransportFinished(0) }
+            return
+        }
         Thread({
             try {
                 // TOFU 告警等提示直接写进终端画面（这条连接天然有屏幕可写）。
@@ -92,87 +101,96 @@ class SshTransport(
                     feed(session, appContext.localized(R.string.net_via, network.name) + "\r\n")
                 }
                 // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
-                val conn = connector.connect(host, jumpHost, network, heartbeat = true)
-                val client = conn.client
-                jump = conn.jump
-                runCatching { client.connection.keepAlive.keepAliveInterval = 30 }
+                withSshChannel(
+                    resources,
+                    connect = { connector.connect(host, jumpHost, network, heartbeat = true).also { connected = it } },
+                    disconnect = { it.close() },
+                    startSession = { conn ->
+                        runCatching { conn.client.connection.keepAlive.keepAliveInterval = 30 }
+                        conn.client.startSession()
+                    },
+                    closeSession = { it.close() },
+                    allocatePty = { it.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap()) },
+                    // 保持协议级 exec + PTY；不经 shell 注入，也不加 POSIX 包装（兼容 Windows OpenSSH）。
+                    openChannel = { if (effectiveStartup == null) it.startShell() else it.exec(effectiveStartup) },
+                    beforeSessionClose = { it.abortSockets() },
+                ) { conn, s, channel ->
+                    val client = conn.client
+                    ssh = client
+                    sshSession = s as? SessionChannel
+                    out = channel.outputStream
+                    if (!resources.establish { onEstablished?.invoke() }) return@withSshChannel
+                    startLatencyProbe(client)
 
-                val s = client.startSession()
-                s.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap())
-                // tmux 等专用交互程序必须走 SSH 协议级 exec + PTY。过去先 startShell 再延迟键入，
-                // 会受 shell init、提示符、行编辑器和时序影响，所谓“专用连接”仍可能完全没执行。
-                // 主机配置的启动命令**不加 sh 包装**：Windows OpenSSH 的 exec 走 cmd/powershell，
-                // 任何 POSIX 包装都会当场失败——这正是这个功能的主要目标之一。命令若立刻退出，
-                // 由下面的退出码提示如实说明，不假装还在。
-                val channel = if (effectiveStartup == null) s.startShell() else s.exec(effectiveStartup)
-
-                ssh = client
-                sshSession = s as? SessionChannel
-                out = channel.outputStream
-                established = true
-                onEstablished?.invoke()
-                startLatencyProbe(client)
-
-                val input = channel.inputStream
-                val buf = ByteArray(8192)
-                // 登录后自动执行命令：等 shell 首个输出到达、且输出**静默 ~250ms**（提示符画完、bracketed-paste/
-                // 行编辑就绪）后再发；只等"首字节"仍会抢在半就绪的行编辑器里发，丢/错首字符（曾见 `<sh`/`>`）、回显重复。
-                // 换行用 CR（真实回车），与附加键/文本段一致；多行逐行执行。仅发一次。
-                // tmux 覆盖（startupCommand 非空）时不注入：那条通道上跑的是 tmux 自身。
-                // 主机自配启动命令时仍注入——"登录后自动执行"对 cmd/powershell 之类同样成立。
-                val loginCmd = host.loginCommand
-                val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
-                if (startupCommand == null && loginCmd.isNotBlank()) {
-                    Thread({
-                        while (!closed && lastOut.get() == 0L) { try { Thread.sleep(50) } catch (_: InterruptedException) { return@Thread } }
-                        val deadline = System.currentTimeMillis() + 4000  // 静默等待上限，兜底
-                        while (!closed && System.currentTimeMillis() < deadline &&
-                            System.currentTimeMillis() - lastOut.get() < 250
-                        ) { try { Thread.sleep(60) } catch (_: InterruptedException) { return@Thread } }
-                        if (!closed) runCatching {
-                            val payload = loginCmd.replace("\r\n", "\n").replace("\n", "\r")
-                                .let { if (it.endsWith("\r")) it else it + "\r" }
-                            out?.write(payload.toByteArray(StandardCharsets.UTF_8))
-                            out?.flush()
+                    val input = channel.inputStream
+                    val buf = ByteArray(8192)
+                    // 登录后自动执行命令：等 shell 首个输出到达、且输出**静默 ~250ms**（提示符画完、bracketed-paste/
+                    // 行编辑就绪）后再发；只等"首字节"仍会抢在半就绪的行编辑器里发，丢/错首字符（曾见 `<sh`/`>`）、回显重复。
+                    // 换行用 CR（真实回车），与附加键/文本段一致；多行逐行执行。仅发一次。
+                    // tmux 覆盖（startupCommand 非空）时不注入：那条通道上跑的是 tmux 自身。
+                    // 主机自配启动命令时仍注入——"登录后自动执行"对 cmd/powershell 之类同样成立。
+                    val loginCmd = host.loginCommand
+                    val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
+                    if (startupCommand == null && loginCmd.isNotBlank()) {
+                        loginThread = Thread({
+                            while (!closed && lastOut.get() == 0L) { try { Thread.sleep(50) } catch (_: InterruptedException) { return@Thread } }
+                            val deadline = System.currentTimeMillis() + 4000  // 静默等待上限，兜底
+                            while (!closed && System.currentTimeMillis() < deadline &&
+                                System.currentTimeMillis() - lastOut.get() < 250
+                            ) { try { Thread.sleep(60) } catch (_: InterruptedException) { return@Thread } }
+                            if (!closed) runCatching {
+                                val payload = loginCmd.replace("\r\n", "\n").replace("\n", "\r")
+                                    .let { if (it.endsWith("\r")) it else it + "\r" }
+                                out?.write(payload.toByteArray(StandardCharsets.UTF_8))
+                                out?.flush()
+                            }
+                        }, "moke-ssh-login-${host.host}").also { it.start() }
+                    }
+                    while (!closed) {
+                        val n = input.read(buf)
+                        if (n == -1) break
+                        if (n > 0) {
+                            session.processToEmulator(buf, n)
+                            lastOut.set(System.currentTimeMillis())
                         }
-                    }, "moke-ssh-login-${host.host}").start()
-                }
-                while (!closed) {
-                    val n = input.read(buf)
-                    if (n == -1) break
-                    if (n > 0) {
-                        session.processToEmulator(buf, n)
-                        lastOut.set(System.currentTimeMillis())
+                    }
+                    // 启动命令非零退出（拼错、远端没这个程序、参数不对）：把退出码摆出来，
+                    // 否则屏幕上只剩一句"会话已结束"，用户无从判断是自己写错还是网络断了。
+                    if (startupCommand == null && effectiveStartup != null) {
+                        // exit-status 是通道关闭前后才到的异步消息：EOF 之后立刻读通常还是 null，
+                        // 必须先等通道真正 close（真机实测：不等就永远拿不到退出码）。
+                        val code = runCatching {
+                            sshSession?.join(2, java.util.concurrent.TimeUnit.SECONDS)
+                            sshSession?.exitStatus
+                        }.getOrNull()
+                        if (code != null && code != 0) {
+                            feed(session, "\r\n" + appContext.localized(
+                                R.string.startup_command_exited, effectiveStartup, code
+                            ) + "\r\n")
+                        }
                     }
                 }
-                // 启动命令非零退出（拼错、远端没这个程序、参数不对）：把退出码摆出来，
-                // 否则屏幕上只剩一句"会话已结束"，用户无从判断是自己写错还是网络断了。
-                if (startupCommand == null && effectiveStartup != null) {
-                    // exit-status 是通道关闭前后才到的异步消息：EOF 之后立刻读通常还是 null，
-                    // 必须先等通道真正 close（真机实测：不等就永远拿不到退出码）。
-                    val code = runCatching {
-                        sshSession?.join(2, java.util.concurrent.TimeUnit.SECONDS)
-                        sshSession?.exitStatus
-                    }.getOrNull()
-                    if (code != null && code != 0) {
-                        feed(session, "\r\n" + appContext.localized(
-                            R.string.startup_command_exited, effectiveStartup, code
-                        ) + "\r\n")
-                    }
-                }
-                session.onTransportFinished(0)
+                resources.finish { session.onTransportFinished(0) }
             } catch (t: Throwable) {
-                // 捕获 Throwable（含类加载/OOM 等 Error），保证任何建连失败都只报错，不会让会话永远停在「正在连接」。
-                if (!established) {
-                    // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
-                    (t as? NetworkException)?.let(onNetworkError)
-                    session.onTransportConnectFailed(t.connectFailureText(appContext))
-                } else {
-                    // 连上之后才断的：是"中断"，不是"连接失败"。
-                    val msg = ("\r\n" + appContext.localized(R.string.ssh_connection_lost, t.message ?: "") + "\r\n").toByteArray()
-                    session.processToEmulator(msg, msg.size)
-                    session.onTransportFinished(1)
+                // 主动关闭期间迟到的认证/会话错误不是连接失败，也不能再次宣告 established。
+                resources.finish {
+                    if (closeRequested.get()) {
+                        session.onTransportFinished(0)
+                    } else if (!established) {
+                        t.networkException()?.let(onNetworkError)
+                        session.onTransportConnectFailed(t.connectFailureText(appContext))
+                    } else {
+                        feed(session, "\r\n" + appContext.localized(R.string.ssh_connection_lost, t.message ?: "") + "\r\n")
+                        session.onTransportFinished(1)
+                    }
                 }
+            } finally {
+                resources.stop().invoke()
+                stopAuxiliaryWork()
+                out = null
+                sshSession = null
+                ssh = null
+                connected = null
             }
         }, "moke-ssh-${host.host}").start()
     }
@@ -184,7 +202,7 @@ class SshTransport(
 
     /** 周期性 RTT 探测：发一个带回复的 keepalive 全局请求，测往返耗时 → 状态条延迟。 */
     private fun startLatencyProbe(client: SSHClient) {
-        Thread({
+        latencyThread = Thread({
             while (!closed) {
                 val ms = runCatching {
                     val t0 = System.nanoTime()
@@ -198,17 +216,15 @@ class SshTransport(
                 onLatency(ms?.takeIf { it < 4500 })
                 try { Thread.sleep(4000) } catch (_: InterruptedException) { break }
             }
-        }, "moke-ssh-rtt-${host.host}").start()
+        }, "moke-ssh-rtt-${host.host}").also { it.start() }
     }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (closed) return
         val copy = data.copyOfRange(offset, offset + count)
-        writeExec.execute {
-            try {
-                out?.write(copy)
-                out?.flush()
-            } catch (_: Exception) {
+        runCatching {
+            writeExec.execute {
+                if (!closed) runCatching { out?.write(copy); out?.flush() }
             }
         }
     }
@@ -218,8 +234,10 @@ class SshTransport(
         // 否则远端 PTY 尺寸不变，全屏 TUI（vim/htop/tmux）的底栏/状态行会错位。
         if (closed) return
         val s = sshSession ?: return
-        writeExec.execute {
-            runCatching { s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels) }
+        runCatching {
+            writeExec.execute {
+                if (!closed) runCatching { s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels) }
+            }
         }
     }
 
@@ -246,13 +264,19 @@ class SshTransport(
         }.getOrNull()
     }
 
+    private fun stopAuxiliaryWork() {
+        latencyThread?.interrupt()
+        loginThread?.interrupt()
+        writeExec.shutdownNow()
+    }
+
     override fun close() {
-        closed = true
-        writeExec.execute {
-            runCatching { sshSession?.close() }
-            runCatching { ssh?.disconnect() }
-            runCatching { jump?.disconnect() }
-        }
-        writeExec.shutdown()
+        if (!closeRequested.compareAndSet(false, true)) return
+        val cleanup = resources.stop()
+        stopAuxiliaryWork()
+        // A blocked channel write must not hold the only path that can close its connection.
+        // close() is called by UI; both sshj DISCONNECT and channel close stay off that thread.
+        val connection = connected
+        Thread({ connection?.abortSockets(); cleanup() }, "moke-ssh-close").start()
     }
 }

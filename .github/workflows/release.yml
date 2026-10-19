@@ -121,20 +121,14 @@ jobs:
           # SemVer 后缀（如 -rc.1）只发布为 GitHub Pre-release，且绝不占用 Latest。
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          generate_release_notes: true
+          generate_release_notes: false
           files: dist/moke-*.apk
           body: |
-            **moke · 墨客 ${{ github.ref_name }}** — Android 原生 SSH / mosh 终端。
-
             ${{ steps.changelog.outputs.body }}
 
             ### 安装
-            下载 `moke-${{ github.ref_name }}.apk`，允许"安装未知来源应用"后安装（稳定签名，可覆盖升级）。
+            需要 Android 11 及以上、arm64-v8a 设备。下载 `moke-${{ github.ref_name }}.apk`，按系统提示允许安装。发布包使用固定签名，可覆盖升级。
 
-            ### 特性
-            - 多会话，原生终端渲染（Apache-2.0 terminal-view 内核）
-            - SSH（密码 / 私钥）+ mosh（UDP 漫游）
-            - 实时预览外观 · 多套配色 · 字体管理（主字体 + 中文回退）
-            - 连接分组排序 · 双排附加键 · 文本段输入
+            mosh 需要远端安装 `mosh-server` 且 UDP 可达；经代理使用时，需 SOCKS5 服务端支持 UDP 转发。
 
-            本版改动见 [CHANGELOG](https://github.com/briqt/moke/blob/main/CHANGELOG.md)。
+            完整变更记录见 [CHANGELOG](https://github.com/briqt/moke/blob/${{ github.ref_name }}/CHANGELOG.md)。

@@ -10,10 +10,12 @@ import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.userauth.keyprovider.PKCS8KeyFile
+import net.schmizz.sshj.userauth.password.PasswordFinder
 import net.schmizz.sshj.userauth.password.PasswordUtils
 import java.io.File
 import java.io.StringReader
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 建连 + 认证 + 跳板 + TOFU 的唯一实现。
@@ -86,23 +88,18 @@ class SshConnector(
     ): Connected {
         val direct = if (jumpHost == null) network else null
         val client = newClient(heartbeat, awaitsTrust(host, direct), direct, dialHost.takeIf { direct != null })
-        var jump: SSHClient? = null
-        try {
-            if (jumpHost != null) {
-                val j = newClient(heartbeat, awaitsTrust(jumpHost, network), network)
-                j.connect(jumpHost.host, jumpHost.port)
-                authenticate(j, jumpHost)
-                jump = j
-                client.connectVia(j.newDirectConnection(host.host, host.port))
-            } else {
-                client.connect(host.host, host.port)
-            }
-            authenticate(client, host)
-        } catch (e: Throwable) {
-            runCatching { client.disconnect() }
-            runCatching { jump?.disconnect() }
-            throw e
-        }
+        val (_, jump) = connectSshOwned(
+            target = client,
+            createJump = jumpHost?.let { h -> { newClient(heartbeat, awaitsTrust(h, network), network) } },
+            connectJump = { it.connect(jumpHost!!.host, jumpHost.port) },
+            authenticateJump = { authenticate(it, jumpHost!!) },
+            connectTarget = { j ->
+                if (j == null) client.connect(host.host, host.port)
+                else client.connectVia(j.newDirectConnection(host.host, host.port))
+            },
+            authenticateTarget = { authenticate(it, host) },
+            disconnect = { it.disconnect() },
+        )
         return Connected(client, jump)
     }
 
@@ -129,13 +126,11 @@ class SshConnector(
                 val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
                 try {
                     keyFile.writeText(h.privateKeyPem)
-                    val kp = if (h.passphrase.isBlank()) {
+                    val finder = keyPasswordFinder(h.passphrase)
+                    val kp = if (finder == null) {
                         client.loadKeys(keyFile.absolutePath)
                     } else {
-                        client.loadKeys(
-                            keyFile.absolutePath,
-                            PasswordUtils.createOneOff(h.passphrase.toCharArray()),
-                        )
+                        client.loadKeys(keyFile.absolutePath, finder)
                     }
                     client.authPublickey(h.username, kp)
                 } finally {
@@ -146,8 +141,21 @@ class SshConnector(
     }
 
     /** 一次连接的全部句柄。[close] 幂等，顺序固定为先目标后跳板。 */
-    class Connected(val client: SSHClient, val jump: SSHClient?) {
-        fun close() {
+    class Connected(val client: SSHClient, val jump: SSHClient?) : AutoCloseable {
+        private val closed = AtomicBoolean()
+        private val socketsClosed = AtomicBoolean()
+
+        /** Unblock a transport write before asking sshj to send CHANNEL_CLOSE / DISCONNECT. */
+        @Synchronized
+        internal fun abortSockets() {
+            if (!socketsClosed.compareAndSet(false, true)) return
+            runCatching { client.socket?.close() }
+            runCatching { jump?.socket?.close() }
+        }
+
+        override fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            abortSockets()
             runCatching { client.disconnect() }
             runCatching { jump?.disconnect() }
         }
@@ -160,3 +168,7 @@ class SshConnector(
         private const val TRUST_PROMPT_TIMEOUT_MS = 150_000
     }
 }
+
+/** A nonempty key passphrase is opaque, including leading, trailing or exclusively whitespace. */
+internal fun keyPasswordFinder(passphrase: String): PasswordFinder? =
+    if (passphrase.isEmpty()) null else PasswordUtils.createOneOff(passphrase.toCharArray())

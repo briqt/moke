@@ -272,7 +272,20 @@ func (n *Node) Dial(ctx context.Context, target string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, err := d.UserDial(ctx, "tcp", ap.String())
+	return dialPlannedTCP(ctx, ap, st, d)
+}
+
+// dialPlannedTCP carries out an already-admitted literal target.
+func dialPlannedTCP(ctx context.Context, ap netip.AddrPort, st *ipnstate.Status, d *tsdial.Dialer) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, codes.Of(err, codes.TargetUnreachable)
+	}
+	if d.NetstackDialTCP == nil {
+		return nil, codes.New(codes.NotReady, "node has no userspace TCP dialer yet")
+	}
+	// UserDial re-evaluates routing and can fall back to an OS socket if the
+	// admitted route disappeared. Pin the final dial to tsnet's netstack instead.
+	conn, err := d.NetstackDialTCP(ctx, ap)
 	if err != nil {
 		if offline(st, ap.Addr()) {
 			return nil, codes.New(codes.TargetUnreachable, "peer is offline")

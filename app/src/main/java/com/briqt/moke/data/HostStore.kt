@@ -6,8 +6,17 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "moke_hosts")
@@ -31,20 +40,30 @@ internal data class DecodedHosts(val json: String, val unreadable: Boolean)
  * 抽出来是因为这里出过一个静默毁数据的 bug：解密失败被 `getOrDefault("[]")` 吞掉，和「空列表」
  * 完全无法区分。这个分类必须有测试守着。
  */
-internal fun decodeHosts(raw: String?, decrypt: (String) -> String): DecodedHosts = when {
-    raw.isNullOrBlank() -> DecodedHosts("[]", false)
-    // 旧版明文（以 '[' 开头），下次 save 自动加密。
-    raw.trimStart().startsWith("[") -> DecodedHosts(raw, false)
-    else -> runCatching { decrypt(raw) }
-        .fold({ DecodedHosts(it, false) }, { DecodedHosts("[]", true) })
-}
+internal fun decodeHosts(raw: String?, decrypt: (String) -> String): DecodedHosts = runCatching {
+    val json = when {
+        raw.isNullOrBlank() -> "[]"
+        // 旧版明文（以 '[' 开头），下次 save 自动加密。
+        raw.trimStart().startsWith("[") -> raw
+        else -> decrypt(raw)
+    }
+    val array = JSONArray(json)
+    repeat(array.length()) { array.getJSONObject(it) }
+    DecodedHosts(json, false)
+}.getOrElse { DecodedHosts("[]", true) }
 
 /** 主机列表持久化（DataStore Preferences，单个 JSON 字符串键；凭据经 Keystore 加密）。 */
+@OptIn(ExperimentalCoroutinesApi::class)
 class HostStore(private val context: Context) {
 
     private val key = stringPreferencesKey("hosts_json")
+    private val reads = MutableStateFlow(0)
+    private val decoded: Flow<DecodedHosts> = reads.flatMapLatest {
+        context.dataStore.data.map { prefs -> decode(prefs[key]) }
+            .catch { emit(DecodedHosts("[]", true)) }
+    }.flowOn(Dispatchers.IO)
 
-    private val decoded: Flow<DecodedHosts> = context.dataStore.data.map { prefs -> decode(prefs[key]) }
+    fun refresh() { reads.update { it + 1 } }
 
     val hosts: Flow<List<Host>> = decoded.map { parse(it.json) }
 
@@ -73,8 +92,8 @@ class HostStore(private val context: Context) {
      *
      * @return 是否真的落盘；false = 被上面两条规则挡下。
      */
-    suspend fun save(list: List<Host>): Boolean {
-        val encrypted = encode(list) ?: return false
+    suspend fun save(list: List<Host>): Boolean = withContext(Dispatchers.IO) {
+        val encrypted = encode(list) ?: return@withContext false
         var written = false
         context.dataStore.edit { prefs ->
             // 在同一个事务里重新判定，避免「读到空 → 用户操作 → 写空」这条竞态。
@@ -82,14 +101,40 @@ class HostStore(private val context: Context) {
             prefs[key] = encrypted
             written = true
         }
-        return written
+        written
     }
 
-    suspend fun upsert(host: Host, current: List<Host>): Boolean {
-        val idx = current.indexOfFirst { it.id == host.id }
-        val next = current.toMutableList()
-        if (idx >= 0) next[idx] = host else next.add(host)
-        return save(next)
+    suspend fun upsert(host: Host, current: List<Host>): Boolean =
+        commit(host, editing = current.any { it.id == host.id }) is StoreResult.Saved
+
+    suspend fun commit(host: Host, editing: Boolean): StoreResult<Host> = withContext(Dispatchers.IO) {
+        try {
+            var result: StoreResult<Host> = StoreResult.Failed(StoreFailure.UNREADABLE)
+            context.dataStore.edit { prefs ->
+                val current = decode(prefs[key])
+                if (current.unreadable) return@edit
+                when (val prepared = prepareHostEdit(parse(current.json), host, editing)) {
+                    is StoreResult.Failed -> result = prepared
+                    is StoreResult.Saved -> {
+                        val encrypted = encode(prepared.value.items)
+                        if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
+                            prefs[key] = encrypted
+                            result = StoreResult.Saved(prepared.value.saved)
+                        }
+                    }
+                }
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
+        }
+    }
+
+    suspend fun reorder(ids: List<String>): Boolean = updateAll { current ->
+        val byId = current.associateBy { it.id }
+        ids.distinct().mapNotNull { byId[it] } + current.filterNot { it.id in ids }
     }
 
     /**
@@ -101,7 +146,7 @@ class HostStore(private val context: Context) {
      *
      * @return 是否真的落盘；false = 记录不存在，或被 [save] 的两条硬规则挡下。
      */
-    suspend fun update(id: String, transform: (Host) -> Host): Boolean {
+    suspend fun update(id: String, transform: (Host) -> Host): Boolean = withContext(Dispatchers.IO) {
         var written = false
         context.dataStore.edit { prefs ->
             val current = decode(prefs[key])
@@ -110,14 +155,14 @@ class HostStore(private val context: Context) {
             prefs[key] = encode(next) ?: return@edit
             written = true
         }
-        return written
+        written
     }
 
     /**
      * 整表读-改-写在同一事务里完成；[transform] 返回 null 表示无需修改。
      * @return 存储可读（无论改没改）；false = 解不开或加密失败，什么也没写。
      */
-    suspend fun updateAll(transform: (List<Host>) -> List<Host>?): Boolean {
+    suspend fun updateAll(transform: (List<Host>) -> List<Host>?): Boolean = withContext(Dispatchers.IO) {
         var ok = false
         context.dataStore.edit { prefs ->
             val current = decode(prefs[key])
@@ -126,11 +171,33 @@ class HostStore(private val context: Context) {
             if (next != null) prefs[key] = encode(next) ?: return@edit
             ok = true
         }
-        return ok
+        ok
     }
 
-    suspend fun delete(host: Host, current: List<Host>): Boolean =
-        save(current.filterNot { it.id == host.id })
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun delete(host: Host, current: List<Host>): Boolean = remove(host.id) is StoreResult.Saved
+
+    suspend fun remove(id: String): StoreResult<Unit> = withContext(Dispatchers.IO) {
+        try {
+            var result: StoreResult<Unit> = StoreResult.Failed(StoreFailure.UNREADABLE)
+            context.dataStore.edit { prefs ->
+                val decoded = decode(prefs[key])
+                if (decoded.unreadable) return@edit
+                val current = parse(decoded.json)
+                if (current.none { it.id == id }) { result = StoreResult.Saved(Unit); return@edit }
+                val encrypted = encode(current.filterNot { it.id == id })
+                if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
+                    prefs[key] = encrypted
+                    result = StoreResult.Saved(Unit)
+                }
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
+        }
+    }
 
     private fun parse(json: String): List<Host> = runCatching {
         val arr = JSONArray(json)

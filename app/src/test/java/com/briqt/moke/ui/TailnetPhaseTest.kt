@@ -16,6 +16,7 @@ class TailnetPhaseTest {
         loggedIn: Boolean? = null,
         st: NetworkManager.NodeStatus? = null,
         flow: MokeViewModel.LoginFlow? = null,
+        knownPersisted: Boolean = true,
     ) = tailnetPhase(
         e,
         MokeViewModel.NetworkLive(
@@ -23,12 +24,24 @@ class TailnetPhaseTest {
             status = st?.let { mapOf("t" to it) }.orEmpty(),
         ),
         flow,
+        knownPersisted,
     )
 
     @Test fun `only local knowledge when the node is not running`() {
-        assertEquals(TailnetPhase.NOT_LOGGED_IN, phase())
+        assertEquals(TailnetPhase.CHECKING, phase())
         assertEquals(TailnetPhase.NOT_LOGGED_IN, phase(loggedIn = false))
         assertEquals(TailnetPhase.LOGGED_IN, phase(loggedIn = true))
+        assertEquals(TailnetPhase.NOT_LOGGED_IN, phase(st = status("NeedsLogin")))
+    }
+
+    @Test fun `unknown persisted login marker is not a new unsaved network`() {
+        assertEquals(TailnetPhase.CHECKING, phase(knownPersisted = true))
+        assertEquals(TailnetPhase.NOT_LOGGED_IN, phase(knownPersisted = false))
+        assertEquals(TailnetPhase.CHECKING, tailnetPhase(e,
+            MokeViewModel.NetworkLive(loggedIn = mapOf("another-network" to false)), null))
+        // Stronger runtime and flow facts still take priority over an unread marker.
+        assertEquals(TailnetPhase.ACTIVE, phase(st = status("Running"), knownPersisted = false))
+        assertEquals(TailnetPhase.CONNECTING, phase(flow = MokeViewModel.LoginFlow(), knownPersisted = true))
     }
 
     @Test fun `running node states win over local knowledge`() {
@@ -42,7 +55,8 @@ class TailnetPhaseTest {
         assertEquals(TailnetPhase.CONNECTING, phase(flow = MokeViewModel.LoginFlow()))
         assertEquals(TailnetPhase.WAITING_BROWSER, phase(st = status("NeedsLogin"), flow = MokeViewModel.LoginFlow(url = "https://x")))
         // A failed attempt falls back to what is known locally; the error shows in the panel.
-        assertEquals(TailnetPhase.NOT_LOGGED_IN, phase(flow = MokeViewModel.LoginFlow(error = "boom", busy = false)))
+        assertEquals(TailnetPhase.CHECKING, phase(flow = MokeViewModel.LoginFlow(error = "boom", busy = false)))
+        assertEquals(TailnetPhase.NOT_LOGGED_IN, phase(loggedIn = false, flow = MokeViewModel.LoginFlow(error = "boom", busy = false)))
         // Authorized in the browser: the node is Running even while the flow is still recorded.
         assertEquals(TailnetPhase.ACTIVE, phase(st = status("Running"), flow = MokeViewModel.LoginFlow(url = "https://x")))
     }

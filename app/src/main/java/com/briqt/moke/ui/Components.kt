@@ -20,6 +20,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import com.briqt.moke.data.ThemeMode
+import com.briqt.moke.net.RecoveryKind
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -33,6 +34,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -175,7 +179,7 @@ fun ScrollModeDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
     )
 }
 
@@ -215,7 +219,7 @@ fun KeyboardModeDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
     )
 }
 
@@ -228,6 +232,7 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     destructive: Boolean = false,
+    dismissLabel: String = stringResource(R.string.action_cancel),
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -238,8 +243,17 @@ fun ConfirmDialog(
                 Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
     )
+}
+
+/** Action labels follow structured recovery data, never translated error text. */
+fun recoveryActionLabel(kind: RecoveryKind): Int = when (kind) {
+    RecoveryKind.LOGIN_NETWORK -> R.string.action_login
+    RecoveryKind.VIEW_NETWORK -> R.string.action_view_network
+    RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
+    RecoveryKind.EDIT_HOST -> R.string.action_edit_host
+    RecoveryKind.RETRY -> R.string.action_retry
 }
 
 /** 明暗主题 → 文案资源。 */
@@ -268,7 +282,7 @@ fun ThemeModeDialog(current: ThemeMode, onPick: (ThemeMode) -> Unit, onDismiss: 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
     )
 }
 
@@ -309,7 +323,7 @@ fun SwitchRow(
 @Composable
 fun InfoNote(text: String, modifier: Modifier = Modifier, error: Boolean = false) {
     val color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+    Row(modifier = modifier.semantics { if (error) liveRegion = LiveRegionMode.Polite }, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
         Icon(
             if (error) Icons.Outlined.ErrorOutline else Icons.Outlined.Info,
             contentDescription = null,

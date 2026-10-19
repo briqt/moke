@@ -42,7 +42,6 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardAlt
@@ -103,6 +102,9 @@ import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.ListState
+import com.briqt.moke.net.NetworkRecovery
+import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.KeyboardMode
@@ -164,6 +166,16 @@ fun HomeScreen(
     /** 点主机连接前的本地检查（已删除的网络/跳板机、从没登录的 tailnet），见 [MokeViewModel.preflight]。 */
     preflight: (Host) -> MokeViewModel.Preflight = { MokeViewModel.Preflight.Ok },
     onLoginNetwork: (NetworkEntry) -> Unit = {},
+    hostsState: ListState<Host> = if (credentialsUnreadable) ListState.Unreadable else ListState.Ready(hosts),
+    networkState: ListState<NetworkEntry> = ListState.Ready(networks),
+    onRetryReads: () -> Unit = {},
+    onRecover: (Host, NetworkRecovery) -> Unit = { host, recovery ->
+        when (recovery.kind) {
+            RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> recovery.network?.let(onLoginNetwork)
+            RecoveryKind.EDIT_HOST -> onEditHost(host)
+            RecoveryKind.RETRY -> onRetryReads()
+        }
+    },
 ) {
     var pendingPreflight by remember { mutableStateOf<Pair<Host, MokeViewModel.Preflight>?>(null) }
     val connect: (Host) -> Unit = { host ->
@@ -248,7 +260,7 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
-            if (tab == HomeTab.Connections) {
+            if (tab == HomeTab.Connections && hostsState is ListState.Ready) {
                 FloatingActionButton(onClick = onAddHost) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_host))
                 }
@@ -258,11 +270,11 @@ fun HomeScreen(
         // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             when (tabs[page]) {
-                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive)
+                HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, onRetryReads)
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
-                    networks, networkLive, onOpenNetworks,
+                    networks, networkLive, onOpenNetworks, networkState,
                 )
             }
         }
@@ -287,14 +299,14 @@ fun HomeScreen(
                 title = stringResource(if (p.expired) R.string.preflight_expired_title else R.string.preflight_login_title, p.network.name),
                 message = stringResource(if (p.expired) R.string.preflight_expired_message else R.string.preflight_login_message, p.network.name),
                 confirmLabel = stringResource(R.string.action_login),
-                onConfirm = { pendingPreflight = null; onLoginNetwork(p.network) },
+                onConfirm = { pendingPreflight = null; onRecover(host, NetworkRecovery(RecoveryKind.LOGIN_NETWORK, p.network)) },
                 onDismiss = { pendingPreflight = null },
             )
             is MokeViewModel.Preflight.Refused -> ConfirmDialog(
                 title = stringResource(R.string.preflight_refused_title),
                 message = p.reason,
-                confirmLabel = stringResource(R.string.host_edit),
-                onConfirm = { pendingPreflight = null; onEditHost(host) },
+                confirmLabel = stringResource(p.recovery?.let { recoveryActionLabel(it.kind) } ?: R.string.action_ok),
+                onConfirm = { pendingPreflight = null; p.recovery?.let { onRecover(host, it) } },
                 onDismiss = { pendingPreflight = null },
             )
             MokeViewModel.Preflight.Ok -> pendingPreflight = null
@@ -360,7 +372,6 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
 private fun ConnectionsContent(
     padding: PaddingValues,
     hosts: List<Host>,
-    credentialsUnreadable: Boolean,
     groupOrder: List<String>,
     collapsed: Set<String>,
     onToggleCollapse: (String) -> Unit,
@@ -373,9 +384,16 @@ private fun ConnectionsContent(
     onConnect: (Host) -> Unit,
     networks: List<NetworkEntry>,
     networkLive: MokeViewModel.NetworkLive,
+    hostsState: ListState<Host>,
+    networkState: ListState<NetworkEntry>,
+    onRetryReads: () -> Unit,
 ) {
     // 主机卡片上的路由徽标：选了网络显示网络名；本地就能知道的问题（引用已删除、tailnet 从没登录）用错误色。
-    val hostIds = hosts.map { it.id }.toSet()
+    val availableNetworks = (networkState as? ListState.Ready)?.items ?: networks
+    val loadingNetworks = stringResource(R.string.networks_loading)
+    val unreadableNetworks = stringResource(R.string.networks_unreadable)
+    val loadingHosts = stringResource(R.string.hosts_loading)
+    val unreadableHosts = stringResource(R.string.hosts_unreadable_title)
     val deletedNetwork = stringResource(R.string.badge_network_deleted)
     val deletedJump = stringResource(R.string.badge_jump_deleted)
     val notLoggedIn = stringResource(R.string.net_state_not_logged_in)
@@ -386,10 +404,14 @@ private fun ConnectionsContent(
         // 有跳板机时第一跳实际走的是跳板机的网络（F2），卡片要标真正在用的那个。
         val jump = hosts.firstOrNull { it.id == h.jumpHostId }
         val effective = if (h.jumpHostId.isNotBlank()) jump else h
-        val net = networks.firstOrNull { it.id == effective?.networkId }
+        val net = availableNetworks.firstOrNull { it.id == effective?.networkId }
         when {
+            h.jumpHostId.isNotBlank() && hostsState == ListState.Loading -> BadgeSpec(loadingHosts, neutral)
+            h.jumpHostId.isNotBlank() && hostsState == ListState.Unreadable -> BadgeSpec(unreadableHosts, errorColor)
             h.jumpHostId.isNotBlank() && jump == null -> BadgeSpec(deletedJump, errorColor)
             effective == null || effective.networkId.isBlank() -> null
+            networkState == ListState.Loading -> BadgeSpec(loadingNetworks, neutral)
+            networkState == ListState.Unreadable -> BadgeSpec(unreadableNetworks, errorColor)
             net == null -> BadgeSpec(deletedNetwork, errorColor)
             net.kind == NetworkKind.TAILSCALE && networkLive.loggedIn[net.id] == false -> BadgeSpec("${net.name} · $notLoggedIn", errorColor)
             net.kind == NetworkKind.TAILSCALE && net.id in networkLive.expired -> BadgeSpec("${net.name} · $expiredLabel", errorColor)
@@ -398,12 +420,17 @@ private fun ConnectionsContent(
     }
     // 「读不出来」不能伪装成「一台都没有」——那会让用户以为数据没了，
     // 转头新建一条连接就把还在磁盘上的密文覆盖掉（写入已在 HostStore 侧挡住，这里负责说清楚）。
-    if (credentialsUnreadable) {
+    if (hostsState == ListState.Loading) {
+        EmptyState(padding, Icons.Filled.Dns, stringResource(R.string.hosts_loading))
+        return
+    }
+    if (hostsState == ListState.Unreadable) {
         EmptyState(
             padding = padding,
             icon = Icons.Filled.Shield,
             title = stringResource(R.string.hosts_unreadable_title),
             error = true,
+            onRetry = onRetryReads,
         )
         return
     }
@@ -659,9 +686,10 @@ private fun HostCard(
                         host.displayName.ifBlank { stringResource(R.string.unnamed) },
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
                     ProtocolBadge(host.useMosh)
-                    routeBadge?.let { RouteBadge(it) }
                 }
                 Text(
                     "${host.username}@${host.host}:${host.port}" +
@@ -670,6 +698,7 @@ private fun HostCard(
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = MokeMono,
                 )
+                routeBadge?.let { RouteBadge(it) }
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
@@ -1006,16 +1035,20 @@ private fun SettingsMenuContent(
     networks: List<NetworkEntry>,
     networkLive: MokeViewModel.NetworkLive,
     onOpenNetworks: () -> Unit,
+    networkState: ListState<NetworkEntry>,
 ) {
     val context = LocalContext.current
     var langDialog by remember { mutableStateOf(false) }
     // 设置行副标题：没有网络时说用途；有需要登录的 tailnet 时点名并带小圆点；否则给数量。
-    val tailnets = networks.filter { it.kind == NetworkKind.TAILSCALE }
-    val needsLogin = tailnets.firstOrNull { networkLive.loggedIn[it.id] == false || it.id in networkLive.expired }
+    val entries = (networkState as? ListState.Ready)?.items ?: networks
+    val tailnets = entries.filter { it.kind == NetworkKind.TAILSCALE }
+    val needsLogin = if (networkState is ListState.Ready) tailnets.firstOrNull { networkLive.loggedIn[it.id] == false || it.id in networkLive.expired } else null
     val networkSubtitle = when {
-        networks.isEmpty() -> stringResource(R.string.menu_network_empty)
+        networkState == ListState.Loading -> stringResource(R.string.networks_loading)
+        networkState == ListState.Unreadable -> stringResource(R.string.networks_unreadable)
+        entries.isEmpty() -> stringResource(R.string.menu_network_empty)
         needsLogin != null -> stringResource(R.string.menu_network_needs_login, needsLogin.name)
-        else -> stringResource(R.string.menu_network_summary, tailnets.size, networks.size - tailnets.size)
+        else -> stringResource(R.string.menu_network_summary, tailnets.size, entries.size - tailnets.size)
     }
     val langTag = LocaleManager.currentTag(context)
     val langLabel = when (langTag) {
@@ -1084,7 +1117,7 @@ private fun LanguageDialog(current: String, onDismiss: () -> Unit, onPick: (Stri
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         },
     )
 }
@@ -1099,6 +1132,7 @@ private fun EmptyState(
     hint: String = "",
     // 出错态（如凭据解不开）用错误色，把「没有内容」和「读不出来」在视觉上分开。
     error: Boolean = false,
+    onRetry: (() -> Unit)? = null,
 ) {
     Box(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1122,6 +1156,7 @@ private fun EmptyState(
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
+            if (onRetry != null) TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
         }
     }
 }

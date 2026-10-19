@@ -211,6 +211,148 @@ func TestCloseIsIdempotentAndUnblocksReaders(t *testing.T) {
 	}
 }
 
+type gatedCloseConn struct {
+	*fakePacketConn
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (c *gatedCloseConn) Close() error {
+	close(c.entered)
+	<-c.release
+	c.fakePacketConn.Close()
+	return c.err
+}
+
+func TestCloseOwnershipSurvivesIDReuseAndBulkClose(t *testing.T) {
+	m := NewManager()
+	gate := make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(gate) }) }
+	t.Cleanup(func() { unblock(); m.CloseAll() })
+	closeErr := errors.New("socket close failed")
+	first := &gatedCloseConn{fakePacketConn: fakeConn("100.64.0.1:33000"), entered: make(chan struct{}), release: gate, err: closeErr}
+	var closed [3]atomic.Int32
+	open := func(index int, networkID string) *session {
+		m.listenLocal = func(string, string) (net.PacketConn, error) { return fakeConn("127.0.0.1:32000"), nil }
+		remote := net.PacketConn(fakeConn("100.64.0.1:33001"))
+		if index == 0 {
+			remote = first
+		}
+		_, err := m.Open(Config{ID: "same", NetworkID: networkID, TargetHost: "100.64.0.2"}, Network{
+			ID: networkID, IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+			ListenPacket: func(string, string) (net.PacketConn, error) { return remote, nil },
+			Closed: func() {
+				closed[index].Add(1)
+				m.Count() // Closing callbacks must also be outside the registry lock.
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.mu.Lock()
+		s := m.relays["same"]
+		m.mu.Unlock()
+		return s
+	}
+	old := open(0, "a")
+	old.dropped.Store(7)
+	if err := m.Start("same", 60000, testKey); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- m.Close("same") }()
+	select {
+	case <-first.entered:
+	case <-time.After(time.Second):
+		t.Fatal("socket Close not reached")
+	}
+	registry := make(chan int, 1)
+	go func() { registry <- m.Count() }()
+	select {
+	case count := <-registry:
+		if count != 0 || closed[0].Load() != 0 {
+			t.Fatal("session not detached, or lease returned before socket close finished")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("registry locked across socket Close")
+	}
+	if err := m.Start("same", 60000, testKey); err == nil {
+		t.Fatal("started a detached session")
+	}
+	// A repeated single close and bulk closes cannot take the pending owner's
+	// callback, nor accidentally remove a session subsequently reusing its ID.
+	if err := m.Close("same"); err != nil {
+		t.Fatal(err)
+	}
+	second := open(1, "b")
+	second.dropped.Store(11)
+	if err := m.CloseNetwork("a"); err != nil || m.Count() != 1 {
+		t.Fatalf("old network bulk close touched replacement: %v", err)
+	}
+	if err := m.Start("same", 60001, testKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CloseAll(); err != nil || closed[1].Load() != 1 || closed[0].Load() != 0 {
+		t.Fatalf("bulk close ownership: %v, old=%d new=%d", err, closed[0].Load(), closed[1].Load())
+	}
+	third := open(2, "a")
+	third.dropped.Store(13)
+	unblock()
+	if err := <-done; !errors.Is(err, closeErr) {
+		t.Fatalf("lost close failure: %v", err)
+	}
+	if closed[0].Load() != 1 || closed[2].Load() != 0 || m.Count() != 1 {
+		t.Fatal("old close affected new owner or skipped its own callback on error")
+	}
+	if err := m.Close("same"); err != nil || closed[2].Load() != 1 {
+		t.Fatalf("third close: %v", err)
+	}
+	if m.Dropped() != 31 || first.closeCount.Load() != 1 {
+		t.Fatalf("retired more than once: drops=%d closes=%d", m.Dropped(), first.closeCount.Load())
+	}
+}
+
+func TestOpenFailureClosesSocketsOutsideRegistryWithoutTakingLease(t *testing.T) {
+	m := NewManager()
+	gate := make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(gate) }) }
+	t.Cleanup(func() { unblock(); m.CloseAll() })
+	remote := &gatedCloseConn{fakePacketConn: fakeConn("100.64.0.1:33000"), entered: make(chan struct{}), release: gate}
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return nil, errors.New("loopback bind failed") }
+	var released atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Open(Config{ID: "r", NetworkID: "a", TargetHost: "100.64.0.2"}, Network{
+			ID: "a", IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+			ListenPacket: func(string, string) (net.PacketConn, error) { return remote, nil },
+			Closed:       func() { released.Add(1) },
+		})
+		done <- err
+	}()
+	select {
+	case <-remote.entered:
+	case <-time.After(time.Second):
+		t.Fatal("partial Open did not close its socket")
+	}
+	registry := make(chan int, 1)
+	go func() { registry <- m.Count() }()
+	select {
+	case count := <-registry:
+		if count != 0 || released.Load() != 0 {
+			t.Fatal("failed Open transferred ownership")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("partial Open locked registry across socket Close")
+	}
+	unblock()
+	if err := <-done; err == nil || remote.closeCount.Load() != 1 || released.Load() != 0 {
+		t.Fatalf("partial Open error/ownership: %v", err)
+	}
+}
+
 func TestStrictTargetsAndFamilies(t *testing.T) {
 	for _, target := range []string{"peer.example", "::ffff:100.64.0.2", "fe80::1%wlan0", "0.0.0.0", "224.0.0.1", "::", "127.0.0.1"} {
 		t.Run(target, func(t *testing.T) {

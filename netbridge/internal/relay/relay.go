@@ -72,6 +72,10 @@ type Network struct {
 	// control connection dropped, typically on a network change). The relay then
 	// opens a new one instead of ending the session.
 	Reopen bool
+	// Closed returns the owner's lease once, after an explicitly removed session
+	// has shut down. It runs outside the registry lock, for both single and bulk
+	// closes. Failed Open calls do not transfer ownership or invoke Closed.
+	Closed func()
 }
 
 // HostWriter is a backend socket that sends to a name it resolves itself.
@@ -217,34 +221,39 @@ func (m *Manager) Open(c Config, network Network) (Info, error) {
 		bind = netip.AddrPortFrom(source, 0).String()
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, exists := m.relays[c.ID]; exists {
+		m.mu.Unlock()
 		return Info{}, errors.New("UDP relay ID is already open")
 	}
 	if len(m.relays) >= maxRelays {
+		m.mu.Unlock()
 		return Info{}, errors.New("UDP relay limit reached")
 	}
 	remote, err := network.ListenPacket("udp", bind)
 	if err != nil {
+		m.mu.Unlock()
 		return Info{}, fmt.Errorf("bind UDP on selected node: %w", err)
 	}
 	if _, ok := remote.(HostWriter); target.name != "" && !ok {
+		m.mu.Unlock()
 		remote.Close()
 		return Info{}, errors.New("this network cannot send UDP to a host name")
 	}
 	local, err := m.listenLocal("udp4", "127.0.0.1:0")
 	if err != nil {
+		m.mu.Unlock()
 		remote.Close()
 		return Info{}, fmt.Errorf("bind UDP loopback: %w", err)
 	}
 	localAddr, ok := packetAddr(local.LocalAddr())
 	if !ok || localAddr.Addr() != netip.MustParseAddr("127.0.0.1") || localAddr.Port() == 0 {
+		m.mu.Unlock()
 		local.Close()
 		remote.Close()
 		return Info{}, errors.New("UDP listener did not bind IPv4 loopback")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &session{local: local, remote: remote, target: target, networkID: c.NetworkID, ctx: ctx, cancel: cancel}
+	s := &session{local: local, remote: remote, target: target, networkID: c.NetworkID, ctx: ctx, cancel: cancel, onClose: network.Closed}
 	if network.Reopen {
 		s.reopen = func() (net.PacketConn, error) { return network.ListenPacket("udp", bind) }
 	}
@@ -252,6 +261,7 @@ func (m *Manager) Open(c Config, network Network) (Info, error) {
 	s.wg.Add(2)
 	go s.fromLocal()
 	go s.fromRemote()
+	m.mu.Unlock()
 	return Info{ID: c.ID, LocalHost: "127.0.0.1", LocalPort: int(localAddr.Port()), NetworkID: c.NetworkID}, nil
 }
 
@@ -265,14 +275,19 @@ func (m *Manager) Start(id string, port int, key string) error {
 	if err != nil {
 		return err
 	}
+	// Linearize Start with registry removal. No I/O or shutdown is performed
+	// under either lock, and an old Start cannot act on a reused relay ID.
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	s := m.relays[id]
-	m.mu.Unlock()
 	if s == nil {
 		return errors.New("UDP relay is not open")
 	}
 	s.clientMu.Lock()
 	defer s.clientMu.Unlock()
+	if s.ctx.Err() != nil {
+		return errors.New("UDP relay is closed")
+	}
 	if s.aead != nil {
 		return errors.New("UDP relay is already started")
 	}
@@ -285,11 +300,21 @@ func (m *Manager) Close(id string) error {
 	s := m.relays[id]
 	delete(m.relays, id)
 	m.mu.Unlock()
-	defer m.retire(s)
+	return m.closeOwned(s)
+}
+
+// closeOwned is called only by the owner that removed s under m.mu. Socket
+// closure, worker joins and the captured lease release all happen outside it.
+func (m *Manager) closeOwned(s *session) error {
 	if s == nil {
 		return nil
 	}
-	return s.close()
+	err := s.close()
+	m.retire(s)
+	if s.onClose != nil {
+		s.onClose()
+	}
+	return err
 }
 
 func (m *Manager) closeMatching(networkID string, all bool) error {
@@ -304,23 +329,13 @@ func (m *Manager) closeMatching(networkID string, all bool) error {
 	m.mu.Unlock()
 	var result error
 	for _, s := range sessions {
-		result = errors.Join(result, s.close())
-		m.retire(s)
+		result = errors.Join(result, m.closeOwned(s))
 	}
 	return result
 }
 
 func (m *Manager) CloseNetwork(networkID string) error { return m.closeMatching(networkID, false) }
 
-// NetworkOf returns the network an open relay belongs to.
-func (m *Manager) NetworkOf(id string) (string, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if s := m.relays[id]; s != nil {
-		return s.networkID, true
-	}
-	return "", false
-}
 func (m *Manager) CloseAll() error { return m.closeMatching("", true) }
 
 func (m *Manager) Count() int {
@@ -429,6 +444,7 @@ type session struct {
 	wg        sync.WaitGroup
 	once      sync.Once
 	closeErr  error
+	onClose   func() // Immutable, called only by the registry removal owner.
 	errorMu   sync.Mutex
 	ioErr     error
 

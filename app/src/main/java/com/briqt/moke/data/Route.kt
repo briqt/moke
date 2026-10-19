@@ -50,6 +50,12 @@ fun resolveRoute(hostId: String, hosts: ListState<Host>, networks: ListState<Net
     return Route.Ok(host, jump, network)
 }
 
+/** 当前可解析、且第一跳实际依赖此网络的主机数；不把跳板覆盖的字段算成断连影响。 */
+fun hostsUsingNetwork(networkId: String, hosts: ListState<Host>, networks: ListState<NetworkEntry>): Int {
+    val all = (hosts as? ListState.Ready)?.items ?: return 0
+    return all.count { (resolveRoute(it.id, hosts, networks) as? Route.Ok)?.network?.id == networkId }
+}
+
 /**
  * 一次性迁移：把**已经失效**的跳板引用清空（指向不存在的主机或自己）。这些主机此前实际是
  * 直连且可用的（旧版静默忽略失效跳板），清空后行为不变；此后的删除才按新规则拒连。

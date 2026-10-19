@@ -2,80 +2,41 @@
 
 # Moke · 墨客
 
-**Native SSH / mosh terminal for Android** (Kotlin + Jetpack Compose)
+**Native Android SSH / mosh terminal with multiple sessions, proxies, built-in Tailscale, tmux, and SFTP.**
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
-[![minSdk](https://img.shields.io/badge/minSdk-30-blue)](#)
+[![Android](https://img.shields.io/badge/Android-11%2B-blue)](#install)
 
 </div>
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-## What is this
-
-Moke is a native SSH / mosh terminal for Android. It connects to remote servers directly inside the app — run a shell, tmux, vim, or a full-screen TUI such as Claude Code — and reuses termux's `terminal-view` / `terminal-emulator` (Apache-2.0) for terminal rendering instead of writing its own ANSI parser.
-
 ## Features
 
-- **SSH**: password / private-key (PEM) auth; TOFU host-key verification with fingerprint confirmation on first connection (matching `ssh-keygen -lf`); jump host (ProxyJump); per-host startup command (e.g. pick cmd, PowerShell or WSL on a Windows host); run-on-login command; keep-alive heartbeat.
-- **Port forwarding**: forward a remote port to the phone (loopback only) and open remote services such as a dev server in the browser; works for SSH and mosh sessions; optional per-host ports forwarded on connect.
-- **Networks**: reach hosts through HTTP / HTTPS / SOCKS4 / SOCKS5 proxies, or join Tailscale tailnets with the built-in userspace client — no separate Tailscale app and no system VPN slot. Official and self-hosted control servers are supported, several tailnets can be online at once, and hosts can be reached by tailnet address or device name; mosh works too. Each host chooses its own network, and proxy credentials and tailnet login state are encrypted with the Android Keystore.
-- **mosh**: bundled native `mosh-client` running as a separate subprocess over a PTY; UDP roaming (survives screen-off and network switches); closing a session also shuts down the remote `mosh-server`.
-- **tmux**: a panel to attach / create / rename / detach / kill remote sessions; optionally attach automatically on connect; optionally let tmux handle swipe scrolling.
-- **Files**: browse remote folders over SFTP (SSH and mosh hosts); upload / download with resume; transfers keep running in the background; send a file's path to the terminal.
-- **Sessions & hosts**: multiple sessions stay resident, with a foreground service keeping connections alive in the background; group / sort (including manual drag-to-reorder); duplicate; per-session titles; clear ended sessions; copy connect command.
-- **Terminal**: two rows of customizable extra keys plus an expandable full keyboard (editing keys, F1–F12, Ctrl shortcuts), with hold-to-lock modifiers; text-block input; tap a link to open or copy it, and forward-and-open local links in one step; bell and notification alerts (OSC 9 / 777); three keyboard modes (character / standard / IME first) for comfortable CJK input; copy & paste, including remote clipboard writes (OSC 52); pinch-to-zoom; swipe-to-scroll in full-screen TUIs with a selectable mode, plus jump-to-latest; a top status bar (protocol / host / latency).
-- **Appearance**: live preview; light / dark / follow-system theme with separate terminal color schemes for each; font size / line spacing / letter spacing; cursor style; font management (primary + CJK fallback).
-- **Security, languages & updates**: connection credentials, proxy passwords and tailnet login state are encrypted with the Android Keystore (AES-GCM) before being stored and are excluded from system backups; bilingual English / 中文, following the system language by default and switchable in Settings; in-app update check (optionally including pre-releases).
+- **SSH / mosh**: password and PEM private-key authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
+- **Networks**: HTTP / HTTPS / SOCKS4 / SOCKS5 proxies and built-in userspace Tailscale, including self-hosted control servers, without taking the system VPN slot. Credentials and tailnet login state are encrypted with the Android Keystore.
+- **Sessions & tmux**: multiple sessions, background connections, remote tmux session management, and port forwarding that listens only on the device's loopback interface.
+- **Files**: SFTP browsing, uploads and downloads with resume, and sending file paths to the terminal.
+- **Terminal**: customizable extra keys, IME input, text-block input, links, clipboard and notification support, fonts and color schemes, and English / Chinese interfaces.
 
 ## Screenshots
 
 <div align="center">
-<img src="docs/screenshot-connections.png" alt="Hosts" width="160"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="Terminal running Claude Code over SSH" width="160"/>&nbsp;<img src="docs/screenshot-tmux.png" alt="tmux panel" width="160"/>&nbsp;<img src="docs/screenshot-files.png" alt="Remote files" width="160"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance (light theme)" width="160"/>
-<br/><sub>Hosts · Terminal (Claude Code over SSH) · tmux panel · Remote files · Appearance (light theme)</sub>
+<img src="docs/screenshot-connections.png" alt="Hosts" width="160"/>&nbsp;<img src="docs/screenshot-terminal.png" alt="Terminal" width="160"/>&nbsp;<img src="docs/screenshot-tmux.png" alt="tmux panel" width="160"/>&nbsp;<img src="docs/screenshot-files.png" alt="Remote files" width="160"/>&nbsp;<img src="docs/screenshot-appearance.png" alt="Appearance (light theme)" width="160"/>
+<br/><sub>Hosts · Terminal · tmux panel · Remote files · Appearance (light theme)</sub>
 </div>
 
 ## Install
 
-Download `moke-vX.Y.Z.apk` from [Releases](https://github.com/briqt/moke/releases), allow "install from unknown sources" and install. Release builds use a stable signature, so upgrades install over the top.
+Requires **Android 11 or newer** and an **arm64-v8a** device. Download the APK from [Releases](https://github.com/briqt/moke/releases) and allow installation from that source. Published APKs use a stable signing key and support in-place upgrades. In-app update checks offer stable releases by default; pre-releases can be enabled in Settings.
 
-## Modules
+mosh requires `mosh-server` on the remote host and a reachable UDP path. Proxy use requires a SOCKS5 server that supports UDP forwarding; HTTP, HTTPS and SOCKS4 proxies cannot carry mosh. SSH jump hosts carry only the bootstrap connection, not mosh UDP traffic, so the target still needs a directly reachable UDP path. Session continuity also depends on network availability and Android background restrictions.
 
-| Module | Description | License |
-|---|---|---|
-| `app` | Product layer (Compose UI / session orchestration / transport implementations) | GPL-3.0-or-later |
-| `terminal-emulator` | Terminal parsing / state core (vendored; `TerminalSession` made transport-agnostic; the PTY JNI is kept for the mosh subprocess) | Apache-2.0 |
-| `terminal-view` | Terminal rendering View (vendored; additive changes for line / letter spacing and swipe scrolling) | Apache-2.0 |
+## Build & feedback
 
-## Build
-
-Requires JDK 17 or newer + Android SDK (compileSdk 37 / build-tools 36); the network bridge also needs Go 1.27.2 and Android NDK r30. Create `local.properties` at the project root pointing to the SDK: `sdk.dir=/path/to/Android/sdk`.
-
-```bash
-# the network bridge is required by every build (Go 1.27.2 + NDK r30)
-ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-netbridge.sh
-
-./gradlew assembleDebug        # debug APK
-./gradlew testDebugUnitTest    # unit tests
-
-# release also needs the mosh native artifacts and the bundled font
-ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-mosh-native.sh
-./scripts/fetch-maple-font.sh && ./gradlew assembleRelease
-```
-
-The mosh native artifacts are reproducibly built by [`scripts/build-mosh-native.sh`](scripts/build-mosh-native.sh) from public sources (mosh 1.4.0 + rjyo/mosh-android prebuilt libs); NDK r30 is required, and the GPLv3 binaries are not checked in. The network bridge is built by [`scripts/build-netbridge.sh`](scripts/build-netbridge.sh); its Go, gomobile and Tailscale versions are pinned in `netbridge/go.mod`.
-
-## Feedback
-
-Only [issue](https://github.com/briqt/moke/issues)-based reports are accepted; pull requests are not accepted for now (see [CONTRIBUTING](CONTRIBUTING.md)).
-
-Community discussion: [学AI，linuxdo](https://linux.do/)
-
-## Acknowledgements & third-party
-
-The terminal core reuses `terminal-emulator` / `terminal-view` from [termux/termux-app](https://github.com/termux/termux-app) (Apache-2.0, originally from [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)). SSH transport uses [sshj](https://github.com/hierynomus/sshj). The mosh native component is based on [mobile-shell/mosh](https://github.com/mobile-shell/mosh) (GPLv3) and [rjyo/mosh-android](https://github.com/rjyo/mosh-android). The network layer runs [Tailscale](https://tailscale.com/) (BSD-3-Clause) as a userspace library, and the mosh relay uses [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto). Bundled Chinese fonts are OFL-licensed. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.
+Build requirements, commands and release conventions are maintained in [CONTRIBUTING](CONTRIBUTING.md). Report problems through [issues](https://github.com/briqt/moke/issues); pull requests are not accepted.
 
 ## License
 
-The moke product layer (`app/`) is released under the **GNU General Public License v3.0 or later**; see [LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md). The vendored `terminal-*` modules are Apache-2.0 (GPLv3-compatible); the mosh native component is GPLv3 and ships as a standalone executable.
+The product layer (`app/`) is **GPL-3.0-or-later**; see [LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md). The vendored terminal modules are Apache-2.0, and the standalone mosh executable is GPLv3. Component sources, modifications and font licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Distributors must meet the applicable license and corresponding-source requirements.

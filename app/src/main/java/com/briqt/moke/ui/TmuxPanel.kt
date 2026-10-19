@@ -34,6 +34,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,13 +68,13 @@ fun TmuxPanel(
     onRefresh: () -> Unit,
     onAttach: (TmuxSession) -> Unit,
     onTakeOver: (TmuxSession) -> Unit,
-    onRename: (TmuxSession, String) -> Unit,
+    onRename: suspend (TmuxSession, String) -> Boolean,
     onDetach: (TmuxSession) -> Unit,
     onKill: (TmuxSession) -> Unit,
-    onNew: (String) -> Unit,
+    onNew: suspend (String) -> Boolean,
 ) {
-    // 输入弹窗：null=不显示；(初值, 提交回调)。新建时初值空，重命名时预填当前名。
-    var dialog by remember { mutableStateOf<Pair<String, (String) -> Unit>?>(null) }
+    // null=closed; a failed asynchronous action keeps this in-memory draft.
+    var dialog by remember { mutableStateOf<Pair<String, suspend (String) -> Boolean>?>(null) }
     var detachTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var takeOverTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var killTarget by remember { mutableStateOf<TmuxSession?>(null) }
@@ -164,28 +170,46 @@ fun TmuxPanel(
         }
     }
 
-    dialog?.let { (initial, submit) ->
+    dialog?.let { (initial, action) ->
         var text by remember(initial) { mutableStateOf(initial) }
+        var submitted by remember(initial) { mutableStateOf(false) }
+        var submitting by remember(initial) { mutableStateOf(false) }
+        var failed by remember(initial) { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+        val target = remember(initial) { EditorTarget() }
+        val validName = FormValidation.tmuxName(text)
+        fun submit() {
+            if (submitting) return
+            submitted = true
+            if (!validName) { scope.launch { target.reveal() }; return }
+            submitting = true
+            failed = false
+            scope.launch {
+                try {
+                    if (action(text.trim())) dialog = null else failed = true
+                } catch (cancelled: CancellationException) { throw cancelled
+                } catch (_: Exception) { failed = true
+                } finally { submitting = false }
+            }
+        }
         AlertDialog(
-            onDismissRequest = { dialog = null },
-            title = { Text(if (initial.isBlank()) stringResource(R.string.tmux_new) else stringResource(R.string.tmux_rename)) },
+            onDismissRequest = { if (!submitting) dialog = null },
+            title = { Text(stringResource(if (initial.isEmpty()) R.string.tmux_new else R.string.tmux_rename_title)) },
             text = {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.tmux_name_hint)) },
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FormTextField(text, { text = it }, stringResource(R.string.tmux_name_hint),
+                        error = if (!validName) stringResource(R.string.tmux_name_invalid) else null, submitted = submitted,
+                        enabled = !submitting, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submit() }), modifier = Modifier.editorTarget(target))
+                    if (failed) InfoNote(state.message ?: stringResource(R.string.form_action_failed), error = true)
+                }
             },
             confirmButton = {
-                TextButton(
-                    enabled = text.isNotBlank(),
-                    onClick = { submit(text.trim()); dialog = null },
-                ) { Text(stringResource(R.string.action_save)) }
+                TextButton(enabled = !submitting, onClick = { submit() }) {
+                    Text(stringResource(if (submitting) R.string.action_working else if (initial.isEmpty()) R.string.action_create else R.string.action_rename))
+                }
             },
-            dismissButton = {
-                TextButton(onClick = { dialog = null }) { Text(stringResource(R.string.action_cancel)) }
-            },
+            dismissButton = { TextButton(enabled = !submitting, onClick = { dialog = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 

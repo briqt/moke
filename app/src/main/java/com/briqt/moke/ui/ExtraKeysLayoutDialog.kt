@@ -1,11 +1,15 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -56,25 +60,20 @@ fun ExtraKeysLayoutDialog(
                     fontWeight = FontWeight.SemiBold,
                 )
                 slots.forEachIndexed { row, ids ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        ids.forEachIndexed { col, id ->
-                            Surface(
-                                onClick = { picking = row to col },
-                                modifier = Modifier.weight(1f).height(36.dp),
-                                shape = MokeShapes.keycap,
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            ) {
-                                Box(Modifier.fillMaxWidth().height(36.dp), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        ExtraKeyLayout.label(id),
-                                        fontFamily = MokeMono,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val keyWidth = maxOf(48.dp, (maxWidth - 20.dp) / 6)
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ids.forEachIndexed { col, id ->
+                                val description = stringResource(R.string.extra_key_slot, row + 1, col + 1, ExtraKeyLayout.label(id))
+                                Surface(
+                                    onClick = { picking = row to col },
+                                    modifier = Modifier.width(keyWidth).heightIn(min = 48.dp).semantics { contentDescription = description },
+                                    shape = MokeShapes.keycap,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                ) {
+                                    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(4.dp), contentAlignment = Alignment.Center) {
+                                        Text(ExtraKeyLayout.label(id), fontFamily = MokeMono, style = MaterialTheme.typography.labelMedium)
+                                    }
                                 }
                             }
                         }

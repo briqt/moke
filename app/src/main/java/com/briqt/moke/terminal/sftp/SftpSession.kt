@@ -3,7 +3,6 @@ package com.briqt.moke.terminal.sftp
 import android.content.Context
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
-import com.briqt.moke.net.NetworkException
 import com.briqt.moke.terminal.SshConnector
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
@@ -121,15 +120,8 @@ class SftpSession(
     private fun statType(path: String): Boolean =
         client().stat(path).mode.type == FileMode.Type.DIRECTORY
 
-    fun stat(path: String): RemoteStat? = try {
-        withReconnect {
-            val a = it.stat(path)
-            RemoteStat(a.size, a.mtime, a.mode.type == FileMode.Type.DIRECTORY)
-        }
-    } catch (t: Throwable) {
-        // 「文件不存在」可以返回 null；网络/登录/代理失败必须原样抛出，否则会被报成「远端文件不存在」。
-        if (t is NetworkException || t.cause is NetworkException) throw t
-        null
+    fun stat(path: String): RemoteStat? = readSftpStat(path) { target ->
+        withReconnect { it.statExistence(target) }
     }
 
     fun mkdir(path: String) = withReconnect { it.mkdir(path) }
@@ -166,8 +158,7 @@ class SftpSession(
     /**
      * 上传 [source] 到 [remote]，从 [offset] 字节处续写。
      *
-     * 不带 TRUNC：续传时截断就把已传的部分丢了。[offset]==0 的整传由调用方先删除/覆盖同名文件，
-     * 或接受"写在已有内容之上"——上层只在确认过远端大小后才走非 0 偏移。
+     * 续传只打开已存在文件，不截断、不重建；新上传默认排他创建，只有明确确认过覆盖才允许截断。
      */
     fun upload(
         source: InputStream,
@@ -175,12 +166,10 @@ class SftpSession(
         offset: Long,
         onProgress: (Long) -> Unit,
         cancelled: () -> Boolean,
+        allowOverwrite: Boolean = false,
     ): Long {
-        val modes = if (offset > 0L) {
-            EnumSet.of(OpenMode.WRITE, OpenMode.CREAT)
-        } else {
-            EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC)
-        }
+        if (cancelled()) return offset
+        val modes = uploadOpenModes(offset, allowOverwrite)
         client().open(remote, modes).use { file ->
             val buf = ByteArray(BUFFER)
             var pos = offset
