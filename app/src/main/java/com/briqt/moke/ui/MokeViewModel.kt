@@ -15,10 +15,18 @@ import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.MokeTransferService
 import com.briqt.moke.terminal.TermSession
+import com.briqt.moke.terminal.RefusedTransport
 import com.briqt.moke.terminal.Tmux
-import com.briqt.moke.terminal.TmuxDiscovery
 import com.briqt.moke.terminal.TmuxPhase
-import com.briqt.moke.terminal.TmuxSession
+import com.briqt.moke.terminal.TmuxConnection
+import com.briqt.moke.terminal.TmuxIntent
+import com.briqt.moke.terminal.TmuxLaunchPolicy
+import com.briqt.moke.terminal.TmuxPresence
+import com.briqt.moke.terminal.TmuxRemote
+import com.briqt.moke.terminal.TmuxSelection
+import com.briqt.moke.terminal.TmuxSessionRef
+import com.briqt.moke.terminal.sameInstance
+import com.briqt.moke.terminal.selectionFor
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
@@ -69,6 +77,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -327,7 +336,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val importSuccess: StateFlow<String?> = _importSuccess.asStateFlow()
     fun clearImportSuccess() { _importSuccess.value = null }
 
-    suspend fun saveHost(host: Host, editing: Boolean): StoreResult<Host> = store.commit(host, editing)
+    suspend fun saveHost(host: Host, editing: Boolean): StoreResult<Host> = sessions.tmuxMemoryMutex.withLock {
+        store.commit(host, editing)
+    }
 
     fun save(host: Host) = viewModelScope.launch {
         val result = saveHost(host, hosts.value.any { it.id == host.id })
@@ -380,10 +391,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     private val networkLogins by lazy {
         NetworkLoginController(viewModelScope, ::saveNetwork, object : NetworkLoginBackend {
+            override suspend fun prepare(entry: NetworkEntry): StoreResult<NetworkEntry> = prepareTmuxNetworkIdentity(entry)
             override fun hold(entry: NetworkEntry, attempt: Long) = networkManager.holdLogin(entry, attempt)
             override fun begin(entry: NetworkEntry, authKey: String, attempt: Long): String = networkManager.beginLogin(entry, authKey, attempt)
             override fun end(entry: NetworkEntry, attempt: Long) = networkManager.endLogin(entry, attempt)
-        }) { t -> (t as? NetworkException)?.describe(getApplication()) ?: str(R.string.store_failure_io) }
+        }) { t -> when (t) {
+            is NetworkLoginPreparationException -> str(storeFailureMessage(t.reason))
+            is NetworkException -> t.describe(getApplication())
+            else -> str(R.string.store_failure_io)
+        } }
     }
     val loginFlows: StateFlow<Map<String, LoginFlow>> get() = networkLogins.flows
     val loginUrl: StateFlow<LoginUrlRequest?> get() = networkLogins.url
@@ -459,7 +475,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun saveNetwork(entry: NetworkEntry, editing: Boolean): StoreResult<NetworkEntry> {
         val old = networks.value.firstOrNull { it.id == entry.id }
-        val result = networkStore.commit(entry, editing)
+        val result = sessions.tmuxMemoryMutex.withLock { networkStore.commit(entry, editing) }
         if (result is StoreResult.Saved) {
             if (old != null && result.value.revision != old.revision && networkManager.leases(old) > 0) {
                 _networkNotice.value = str(R.string.network_saved_sessions_unaffected)
@@ -478,19 +494,49 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun reopenLoginUrl(id: String) = networkLogins.reopen(id)
     fun cancelLogin(entry: NetworkEntry) = networkLogins.cancel(entry)
 
+    /** Durable revision + preference invalidation precede any replacement of a tailnet identity. */
+    private suspend fun prepareTmuxNetworkIdentity(entry: NetworkEntry): StoreResult<NetworkEntry> =
+        sessions.tmuxMemoryMutex.withLock {
+            val state = networkStore.state.first()
+            if (state !is ListState.Ready) return@withLock StoreResult.Failed(StoreFailure.UNREADABLE)
+            val current = state.items.singleOrNull { it.id == entry.id }
+                ?: return@withLock StoreResult.Failed(StoreFailure.MISSING)
+            if (current.kind != entry.kind || current.controlUrl != entry.controlUrl) {
+                return@withLock StoreResult.Failed(StoreFailure.CONFLICT)
+            }
+            sessions.invalidateTmuxNetwork(entry.id)
+            val advanced = if (current.kind == NetworkKind.TAILSCALE) networkStore.advanceTailnetIdentity(entry.id)
+                else StoreResult.Saved(current)
+            if (advanced is StoreResult.Failed) return@withLock advanced
+            when (val cleared = store.clearTmuxMemoryForNetwork(entry.id)) {
+                is StoreResult.Failed -> cleared
+                is StoreResult.Saved -> advanced
+            }
+        }
+
     suspend fun logoutTailnet(entry: NetworkEntry): StoreResult<Unit> = viewModelScope.async {
         cancelLogin(entry)
-        closeSessionsUsing(entry.id)
-        forgetNetwork(entry)
+        when (val prepared = prepareTmuxNetworkIdentity(entry)) {
+            is StoreResult.Failed -> prepared
+            is StoreResult.Saved -> {
+                closeSessionsUsing(entry.id)
+                forgetNetwork(prepared.value)
+            }
+        }
     }.await()
 
     suspend fun deleteNetwork(entry: NetworkEntry): StoreResult<Unit> = viewModelScope.async {
-        when (val removed = networkStore.remove(entry.id)) {
-            is StoreResult.Failed -> removed
+        cancelLogin(entry)
+        when (val prepared = prepareTmuxNetworkIdentity(entry)) {
+            is StoreResult.Failed -> prepared
             is StoreResult.Saved -> {
-                cancelLogin(entry)
-                closeSessionsUsing(entry.id)
-                forgetNetwork(entry)
+                when (val removed = sessions.tmuxMemoryMutex.withLock { networkStore.remove(entry.id) }) {
+                    is StoreResult.Failed -> removed
+                    is StoreResult.Saved -> {
+                        closeSessionsUsing(entry.id)
+                        forgetNetwork(prepared.value)
+                    }
+                }
             }
         }
     }.await()
@@ -599,297 +645,311 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 拖动重排会话（仅内存，无持久化）。 */
     fun reorderSessions(orderedIds: List<String>) = sessions.reorder(orderedIds)
 
-    // ---------- tmux 侧通道管理（SSH 复用现有连接；mosh 按需建立独立 SSH 控制连接）----------
-    /**
-     * 探测/刷新远端 tmux。状态明确区分检查中、未安装、零会话与失败；
-     * 同一终端会话的刷新/增删改用 Mutex 串行，避免慢请求用旧列表覆盖新操作结果。
-     */
-    fun refreshTmux(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
-        ts.tmuxMutex.withLock { refreshTmuxLocked(ts, retryUntilReady = true) }
+    // ---------- tmux：管理动作永远使用来源连接；新连接另行校验最新持久化 Route。 ----------
+    private val tmuxTracking = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private val tmuxOpening = mutableMapOf<String, kotlinx.coroutines.sync.Mutex>()
+    private val pickerSources = mutableSetOf<String>()
+    private val _tmuxPicker = MutableStateFlow<Set<String>>(emptySet())
+    val tmuxPicker: StateFlow<Set<String>> = _tmuxPicker.asStateFlow()
+
+    fun refreshTmux(ts: TermSession) = viewModelScope.launch {
+        if (sessions.get(ts.id) !== ts) return@launch
+        updateTmuxRoute(ts, storedRouteOf(ts.host.id))
+        ts.tmuxCoordinator.refresh()
+        ts.negotiatedTerm.value = ts.tmuxState.value.snapshot?.observation?.term
     }
 
-    private suspend fun refreshTmuxLocked(ts: TermSession, retryUntilReady: Boolean) {
-        val previous = ts.tmuxState.value
-        ts.tmuxState.value = previous.copy(
-            phase = if (previous.phase == TmuxPhase.READY) TmuxPhase.READY else TmuxPhase.CHECKING,
-            busy = true,
-            message = null,
-        )
+    private fun routeMatches(ts: TermSession, route: Route): Boolean = TmuxLaunchPolicy.matches(
+        ts.scopeKey, route, sessions.networkEpoch((route as? Route.Ok)?.network?.id),
+    )
 
-        // 重试是给「传输还没 start 完」留的窗口，不是给不可达主机用的压测。
-        // 固定 1.5s 间隔在 20s 内会打满 13 次；mosh 主机上每一次都是一条完整 SSH 登录，
-        // 对带 fail2ban / MaxStartups 的远端等于自我封禁。改成指数退避：0/1/3/7/15s 共 5 次。
-        val deadline = System.currentTimeMillis() + if (retryUntilReady) 20_000L else 0L
-        var out: String?
-        var backoff = 1_000L
-        while (true) {
-            out = runCatching { ts.transport.exec(Tmux.DISCOVER_CMD) }.getOrNull()
-            if (out != null || !retryUntilReady || !currentCoroutineContext().isActive) break
-            if (System.currentTimeMillis() + backoff >= deadline) break
-            delay(backoff)
-            backoff = (backoff * 2).coerceAtMost(8_000L)
-        }
-
-        if (out == null) {
-            ts.tmuxState.value = previous.copy(
-                phase = if (previous.phase == TmuxPhase.READY) TmuxPhase.READY else TmuxPhase.ERROR,
-                busy = false,
-                message = str(R.string.tmux_control_unavailable),
-            )
-            return
-        }
-
-        ts.tmuxState.value = when (val discovery = Tmux.parseDiscovery(out)) {
-            TmuxDiscovery.NotInstalled -> previous.copy(
-                phase = TmuxPhase.NOT_INSTALLED,
-                sessions = emptyList(),
-                busy = false,
-                message = null,
-            )
-            is TmuxDiscovery.Ready -> previous.copy(
-                phase = TmuxPhase.READY,
-                sessions = discovery.sessions,
-                busy = false,
-                message = null,
-            ).also {
-                // 记下远端真的可用的 TERM，供后续 attach 使用（远端缺 xterm-256color 条目时
-                // tmux 会拒绝启动，这是 rc.3 附加全挂的根因）。
-                discovery.term?.let { t -> ts.negotiatedTerm.value = t }
-                sessions.reconcileTmuxAssociations(
-                    ts.host.id,
-                    discovery.sessions,
-                )
-            }
-            TmuxDiscovery.Malformed -> previous.copy(
-                phase = TmuxPhase.ERROR,
-                busy = false,
-                message = str(R.string.tmux_invalid_response),
+    private fun updateTmuxRoute(ts: TermSession, route: Route) {
+        val matches = routeMatches(ts, route)
+        ts.tmuxState.update { old ->
+            val observesTarget = ts.host.useMosh || ts.host.persistence == SessionPersistence.TMUX ||
+                ts.tmuxIntent != TmuxIntent.None || old.snapshot != null || old.lastBinding != null
+            old.copy(
+                targetChanged = old.targetChanged || (!matches && observesTarget && ts.transport !is RefusedTransport),
+                canStartNewConnection = matches && !old.targetChanged && sessions.get(ts.id) === ts,
             )
         }
     }
 
-    /** 执行管理命令，显示远端错误；成功后在同一个串行临界区内回刷。 */
-    private fun tmuxAction(ts: TermSession, cmd: String, onSuccess: () -> Unit = {}) =
-        viewModelScope.launch { tmuxActionNow(ts, cmd, onSuccess) }
-
-    private suspend fun tmuxActionNow(
-        ts: TermSession,
-        cmd: String,
-        onSuccess: () -> Unit = {},
-    ): Boolean = withContext(Dispatchers.IO) {
-        ts.tmuxMutex.withLock {
-            val before = ts.tmuxState.value
-            ts.tmuxState.value = before.copy(busy = true, message = null)
-            val out = runCatching { ts.transport.exec(Tmux.actionCmd(cmd)) }.getOrNull()
-            val result = out?.let(Tmux::parseAction)
-            val failure = when {
-                out == null -> str(R.string.tmux_control_unavailable)
-                result == null -> str(R.string.tmux_invalid_response)
-                !result.ok -> result.output.ifBlank { str(R.string.tmux_action_failed) }.take(500)
-                else -> null
-            }
-            if (failure != null) {
-                ts.tmuxState.value = before.copy(busy = false, message = failure)
-                false
-            } else {
-                onSuccess()
-                refreshTmuxLocked(ts, retryUntilReady = false)
-                true
-            }
+    /** A newly edited target must never inherit an old list, even when its host ID is unchanged. */
+    private suspend fun routeForTmuxOpen(ts: TermSession): Route.Ok? {
+        val route = storedRouteOf(ts.host.id)
+        updateTmuxRoute(ts, route)
+        if (route !is Route.Ok || !routeMatches(ts, route) || ts.tmuxState.value.targetChanged) {
+            ts.tmuxState.update { it.copy(message = route.refusalText(getApplication()) ?: str(R.string.tmux_target_changed)) }
+            return null
         }
-    }
-    suspend fun tmuxNew(ts: TermSession, name: String): Boolean = tmuxActionNow(ts, Tmux.newCmd(name))
-    suspend fun tmuxRename(ts: TermSession, id: String, name: String): Boolean = tmuxActionNow(ts, Tmux.renameCmd(id, name)) {
-        sessions.renameTmuxAssociation(ts.host.id, id, name)
-    }
-    fun tmuxDetach(ts: TermSession, id: String) = tmuxAction(ts, Tmux.detachCmd(id)) {
-        sessions.clearTmuxAssociation(ts.host.id, id, tmuxNameOf(ts, id))
-    }
-    fun tmuxKill(ts: TermSession, id: String) = tmuxAction(ts, Tmux.killCmd(id)) {
-        sessions.clearTmuxAssociation(ts.host.id, id, tmuxNameOf(ts, id))
+        return route
     }
 
-    /** 面板列表里该 ID 对应的会话名：本地关联可能还没拿到 ID，只能按名清（见 clearTmuxAssociation）。 */
-    private fun tmuxNameOf(ts: TermSession, id: String): String? =
-        ts.tmuxState.value.sessions.firstOrNull { it.id == id }?.name
-
-    /**
-     * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，按名称原子恢复。
-     * 不向当前前台终端注入文本，因此当前正在运行的 shell/TUI/半输入命令均不会被破坏。
-     */
-    fun openTmuxSession(
-        source: TermSession,
-        target: TmuxSession,
-        detachOthers: Boolean = false,
-    ): String {
-        val route = routeOf(source.host.id)
-        val ok = route as? Route.Ok
-        val session = sessions.openTmux(
-            source, target, ok?.jump, ok?.network, route.refusalText(getApplication()), detachOthers,
-            host = ok?.host ?: source.host,
-        ).also { it.recovery.value = route.recovery }
-        ensureSessionService()
-        rememberTmuxSession(source.host, target.name)
-        confirmTmuxAttach(session, target.name)
-        return session.id
-    }
-
-    /** 记住该主机上最后选择的 tmux 会话名：下次连接可直接按名附加，不再打扰用户选。 */
-    private fun rememberTmuxSession(host: Host, name: String) = viewModelScope.launch {
-        store.update(host.id) { if (it.tmuxSessionName == name) it else it.copy(tmuxSessionName = name) }
-    }
-
-    /**
-     * 附加确认：发出 attach 命令 ≠ 附加成功。远端 tmux 缺失或启动失败时包装命令会回落成登录壳，
-     * 此时若仍标成「当前 tmux 会话」，面板与顶栏就在撒谎。用源会话的侧通道数一下客户端：
-     * **持续**为 0（一直数到窗口最后一轮）且此刻会话仍存活 → 判定未附上，清除关联。数不出来（null）、
-     * 会话已结束、以及窗口内的中间态 0 都视为"无法确认"，不动状态。
-     */
-    private fun confirmTmuxAttach(session: TermSession, name: String) =
-        viewModelScope.launch(Dispatchers.IO) {
-            // 用**该会话自己**的侧通道：源会话（临时登录壳）在选定后就被关掉了，拿它去问必然失败。
-            // 传输要等 View 测量后才 start，所以给若干次重试；数不出来一律当"无法确认"，不动状态。
-            repeat(ATTACH_CONFIRM_ROUNDS) { round ->
-                delay(1000)
-                if (!session.alive.value) return@launch
-                val count = Tmux.parseClientCount(
-                    runCatching { session.transport.exec(Tmux.clientsCmd(name)) }.getOrNull()
-                ) ?: return@repeat
-                // 命令是在会话还活着时发出的，结果却可能在它结束之后才回来。这种时候"0 个客户端"
-                // 说明不了任何事——detach 本身就会让计数归零——按它清关联会把「已离开 tmux，远端
-                // 会话仍在运行」退化成「会话已结束」（实测：detach 恰好撞上确认往返时就会这样）。
-                if (!session.alive.value) return@launch
-                if (count > 0) {
-                    session.tmuxAttached.value = true
-                    // 附上了才下发滚动绑定：让 tmux 现场判定翻页器/命令行（客户端侧判不了，见
-                    // Tmux.scrollSetupCmd）。失败无所谓——退回原有的客户端启发式。
-                    if (tmuxScrollSetup.value) {
-                        runCatching { session.transport.exec(Tmux.scrollSetupCmd(name)) }
+    private fun trackTmux(ts: TermSession) {
+        if (tmuxTracking[ts.id]?.isActive == true) return
+        tmuxTracking[ts.id] = viewModelScope.launch {
+            var scrollTarget: TmuxSessionRef? = null
+            combine(ts.tmuxState, store.state, networkStore.state) { state, hosts, networks ->
+                state to resolveRoute(ts.host.id, hosts, networks)
+            }.collect { (state, route) ->
+                if (sessions.get(ts.id) !== ts) return@collect
+                updateTmuxRoute(ts, route)
+                val binding = state.currentBinding ?: return@collect
+                if (binding.scope != ts.scopeKey || state.snapshot?.verified != true) return@collect
+                if (tmuxScrollSetup.value && scrollTarget?.sameInstance(binding.session) != true) {
+                    // One attempt per witnessed object, never a replay after a missing ACK.
+                    scrollTarget = binding.session
+                    val selection = state.snapshot.selection(state.sessions.singleOrNull {
+                        it.id == binding.session.id && it.created == binding.session.created
+                    } ?: return@collect)?.copy(expectedClient = binding.client)
+                    if (selection != null && ts.tmuxCoordinator.validateSelection(selection, requireCurrent = true)) {
+                        withContext(Dispatchers.IO) {
+                            val connection = ts.transport as? TmuxConnection
+                            if (connection != null) runCatching { connection.execTmuxOperation(TmuxRemote.guardPeer(
+                                ts.scripts, connection.tmuxNonce, connection.tmuxOwnerRequired, binding.server.bootId,
+                                TmuxRemote.scrollSetup(binding.session),
+                            )) }
+                        }
                     }
-                    return@launch
                 }
-                // 数到 0 **不等于**没附上：mosh 要先引导 mosh-server、再由包装命令里的 tmux 去附加，
-                // 这中间有几秒；第一轮就把 0 当结论，会把一个其实附加成功的会话永久标成"没附上"
-                // ——面板于此给出「加入」（再开一个客户端）、detach 退化成「会话已结束」、滚动绑定
-                // 也不会下发。所以只有窗口最后一轮的 0 才算数。
-                if (round == ATTACH_CONFIRM_ROUNDS - 1) {
-                    session.tmuxAttached.value = false
-                    session.remoteTmuxId.value = null
-                    session.remoteTmuxName.value = null
+                sessions.tmuxMemoryMutex.withLock {
+                    val latest = storedRouteOf(ts.host.id)
+                    if (!sessions.isCurrentTmuxChoice(ts) || sessions.get(ts.id) !== ts ||
+                        ts.tmuxState.value.currentBinding != binding || !routeMatches(ts, latest) ||
+                        ts.host.persistence != SessionPersistence.TMUX) return@withLock
+                    val saved = (latest as Route.Ok).host
+                    if (saved.tmuxSessionName == binding.session.name && saved.tmuxTargetStamp == ts.scopeKey.targetStamp) return@withLock
+                    val result = store.rememberTmux(ts.host, binding.session.name, ts.scopeKey.targetStamp)
+                    if (result is StoreResult.Failed && result.reason !in setOf(StoreFailure.CONFLICT, StoreFailure.MISSING)) {
+                        ts.tmuxState.update { it.copy(message = str(storeFailureMessage(result.reason))) }
+                    }
                 }
             }
         }
-
-    /** 重连时保留协议级启动命令；tmux 专用会话不能退回成普通 shell。 */
-    fun reconnectSession(source: TermSession): String {
-        touchHost(source.host)
-        // 按 ID 重读：重连用主机**当前**的配置（会话里存的是打开那一刻的快照）。
-        val route = routeOf(source.host.id)
-        val ok = route as? Route.Ok
-        val session = sessions.open(
-            host = ok?.host ?: source.host,
-            jumpHost = ok?.jump,
-            network = ok?.network,
-            refusal = route.refusalText(getApplication()),
-            initialTitle = source.displayTitle.value,
-            remoteTmuxId = source.remoteTmuxId.value,
-            remoteTmuxName = source.remoteTmuxName.value,
-            startupCommand = source.startupCommand,
-        ).also { it.recovery.value = route.recovery }
-        ensureSessionService()
-        // 重连同样要核对是否真的附上了。漏掉这一步，新会话的 tmuxAttached 恒为 null：
-        // detach 后提示会退化成「会话已结束」，而 tmux 真的没附上时顶栏还继续标着 tmux ——
-        // 正是首次附加时特意用侧通道消灭掉的那种「UI 撒谎」。
-        source.remoteTmuxName.value?.let { confirmTmuxAttach(session, it) }
-        return session.id
     }
 
-    /**
-     * 记录最近连接时间（用于"最近连接"排序）。
-     *
-     * **只能按 id 重读当前记录再改这一个字段**：`upsert` 是整条替换，而调用方手里的 [host] 往往是
-     * 会话**打开那一刻**的快照（重连/复制会话都拿 `TermSession.host`）。把快照整条写回去，等于把
-     * 此后的一切改动静默回滚——实测「会话开着时编辑主机 → 复制会话」编辑即丢，`tmuxSessionName`
-     * 也是这样被吃掉的（于是"选择会被记住"失效、选择器反复弹）。
-     */
+    suspend fun tmuxRename(ts: TermSession, selection: TmuxSelection, name: String): Boolean {
+        if (sessions.get(ts.id) !== ts || !ts.tmuxCoordinator.rename(selection, name)) return false
+        sessions.renamed(ts.scopeKey.targetStamp, selection.session, name)
+        // A non-current row may be the saved preference, but must not replace a newer selection.
+        sessions.tmuxMemoryMutex.withLock {
+            if (sessions.isCurrentTmuxChoice(ts) && routeMatches(ts, storedRouteOf(ts.host.id))) store.update(ts.host.id) { host ->
+                if (host.tmuxTargetStamp == ts.scopeKey.targetStamp && host.tmuxSessionName == selection.session.name)
+                    host.copy(tmuxSessionName = name) else host
+            }
+        }
+        return true
+    }
+
+    suspend fun tmuxDetach(ts: TermSession, selection: TmuxSelection): Boolean =
+        sessions.get(ts.id) === ts && ts.tmuxCoordinator.detach(selection)
+
+    suspend fun tmuxKill(ts: TermSession, selection: TmuxSelection): Boolean =
+        sessions.get(ts.id) === ts && ts.tmuxCoordinator.kill(selection)
+
+    suspend fun tmuxEndCurrent(ts: TermSession, selection: TmuxSelection): Boolean {
+        if (selection.expectedClient == null || sessions.get(ts.id) !== ts ||
+            !ts.tmuxCoordinator.validateSelection(selection, requireCurrent = true)) return false
+        return ts.tmuxCoordinator.kill(selection)
+    }
+
+    private suspend fun <T> withTmuxOpening(ts: TermSession, action: suspend () -> T?): T? {
+        val lock = tmuxOpening.getOrPut(ts.id) { kotlinx.coroutines.sync.Mutex() }
+        if (!lock.tryLock()) return null
+        try { return action() } finally { lock.unlock() }
+    }
+
+    suspend fun openTmuxSession(source: TermSession, target: TmuxSelection, detachOthers: Boolean = false): String? =
+        withTmuxOpening(source) {
+            val epoch = sessions.nextTmuxChoice(source.host.id)
+            val route = routeForTmuxOpen(source) ?: return@withTmuxOpening null
+            if (!source.tmuxCoordinator.validateSelection(target)) return@withTmuxOpening null
+            if (!detachOthers) {
+                val candidate = sessions.findReusable(source.host.id, source.scopeKey.targetStamp, target.session)
+                val state = candidate?.tmuxState?.value
+                val row = state?.sessions?.singleOrNull { it.id == target.session.id && it.created == target.session.created }
+                val selection = row?.let { state.selectionFor(it) }
+                if (candidate != null && selection != null &&
+                    candidate.tmuxCoordinator.validateSelection(selection, requireCurrent = true)) {
+                    val accepted = sessions.tmuxMemoryMutex.withLock {
+                        if (sessions.get(source.id) !== source || sessions.get(candidate.id) !== candidate ||
+                            routeForTmuxOpen(source) == null) false else {
+                            sessions.claimTmuxChoice(candidate, epoch)
+                            true
+                        }
+                    }
+                    if (!accepted) return@withTmuxOpening null
+                    rememberCurrentTmux(candidate)
+                    return@withTmuxOpening candidate.id
+                }
+            }
+            openTmuxTarget(source, route, target.session, epoch, detachOthers)?.id
+        }
+
+    private suspend fun openTmuxTarget(source: TermSession, route: Route.Ok, target: TmuxSessionRef,
+        epoch: Long, detachOthers: Boolean = false): TermSession? = sessions.tmuxMemoryMutex.withLock {
+        if (sessions.get(source.id) !== source || routeForTmuxOpen(source) == null) return@withLock null
+        sessions.openTmux(
+            source, target, route.jump, route.network, detachOthers = detachOthers,
+            host = route.host, rememberEpoch = epoch,
+        ).also { trackTmux(it); ensureSessionService() }
+    }
+
+    private suspend fun rememberCurrentTmux(ts: TermSession) {
+        val binding = ts.tmuxState.value.currentBinding ?: return
+        sessions.tmuxMemoryMutex.withLock {
+            if (sessions.get(ts.id) === ts && sessions.isCurrentTmuxChoice(ts) && routeMatches(ts, storedRouteOf(ts.host.id)) &&
+                ts.tmuxState.value.snapshot?.verified == true && ts.tmuxState.value.currentBinding == binding &&
+                ts.host.persistence == SessionPersistence.TMUX) {
+                store.rememberTmux(ts.host, binding.session.name, ts.scopeKey.targetStamp)
+            }
+        }
+    }
+
+    /** Strict creation and attachment share one frozen Route; a concurrent edit cannot redirect it. */
+    suspend fun tmuxNew(source: TermSession, name: String): String? = withTmuxOpening(source) {
+        val epoch = sessions.nextTmuxChoice(source.host.id)
+        val route = routeForTmuxOpen(source) ?: return@withTmuxOpening null
+        val sourceState = source.tmuxState.value
+        val ended = !source.alive.value || sourceState.restoreMissing || sourceState.presence is TmuxPresence.Ended
+        var temporary: TermSession? = null
+        try {
+            val creator = if (!ended) source else sessions.tmuxMemoryMutex.withLock {
+                if (sessions.get(source.id) !== source || routeForTmuxOpen(source) == null) return@withTmuxOpening null
+                sessions.open(
+                    host = route.host.copy(persistence = SessionPersistence.NONE, loginCommand = "", forwardPorts = ""),
+                    jumpHost = route.jump, network = route.network, observeTmux = true,
+                    startupCommand = "sh -c 'while IFS= read -r moke_unused; do :; done'",
+                ).also { temporary = it; it.session.updateSize(80, 24, 0, 0) }
+            }
+            if (!awaitTmuxReady(creator)) {
+                source.tmuxState.update { it.copy(message = creator.tmuxState.value.message ?: str(R.string.tmux_control_unavailable)) }
+                return@withTmuxOpening null
+            }
+            val created = creator.tmuxCoordinator.create(name)
+            if (created == null) {
+                source.tmuxState.update { it.copy(message = creator.tmuxState.value.message) }
+                return@withTmuxOpening null
+            }
+            openTmuxTarget(source, route, created, epoch)?.id
+        } finally {
+            temporary?.let { sessions.close(it.id) }
+        }
+    }
+
+    private suspend fun awaitTmuxReady(ts: TermSession): Boolean {
+        val ready = kotlinx.coroutines.withTimeoutOrNull(180_000) {
+            combine(ts.dataReady, ts.alive, sessions.sessions) { up, alive, list ->
+                up || !alive || list.none { it === ts }
+            }.first { it }
+            ts.dataReady.value && ts.alive.value && sessions.get(ts.id) === ts
+        } == true
+        if (!ready) return false
+        for (wait in listOf(0L, 1_000L, 2_000L, 4_000L, 8_000L)) {
+            if (wait > 0) delay(wait)
+            if (sessions.get(ts.id) !== ts || !ts.alive.value) return false
+            val state = ts.tmuxCoordinator.refresh()
+            if (state.snapshot?.verified == true || state.currentBinding != null) return true
+            if (state.phase == TmuxPhase.NOT_INSTALLED || state.restoreMissing || state.targetChanged) return false
+        }
+        return false
+    }
+
+    suspend fun reconnectSession(source: TermSession): String {
+        val epoch = sessions.nextTmuxChoice(source.host.id)
+        return sessions.tmuxMemoryMutex.withLock {
+            val route = storedRouteOf(source.host.id)
+            val ok = route as? Route.Ok
+            if (ok != null && !routeMatches(source, ok)) return@withLock openSessionLocked(ok.host, epoch)
+            touchHost(source.host)
+            val intent = source.tmuxCoordinator.reconnectIntent()
+            val picker = intent == TmuxIntent.None && ok?.host?.persistence == SessionPersistence.TMUX
+            val host = ok?.host ?: source.host
+            val session = sessions.open(
+                host = if (picker) host.copy(loginCommand = "") else host,
+                jumpHost = ok?.jump, network = ok?.network,
+                refusal = route.refusalText(getApplication()),
+                tmuxIntent = intent, rememberEpoch = epoch, observeTmux = picker || intent != TmuxIntent.None,
+            ).also { it.recovery.value = route.recovery; it.setCustomTitle(source.customTitle.value) }
+            trackTmux(session)
+            ensureSessionService()
+            if (picker) { pickerSources += session.id; requestTmuxPickerWhenReady(session) }
+            session.id
+        }
+    }
+
+    /** Only update the timestamp, never overwrite an edited profile with a terminal's old snapshot. */
     fun touchHost(host: Host) = viewModelScope.launch {
         store.update(host.id) { it.copy(lastConnectedAt = System.currentTimeMillis()) }
     }
 
-    /**
-     * 新建会话并返回其 id（UI 据此导航到终端页），并记录最近连接。解析跳板机（避免自引用）。
-     *
-     * 会话持久化=tmux 时自适应两条路：
-     * - 已记住会话名 → 连接即按名附加（`new-session -A` 原子"存在则附加、否则创建"），零额外往返。
-     * - 还没记住 → 先开普通登录壳，连上后侧通道探测，再弹选择器。**不**在连接前另开一条探测连接：
-     *   那会多一次握手，还会让探测连接成为 TOFU 的首次信任（指纹静默入库）。
-     */
-    fun openSession(host: Host): String {
-        touchHost(host)
-        val remembered = host.tmuxSessionName
-            .takeIf { host.persistence == SessionPersistence.TMUX && it.isNotBlank() }
-        val route = routeOf(host.id)
+    suspend fun openSession(host: Host): String {
+        val epoch = sessions.nextTmuxChoice(host.id)
+        return sessions.tmuxMemoryMutex.withLock { openSessionLocked(host, epoch) }
+    }
+
+    private suspend fun openSessionLocked(host: Host, epoch: Long): String {
+        val route = storedRouteOf(host.id)
         val ok = route as? Route.Ok
+        val current = ok?.host ?: host
+        touchHost(current)
+        val intent = TmuxLaunchPolicy.remembered(route)
+        val picker = ok != null && current.persistence == SessionPersistence.TMUX && intent == TmuxIntent.None
         val ts = sessions.open(
-            host = ok?.host ?: host,
-            jumpHost = ok?.jump,
-            network = ok?.network,
-            refusal = route.refusalText(getApplication()),
-            remoteTmuxName = remembered,
-            startupCommand = remembered?.let { Tmux.attachOrCreateCommand(it) },
+            host = if (picker) current.copy(loginCommand = "") else current,
+            jumpHost = ok?.jump, network = ok?.network, refusal = route.refusalText(getApplication()),
+            tmuxIntent = intent,
+            rememberEpoch = epoch, observeTmux = picker,
         ).also { it.recovery.value = route.recovery }
+        trackTmux(ts)
         ensureSessionService()
-        if (remembered != null) {
-            confirmTmuxAttach(ts, remembered)
-        } else if (host.persistence == SessionPersistence.TMUX) {
-            requestTmuxPickerWhenReady(ts)
-        }
+        if (picker) { pickerSources += ts.id; requestTmuxPickerWhenReady(ts) }
         return ts.id
     }
 
-    /** 连接就绪后探测一次；确实装了 tmux 才弹选择器（未安装/失败都不打扰）。 */
+    /** TOFU and bootstrap finish before the bounded observation window begins. */
     private fun requestTmuxPickerWhenReady(ts: TermSession) = viewModelScope.launch {
-        refreshTmux(ts).join()
-        if (ts.alive.value && ts.tmuxState.value.phase == TmuxPhase.READY) {
-            _tmuxPicker.value = ts.id
+        if (awaitTmuxReady(ts) && sessions.get(ts.id) === ts && ts.tmuxState.value.currentBinding == null &&
+            ts.tmuxState.value.presence !is TmuxPresence.Ended && !ts.tmuxState.value.targetChanged) {
+            _tmuxPicker.update { it + ts.id }
         }
     }
 
-    /** 连接时待弹选择器的会话 id（null=不弹）。 */
-    private val _tmuxPicker = MutableStateFlow<String?>(null)
-    val tmuxPicker: StateFlow<String?> = _tmuxPicker.asStateFlow()
+    fun dismissTmuxPicker(id: String) { _tmuxPicker.update { it - id }; pickerSources -= id }
 
-    fun dismissTmuxPicker() { _tmuxPicker.value = null }
-
-    /**
-     * 从选择器选定一个会话名（已存在或新建都走同一条路——`new-session -A` 原子处理）。
-     * 用独立连接附加，并关掉刚才那条临时登录壳，避免一台主机上挂两条连接。
-     */
-    fun pickTmuxSession(sourceId: String, name: String): String? {
-        val source = sessions.get(sourceId) ?: return null
-        _tmuxPicker.value = null
-        val target = source.tmuxState.value.sessions.firstOrNull { it.name == name }
-            ?: TmuxSession(id = "", name = name, windows = 0, clients = 0, created = 0L)
-        val newId = openTmuxSession(source, target)
-        if (newId != sourceId) sessions.close(sourceId)
-        return newId
+    private fun finishTmuxPicker(source: TermSession, newId: String) {
+        _tmuxPicker.update { it - source.id }
+        val transient = pickerSources.remove(source.id)
+        if (transient && newId != source.id && source.tmuxState.value.currentBinding == null) closeSession(source.id)
     }
 
-    /** 复制会话：用同一主机再开一个独立连接，沿用来源的标题/前缀并加不重复标记。源不存在时返回 null。 */
-    fun duplicateSession(id: String): String? {
-        val src = sessions.get(id) ?: return null
-        touchHost(src.host)
-        val route = routeOf(src.host.id)
+    suspend fun pickTmuxSession(sourceId: String, target: TmuxSelection): String? {
+        val source = sessions.get(sourceId) ?: return null
+        val id = openTmuxSession(source, target) ?: return null
+        finishTmuxPicker(source, id)
+        return id
+    }
+
+    suspend fun createPickedTmuxSession(sourceId: String, name: String): String? {
+        val source = sessions.get(sourceId) ?: return null
+        val id = tmuxNew(source, name) ?: return null
+        finishTmuxPicker(source, id)
+        return id
+    }
+
+    suspend fun duplicateSession(id: String): String? = sessions.tmuxMemoryMutex.withLock {
+        val source = sessions.get(id) ?: return@withLock null
+        val route = storedRouteOf(source.host.id)
         val ok = route as? Route.Ok
-        val newId = sessions.open(
-            host = ok?.host ?: src.host,
-            jumpHost = ok?.jump,
-            network = ok?.network,
-            refusal = route.refusalText(getApplication()),
-            carryFrom = src,
-        ).also { it.recovery.value = route.recovery }.id
+        touchHost(source.host)
+        val ts = sessions.open(
+            host = ok?.host ?: source.host, jumpHost = ok?.jump, network = ok?.network,
+            refusal = route.refusalText(getApplication()), carryFrom = source.takeIf { routeMatches(it, route) },
+        ).also { it.recovery.value = route.recovery }
+        trackTmux(ts)
         ensureSessionService()
-        return newId
+        ts.id
     }
 
     /**
@@ -908,7 +968,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, MokeSessionService::class.java)) }
     }
 
-    fun closeSession(id: String) = sessions.close(id)
+    fun closeSession(id: String) {
+        dismissTmuxPicker(id)
+        tmuxTracking.remove(id)?.cancel()
+        sessions.close(id)
+    }
 
     /** 一次清掉列表里所有已结束的会话（保留活着的）。 */
     fun closeEndedSessions() {
@@ -1183,16 +1247,16 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
     init {
+        sessions.sessions.onEach { current ->
+            val ids = current.map { it.id }.toSet()
+            tmuxTracking.keys.filterNot { it in ids }.toList().forEach { tmuxTracking.remove(it)?.cancel() }
+            pickerSources.retainAll(ids)
+            _tmuxPicker.update { it.intersect(ids) }
+            current.forEach(::trackTmux)
+        }.launchIn(viewModelScope)
         repairLegacyTmuxLoginCommands()
         clearDanglingJumpsOnce()
         checkUpdateSilently()
     }
 
-    private companion object {
-        /**
-         * 附加确认的轮数（每轮间隔 1s）：要盖住"mosh 引导 + tmux 附加"的那几秒，又不至于让真的
-         * 没附上的会话长时间挂着错误标注。
-         */
-        const val ATTACH_CONFIRM_ROUNDS = 8
-    }
 }

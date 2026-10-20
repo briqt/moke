@@ -12,11 +12,13 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -134,6 +136,48 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val loginUrl by vm.loginUrl.collectAsState()
     val networkNotice by vm.networkNotice.collectAsState()
     val context = LocalContext.current
+    val sessionConnectFailed by rememberUpdatedState(stringResource(R.string.session_connect_failed))
+    val navigationVisit = remember(screen, homeTab) { Any() }
+    val activeNavigationVisit by rememberUpdatedState(navigationVisit)
+    var pendingConnections by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    suspend fun requestSession(key: String, source: Screen, open: suspend () -> String?): Boolean {
+        if (key in pendingConnections || screen !== source) return false
+        val sourceTab = homeTab
+        val sourceVisit = activeNavigationVisit
+        pendingConnections = pendingConnections + key
+        return try {
+            val id = open()?.takeIf { it.isNotBlank() } ?: return false
+            currentCoroutineContext().ensureActive()
+            // A completed connection may remain in the background; it must not steal navigation.
+            if (screen === source && activeNavigationVisit === sourceVisit && (source !is Screen.Home || homeTab == sourceTab)) {
+                screen = Screen.Terminal(id)
+            }
+            true
+        } finally {
+            pendingConnections = pendingConnections - key
+        }
+    }
+
+    fun launchSessionRequest(key: String, source: Screen, open: suspend () -> String?) {
+        if (key in pendingConnections || screen !== source) return
+        val sourceTab = homeTab
+        val sourceVisit = activeNavigationVisit
+        navigationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val opened = requestSession(key, source, open)
+                if (!opened && screen === source && activeNavigationVisit === sourceVisit && (source !is Screen.Home || homeTab == sourceTab)) {
+                    android.widget.Toast.makeText(context, sessionConnectFailed, android.widget.Toast.LENGTH_LONG).show()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (screen === source && activeNavigationVisit === sourceVisit && (source !is Screen.Home || homeTab == sourceTab)) {
+                    android.widget.Toast.makeText(context, sessionConnectFailed, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     fun returnTo(target: Screen) {
         if (target is Screen.Files) {
@@ -273,12 +317,12 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onOpenHostFiles = { openFiles(it, null) },
             onDuplicateHost = { vm.duplicate(it) },
             onDeleteHost = { vm.delete(it) },
-            onConnectHost = { host -> screen = Screen.Terminal(vm.openSession(host)) },
+            onConnectHost = { host -> launchSessionRequest("host:${host.id}", s) { vm.openSession(host) } },
             onReorderHosts = { vm.reorderHosts(it) },
             onOpenSession = { id -> screen = Screen.Terminal(id) },
             onCloseSession = { id -> vm.closeSession(id) },
             onCloseEndedSessions = { vm.closeEndedSessions() },
-            onDuplicateSession = { id -> vm.duplicateSession(id) },
+            onDuplicateSession = { id -> launchSessionRequest("duplicate:$id", s) { vm.duplicateSession(id) } },
             onReorderSessions = { vm.reorderSessions(it) },
             keyboardMode = keyboardMode,
             confirmClose = confirmClose,
@@ -294,6 +338,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             hostsState = hostsState,
             networkState = networksState,
             onRetryReads = vm::retryNetworkReads,
+            onEndTmux = { id, selection -> vm.sessions.get(id)?.let { vm.tmuxEndCurrent(it, selection) } ?: false },
+            onTmuxRefresh = { id -> vm.sessions.get(id)?.let { vm.refreshTmux(it) } },
             onRecover = { host, recovery ->
                 when (recovery.kind) {
                     RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> openNetworkRecovery(recovery, Screen.Home)
@@ -341,7 +387,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             val ts = vm.sessions.get(s.sessionId)
             if (ts == null) {
                 // 会话已被关闭 → 回主界面（会话分区）。
-                LaunchedEffect(s.sessionId) { screen = Screen.Home; homeTab = HomeTab.Sessions }
+                LaunchedEffect(s.sessionId, pendingConnections) {
+                    if (screen === s && "session:${s.sessionId}" !in pendingConnections) {
+                        screen = Screen.Home; homeTab = HomeTab.Sessions
+                    }
+                }
             } else {
                 // key(sessionId)：Terminal→Terminal 直接切会话时强制重建子树，
                 // 否则 AndroidView 只创建一次会残留旧 View（重连表现为「坏了」）。
@@ -354,14 +404,18 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onDispose { if (TerminalAlerts.visibleSessionId == s.sessionId) TerminalAlerts.visibleSessionId = null }
                     }
                     val reconnect = {
-                        vm.retryNetworkReads()
-                        val newId = vm.reconnectSession(ts)
-                        vm.closeSession(ts.id)
-                        screen = Screen.Terminal(newId)
+                        launchSessionRequest("session:${ts.id}", s) {
+                            vm.retryNetworkReads()
+                            val newId = vm.reconnectSession(ts)
+                            if (newId.isNotBlank() && newId != ts.id) vm.closeSession(ts.id)
+                            newId
+                        }
                     }
                     val editFailedHost = {
-                        vm.closeSession(ts.id)
-                        editHost(ts.host)
+                        if (screen === s) {
+                            vm.closeSession(ts.id)
+                            editHost(ts.host)
+                        }
                     }
                     TerminalScreen(
                         ts = ts,
@@ -384,7 +438,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onReconnect = reconnect,
                         onClose = {
                             vm.closeSession(ts.id)
-                            screen = Screen.Home; homeTab = HomeTab.Sessions
+                            if (screen === s) { screen = Screen.Home; homeTab = HomeTab.Sessions }
                         },
                         // 连接失败 → 改配置：失败的会话只有一行报错，关掉它，编辑的是主机的**最新**配置
                         // （ts.host 是打开那一刻的快照）。
@@ -401,28 +455,40 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onKeyboardMode = { vm.setKeyboardMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
                         onTmuxRefresh = { vm.refreshTmux(ts) },
-                        onTmuxNew = { vm.tmuxNew(ts, it) },
-                        onTmuxRename = { id, name -> vm.tmuxRename(ts, id, name) },
+                        onTmuxNew = { name -> requestSession("session:${ts.id}", s) { vm.tmuxNew(ts, name) } },
+                        onTmuxRename = { selection, name -> vm.tmuxRename(ts, selection, name) },
                         onTmuxDetach = { vm.tmuxDetach(ts, it) },
                         onTmuxKill = { vm.tmuxKill(ts, it) },
-                        onTmuxAttach = { target ->
-                            screen = Screen.Terminal(vm.openTmuxSession(ts, target))
+                        onEndTmux = { vm.tmuxEndCurrent(ts, it) },
+                        onTmuxAttach = { selection ->
+                            requestSession("session:${ts.id}", s) { vm.openTmuxSession(ts, selection) }
                         },
-                        onTmuxTakeOver = { target ->
-                            screen = Screen.Terminal(vm.openTmuxSession(ts, target, detachOthers = true))
+                        onTmuxTakeOver = { selection ->
+                            requestSession("session:${ts.id}", s) { vm.openTmuxSession(ts, selection, detachOthers = true) }
                         },
                         onOpenFiles = { openFiles(ts.host, ts.id) },
                     )
                     // 连接即选会话：主机「会话持久化=tmux」且还没记住选择时，连上后弹一次。
-                    if (tmuxPickerFor == ts.id) {
+                    if (ts.id in tmuxPickerFor) {
                         val tmuxState by ts.tmuxState.collectAsState()
+                        val viaJump = ts.jumpHost?.let { stringResource(R.string.tmux_via_jump, it.displayName) }.orEmpty()
                         TmuxPickerDialog(
-                            sessions = tmuxState.sessions,
+                            state = tmuxState,
+                            targetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, viaJump),
                             defaultName = Tmux.defaultSessionName(ts.host.displayName),
-                            onPick = { name ->
-                                vm.pickTmuxSession(ts.id, name)?.let { screen = Screen.Terminal(it) }
+                            onPick = { selection ->
+                                requestSession("session:${ts.id}", s) {
+                                    vm.pickTmuxSession(ts.id, selection)?.takeIf { it.isNotBlank() }
+                                        ?.also { vm.dismissTmuxPicker(ts.id) }
+                                }
                             },
-                            onPlainShell = { vm.dismissTmuxPicker() },
+                            onNew = { name ->
+                                requestSession("session:${ts.id}", s) {
+                                    vm.createPickedTmuxSession(ts.id, name)?.takeIf { it.isNotBlank() }
+                                        ?.also { vm.dismissTmuxPicker(ts.id) }
+                                }
+                            },
+                            onPlainShell = { vm.dismissTmuxPicker(ts.id) },
                         )
                     }
                 }

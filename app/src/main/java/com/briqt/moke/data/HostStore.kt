@@ -54,12 +54,17 @@ internal fun decodeHosts(raw: String?, decrypt: (String) -> String): DecodedHost
 
 /** 主机列表持久化（DataStore Preferences，单个 JSON 字符串键；凭据经 Keystore 加密）。 */
 @OptIn(ExperimentalCoroutinesApi::class)
-class HostStore(private val context: Context) {
+class HostStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    private val encrypt: (String) -> String,
+    private val decrypt: (String) -> String,
+) {
+    constructor(context: Context) : this(context.dataStore, CredentialCrypto::encrypt, CredentialCrypto::decrypt)
 
     private val key = stringPreferencesKey("hosts_json")
     private val reads = MutableStateFlow(0)
     private val decoded: Flow<DecodedHosts> = reads.flatMapLatest {
-        context.dataStore.data.map { prefs -> decode(prefs[key]) }
+        dataStore.data.map { prefs -> decode(prefs[key]) }
             .catch { emit(DecodedHosts("[]", true)) }
     }.flowOn(Dispatchers.IO)
 
@@ -82,7 +87,7 @@ class HostStore(private val context: Context) {
         if (d.unreadable) ListState.Unreadable else ListState.Ready(parse(d.json))
     }
 
-    private fun decode(raw: String?): DecodedHosts = decodeHosts(raw, CredentialCrypto::decrypt)
+    private fun decode(raw: String?): DecodedHosts = decodeHosts(raw, decrypt)
 
     /**
      * 写回主机列表。两条硬规则：
@@ -95,7 +100,7 @@ class HostStore(private val context: Context) {
     suspend fun save(list: List<Host>): Boolean = withContext(Dispatchers.IO) {
         val encrypted = encode(list) ?: return@withContext false
         var written = false
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             // 在同一个事务里重新判定，避免「读到空 → 用户操作 → 写空」这条竞态。
             if (decode(prefs[key]).unreadable) return@edit
             prefs[key] = encrypted
@@ -110,7 +115,7 @@ class HostStore(private val context: Context) {
     suspend fun commit(host: Host, editing: Boolean): StoreResult<Host> = withContext(Dispatchers.IO) {
         try {
             var result: StoreResult<Host> = StoreResult.Failed(StoreFailure.UNREADABLE)
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 val current = decode(prefs[key])
                 if (current.unreadable) return@edit
                 when (val prepared = prepareHostEdit(parse(current.json), host, editing)) {
@@ -122,6 +127,71 @@ class HostStore(private val context: Context) {
                             result = StoreResult.Saved(prepared.value.saved)
                         }
                     }
+                }
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
+        }
+    }
+
+    /** Remember a verified selection only while the captured connection still targets this record. */
+    suspend fun rememberTmux(host: Host, name: String, stamp: String): StoreResult<Unit> = withContext(Dispatchers.IO) {
+        try {
+            var result: StoreResult<Unit> = StoreResult.Failed(StoreFailure.UNREADABLE)
+            dataStore.edit { prefs ->
+                val decoded = decode(prefs[key])
+                if (decoded.unreadable) return@edit
+                val current = parse(decoded.json)
+                val old = current.firstOrNull { it.id == host.id }
+                if (old == null) { result = StoreResult.Failed(StoreFailure.MISSING); return@edit }
+                if (!sameTmuxTarget(old, host) || old.persistence != SessionPersistence.TMUX || host.persistence != SessionPersistence.TMUX) {
+                    result = StoreResult.Failed(StoreFailure.CONFLICT)
+                    return@edit
+                }
+                if (name.isEmpty() || stamp.isBlank()) { result = StoreResult.Failed(StoreFailure.INVALID); return@edit }
+                val saved = old.copy(tmuxSessionName = name, tmuxTargetStamp = stamp)
+                val encrypted = encode(current.map { if (it.id == saved.id) saved else it })
+                if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
+                    prefs[key] = encrypted
+                    result = StoreResult.Saved(Unit)
+                }
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
+        }
+    }
+
+    /** Clear memory only for routes whose current first hop actually uses this network. */
+    suspend fun clearTmuxMemoryForNetwork(networkId: String): StoreResult<Unit> = withContext(Dispatchers.IO) {
+        if (networkId.isBlank()) return@withContext StoreResult.Failed(StoreFailure.INVALID)
+        try {
+            var result: StoreResult<Unit> = StoreResult.Failed(StoreFailure.UNREADABLE)
+            dataStore.edit { prefs ->
+                val decoded = decode(prefs[key])
+                if (decoded.unreadable) return@edit
+                val current = parse(decoded.json)
+                val byId = current.associateBy { it.id }
+                var changed = false
+                val next = current.map { host ->
+                    val firstHop = if (host.jumpHostId.isBlank()) host else {
+                        byId[host.jumpHostId]?.takeIf { it.id != host.id && it.jumpHostId.isBlank() }
+                    }
+                    if (firstHop?.networkId == networkId && (host.tmuxSessionName.isNotEmpty() || host.tmuxTargetStamp.isNotEmpty())) {
+                        changed = true
+                        host.copy(tmuxSessionName = "", tmuxTargetStamp = "")
+                    } else host
+                }
+                if (!changed) { result = StoreResult.Saved(Unit); return@edit }
+                val encrypted = encode(next)
+                if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
+                    prefs[key] = encrypted
+                    result = StoreResult.Saved(Unit)
                 }
             }
             result
@@ -148,7 +218,7 @@ class HostStore(private val context: Context) {
      */
     suspend fun update(id: String, transform: (Host) -> Host): Boolean = withContext(Dispatchers.IO) {
         var written = false
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = decode(prefs[key])
             if (current.unreadable) return@edit
             val next = updateHostIn(parse(current.json), id, transform) ?: return@edit
@@ -164,7 +234,7 @@ class HostStore(private val context: Context) {
      */
     suspend fun updateAll(transform: (List<Host>) -> List<Host>?): Boolean = withContext(Dispatchers.IO) {
         var ok = false
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = decode(prefs[key])
             if (current.unreadable) return@edit
             val next = transform(parse(current.json))
@@ -180,7 +250,7 @@ class HostStore(private val context: Context) {
     suspend fun remove(id: String): StoreResult<Unit> = withContext(Dispatchers.IO) {
         try {
             var result: StoreResult<Unit> = StoreResult.Failed(StoreFailure.UNREADABLE)
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 val decoded = decode(prefs[key])
                 if (decoded.unreadable) return@edit
                 val current = parse(decoded.json)
@@ -208,7 +278,7 @@ class HostStore(private val context: Context) {
     private fun encode(list: List<Host>): String? {
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }
-        return runCatching { CredentialCrypto.encrypt(arr.toString()) }.getOrNull()
+        return runCatching { encrypt(arr.toString()) }.getOrNull()
     }
 }
 

@@ -41,17 +41,25 @@ internal fun proxyConnectionChanged(a: NetworkEntry, b: NetworkEntry): Boolean =
     a.proxyType != b.proxyType || a.proxyHost != b.proxyHost || a.proxyPort != b.proxyPort ||
         a.username != b.username || a.password != b.password || a.extraCaPem != b.extraCaPem
 
+/** Fields captured by a connection that must still match before it may remember a tmux session. */
+internal fun sameTmuxTarget(a: Host, b: Host): Boolean =
+    a.id == b.id && a.host == b.host && a.port == b.port && a.username == b.username &&
+        a.jumpHostId == b.jumpHostId && (a.jumpHostId.isNotBlank() || a.networkId == b.networkId)
+
 internal fun prepareHostEdit(current: List<Host>, entry: Host, editing: Boolean): StoreResult<ListEdit<Host>> {
     val old = current.firstOrNull { it.id == entry.id }
     if (editing && old == null) return StoreResult.Failed(StoreFailure.MISSING)
     if (!editing && old != null) return StoreResult.Failed(StoreFailure.CONFLICT)
+    val memory = when {
+        entry.persistence != SessionPersistence.TMUX -> null
+        old == null -> entry
+        old.persistence == SessionPersistence.TMUX && sameTmuxTarget(old, entry) -> old
+        else -> null
+    }
     val saved = entry.copy(
         lastConnectedAt = old?.lastConnectedAt ?: entry.lastConnectedAt,
-        tmuxSessionName = when {
-            entry.persistence != SessionPersistence.TMUX -> ""
-            old != null -> old.tmuxSessionName
-            else -> entry.tmuxSessionName
-        },
+        tmuxSessionName = memory?.tmuxSessionName.orEmpty(),
+        tmuxTargetStamp = memory?.tmuxTargetStamp.orEmpty(),
     )
     return StoreResult.Saved(ListEdit(if (old == null) current + saved else current.map { if (it.id == saved.id) saved else it }, saved))
 }

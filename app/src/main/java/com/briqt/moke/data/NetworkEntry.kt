@@ -18,6 +18,7 @@ enum class ProxyType {
  * 它只在首次注册时在内存里用一次，节点状态由 netbridge 经加密的状态存储保存。
  *
  * [revision]：代理配置每次改动加一，运行时据此让新连接用新实例、旧连接留在旧实例上。
+ * tailnet 显式切换身份时也递增，用于持久化的 tmux 目标身份；不改变 tailnet 运行时实例 id。
  */
 data class NetworkEntry(
     val id: String = UUID.randomUUID().toString(),

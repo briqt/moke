@@ -7,11 +7,11 @@ enum class AuthType { PASSWORD, KEY }
 
 /**
  * 会话持久化：连接这台主机时是否自动接入多路复用器。
- * [NONE] 与历史行为一致（普通登录壳）；[TMUX] 连接即进 tmux（存在则附加、不存在则创建）。
+ * [NONE] 使用普通登录壳；[TMUX] 选择或恢复已存在的会话，新建必须由用户明确发起。
  */
 enum class SessionPersistence { NONE, TMUX }
 
-/** 连接主机配置。v0.1 持久化在 DataStore（明文 JSON），后续再上安全存储。 */
+/** 连接主机配置，由 HostStore 加密后持久化到 DataStore。 */
 data class Host(
     val id: String = UUID.randomUUID().toString(),
     val label: String = "",
@@ -44,11 +44,13 @@ data class Host(
     val persistence: SessionPersistence = SessionPersistence.NONE,
     /**
      * 上次在这台主机选择的 tmux 会话名（空=还没选过）。
-     * [SessionPersistence.TMUX] 下：非空则连接时直接按名附加；空则先开普通壳并弹选择器。
+     * [SessionPersistence.TMUX] 下仅在目标校验匹配时按名附加；旧记录或目标变化需重新选择。
      */
     val tmuxSessionName: String = "",
     /** 连接后自动转发的远端端口（用户原文，如 "5173, 8080"；解析见 `PortForwards.parsePorts`）。 */
     val forwardPorts: String = "",
+    /** Route identity paired with [tmuxSessionName]; empty legacy stamps are never trusted implicitly. */
+    val tmuxTargetStamp: String = "",
 ) {
     /**
      * 展示名：连接名优先，否则 `user@host`。
@@ -66,7 +68,7 @@ data class Host(
 
     /**
      * 本次连接实际要用的协议级启动命令（空=默认 login shell）。
-     * 会话持久化=tmux 时这个位置由 tmux 附加命令占用（见 `Tmux.attachOrCreateCommand`），
+     * 会话持久化=tmux 时这个位置由运行态附加意图占用，
      * 用户设的启动命令让位——否则要么覆盖掉 tmux、要么两条命令抢同一个 exec 通道。
      */
     val effectiveStartupCommand: String
@@ -107,6 +109,7 @@ data class Host(
         put("lastConnectedAt", lastConnectedAt)
         put("persistence", persistence.name)
         put("tmuxSessionName", tmuxSessionName)
+        put("tmuxTargetStamp", tmuxTargetStamp)
         put("forwardPorts", forwardPorts)
     }
 
@@ -133,6 +136,7 @@ data class Host(
                 SessionPersistence.valueOf(o.optString("persistence", "NONE"))
             }.getOrDefault(SessionPersistence.NONE),
             tmuxSessionName = o.optString("tmuxSessionName", ""),
+            tmuxTargetStamp = o.optString("tmuxTargetStamp", ""),
             forwardPorts = o.optString("forwardPorts", ""),
         )
     }

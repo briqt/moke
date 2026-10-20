@@ -38,7 +38,23 @@ class SshTransport(
      * 直接执行，不启动 shell/模拟键入。为 null 时才轮到主机自己配置的启动命令。
      */
     private val startupCommand: String? = null,
-) : TerminalTransport, ForwardCapable {
+    private val observerNonce: String? = null,
+    private val tmuxScripts: TmuxScripts? = null,
+    /** Only the explicit tmux picker/create path may observe a default login shell. */
+    private val observeDefaultShell: Boolean = false,
+) : TerminalTransport, ForwardCapable, TmuxConnection {
+
+    @Volatile override var tmuxNonce: String? = null
+        private set
+    override val tmuxOwnerRequired: Boolean = false
+
+    override fun execTmuxOperation(command: String): String? {
+        if (closed) return null
+        // Ownership deliberately does not enter resources: data EOF/close must not lose this ACK.
+        return runCatching {
+            execTmuxOwned(SshConnector(appContext), host, jumpHost, network, command)
+        }.getOrNull()
+    }
 
     /** 本次真正要 exec 的命令；null=启动远端默认 login shell。 */
     private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
@@ -101,18 +117,28 @@ class SshTransport(
                     feed(session, appContext.localized(R.string.net_via, network.name) + "\r\n")
                 }
                 // 全程 SSH 层心跳，避免空闲被中间设备/服务器断开。
+                var selectedStartup = TmuxStartup(effectiveStartup)
                 withSshChannel(
                     resources,
                     connect = { connector.connect(host, jumpHost, network, heartbeat = true).also { connected = it } },
                     disconnect = { it.close() },
                     startSession = { conn ->
                         runCatching { conn.client.connection.keepAlive.keepAliveInterval = 30 }
+                        selectedStartup = sshTmuxStartup(
+                            startupCommand, effectiveStartup, observerNonce, tmuxScripts,
+                            observeDefaultShell = observeDefaultShell,
+                        ) { supportsTmuxObserver(conn.client) }
                         conn.client.startSession()
                     },
                     closeSession = { it.close() },
                     allocatePty = { it.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap()) },
-                    // 保持协议级 exec + PTY；不经 shell 注入，也不加 POSIX 包装（兼容 Windows OpenSSH）。
-                    openChannel = { if (effectiveStartup == null) it.startShell() else it.exec(effectiveStartup) },
+                    // Only an explicitly requested, supported tmux carrier is wrapped; preserve startShell otherwise.
+                    openChannel = { s ->
+                        val command = selectedStartup.command
+                        (if (command == null) s.startShell() else s.exec(command)).also {
+                            tmuxNonce = selectedStartup.nonce
+                        }
+                    },
                     beforeSessionClose = { it.abortSockets() },
                 ) { conn, s, channel ->
                     val client = conn.client
@@ -248,20 +274,7 @@ class SshTransport(
     override fun exec(command: String): String? {
         val client = ssh ?: return null
         if (closed) return null
-        return runCatching {
-            client.startSession().use { s ->
-                val cmd = s.exec(command)
-                // 先等远端命令结束；超时后主动关通道并返回失败。旧实现先 readBytes 再 join，
-                // 命令若不结束会永久卡在读取处，所谓 10 秒超时实际上永远走不到。
-                cmd.join(10, java.util.concurrent.TimeUnit.SECONDS)
-                if (cmd.isOpen) {
-                    runCatching { cmd.close() }
-                    null
-                } else {
-                    cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
-                }
-            }
-        }.getOrNull()
+        return runCatching { execTmuxChannel(client, command) }.getOrNull()
     }
 
     private fun stopAuxiliaryWork() {

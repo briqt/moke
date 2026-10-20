@@ -71,6 +71,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,9 +84,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ScrollMode
+import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.terminal.KeyId
@@ -95,8 +100,7 @@ import com.briqt.moke.terminal.Modifiers
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
-import com.briqt.moke.terminal.TmuxPhase
-import com.briqt.moke.terminal.TmuxSession
+import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
@@ -104,6 +108,7 @@ import com.termux.view.TerminalView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -136,12 +141,13 @@ fun TerminalScreen(
     onToggleExtraKeys: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: suspend (String) -> Boolean,
-    onTmuxRename: suspend (String, String) -> Boolean,
-    onTmuxDetach: (String) -> Unit,
-    onTmuxKill: (String) -> Unit,
-    onTmuxAttach: (TmuxSession) -> Unit,
-    onTmuxTakeOver: (TmuxSession) -> Unit,
+    onTmuxRename: suspend (TmuxSelection, String) -> Boolean,
+    onTmuxDetach: suspend (TmuxSelection) -> Boolean,
+    onTmuxKill: suspend (TmuxSelection) -> Boolean,
+    onTmuxAttach: suspend (TmuxSelection) -> Boolean,
+    onTmuxTakeOver: suspend (TmuxSelection) -> Boolean,
     onOpenFiles: () -> Unit,
+    onEndTmux: suspend (TmuxSelection) -> Boolean = { false },
     onRecover: (NetworkRecovery) -> Unit = { recovery ->
         when (recovery.kind) {
             RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> recovery.network?.let(onLoginNetwork)
@@ -161,44 +167,45 @@ fun TerminalScreen(
     val recovery by ts.recovery.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
-    val remoteTmuxName by ts.remoteTmuxName.collectAsState()
-    // 只有侧通道确认过"确实附加上了"才敢说「已离开 tmux」；tmux 缺失/启动失败会回落普通 shell，
-    // 那种情况必须说清没附上，否则 UI 在撒谎。
-    val tmuxAttached by ts.tmuxAttached.collectAsState()
+    val observeCurrent = observesCurrentTmux(ts.host.useMosh, ts.host.persistence == SessionPersistence.TMUX, ts.tmuxIntent)
+    val endNotice = terminalEndNotice(tmuxState, alive, connectFailed)
     val tmuxRoute = if (ts.jumpHost != null) {
         stringResource(R.string.tmux_via_jump, ts.jumpHost.displayName)
     } else {
         ""
     }
-    val tmuxTargetLabel = buildString {
-        append(ts.host.protocol)
-        append(" · ")
-        if (ts.host.username.isNotBlank()) {
-            append(ts.host.username)
-            append('@')
-        }
-        append(ts.host.host)
-        if (ts.host.port != 22) {
-            append(':')
-            append(ts.host.port)
-        }
-        if (tmuxRoute.isNotEmpty()) {
-            append(" · ")
-            append(tmuxRoute)
-        }
-    }
+    val tmuxTargetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, tmuxRoute)
     var showTmux by remember(ts.id) { mutableStateOf(false) }
+    fun revealTerminalAfterTmuxAction(success: Boolean): Boolean {
+        val current = ts.tmuxState.value
+        if (shouldRevealTerminalAfterTmuxAction(success, current)) showTmux = false
+        return success
+    }
     var showForwards by remember(ts.id) { mutableStateOf(false) }
     val forwardEntries by (ts.forwards?.entries ?: NO_FORWARDS).collectAsState()
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
-    var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
-    // 进入会话后探测远端 tmux；SSH 复用现有连接，mosh 走独立 SSH 控制连接。
-    // 已有确定结论（装了 / 没装）就不再重探：从文件页返回、来回切会话都会重跑这个 effect，
-    // 而 mosh 上一次探测就是一次完整 SSH 登录。列表在打开面板与每次管理动作后仍会实时刷新。
-    LaunchedEffect(ts.id) {
-        val phase = ts.tmuxState.value.phase
-        if (phase == TmuxPhase.IDLE || phase == TmuxPhase.ERROR) onTmuxRefresh()
+    var closeTarget by remember(ts.id) { mutableStateOf<SessionCloseTarget?>(null) }
+    var showNewTmux by remember(ts.id) { mutableStateOf(false) }
+    fun requestClose() {
+        keyboard?.hide()
+        if (requiresSessionCloseChoice(tmuxState, confirmClose, observeCurrent)) {
+            closeTarget = freezeSessionCloseTarget(tmuxState, title, tmuxTargetLabel, observeCurrent)
+        } else onClose()
+    }
+    // Plain SSH (including non-POSIX hosts) is not auto-probed. Explicit tmux requests/panels
+    // observe only while visible; stopping the UI loop never closes a terminal or its network.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val refreshTmux by rememberUpdatedState(onTmuxRefresh)
+    val pollTmux = shouldPollTmux(observeCurrent, showTmux, closeTarget)
+    LaunchedEffect(ts.id, lifecycleOwner, pollTmux) {
+        if (!pollTmux) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                refreshTmux()
+                delay(5_000)
+            }
+        }
     }
     // 修饰键三态（一次性/锁定/关）：附加键与面板共用一份状态，并同步给 controller 供 IME 输入使用。
     var mods by remember(ts.id) { mutableStateOf(Modifiers()) }
@@ -347,17 +354,15 @@ fun TerminalScreen(
                 title = title,
                 useMosh = ts.host.useMosh,
                 alive = alive,
-                tmuxDetached = remoteTmuxName != null && tmuxAttached == true,
                 latencyMs = latency,
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 keyboardMode = keyboardMode,
-                tmuxAvailable = tmuxState.phase != TmuxPhase.IDLE &&
-                    tmuxState.phase != TmuxPhase.NOT_INSTALLED,
                 tmuxCount = tmuxState.sessions.size,
                 onOpenTmux = {
-                    if (!tmuxState.busy) onTmuxRefresh()
+                    keyboard?.hide()
+                    onTmuxRefresh()
                     showTmux = true
                 },
                 forwardCount = forwardEntries.size,
@@ -369,7 +374,7 @@ fun TerminalScreen(
                 onOpenFiles = { keyboard?.hide(); onOpenFiles() },
                 onShowKeyboard = { controller.showKeyboard() },
                 // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
-                onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
+                onClose = { requestClose() },
                 onBack = { keyboard?.hide(); onBack() },
             )
         },
@@ -454,15 +459,16 @@ fun TerminalScreen(
                 }
             }
 
-            if (!alive) {
+            if (endNotice != null) {
                 Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp)) {
                         Text(
-                            stringResource(when {
-                                connectFailed -> R.string.session_connect_failed
-                                remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
-                                remoteTmuxName == null && tmuxAttached == false -> R.string.tmux_attach_unconfirmed
-                                else -> R.string.session_ended
+                            stringResource(when (endNotice) {
+                                TerminalEndNotice.REMOTE_ENDED -> R.string.tmux_remote_ended
+                                TerminalEndNotice.TARGET_CHANGED -> R.string.tmux_target_changed
+                                TerminalEndNotice.LEFT_TMUX -> R.string.tmux_left
+                                TerminalEndNotice.CONNECTION_FAILED -> R.string.session_connect_failed
+                                TerminalEndNotice.CONNECTION_ENDED -> R.string.session_ended
                             }),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -472,17 +478,28 @@ fun TerminalScreen(
                         ) {
                             val action = recovery ?: loginNetwork?.let { NetworkRecovery(RecoveryKind.LOGIN_NETWORK, it) }
                                 ?: if (connectFailed) NetworkRecovery(RecoveryKind.EDIT_HOST) else null
-                            // Retry already has the reconnect action below; never render a duplicate button.
-                            if (connectFailed && action != null && action.kind != RecoveryKind.RETRY) {
-                                TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action.kind))) }
+                            if (endNotice == TerminalEndNotice.TARGET_CHANGED) {
+                                TextButton(onClick = onEditHost) { Text(stringResource(R.string.action_edit_host)) }
+                                TextButton(onClick = { keyboard?.hide(); onTmuxRefresh(); showTmux = true }) {
+                                    Text(stringResource(R.string.tmux_select_session))
+                                }
+                            } else if (endNotice == TerminalEndNotice.REMOTE_ENDED) {
+                                TextButton(onClick = { showNewTmux = true }, enabled = canCreateTmuxFromEndNotice(tmuxState)) {
+                                    Text(stringResource(R.string.tmux_new))
+                                }
+                            } else if (canReconnectFromNotice(endNotice)) {
+                                // Unknown connection loss is reconnectable, but is not proof of recovered work.
+                                if (connectFailed && action != null && action.kind != RecoveryKind.RETRY) {
+                                    TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action.kind))) }
+                                }
+                                TextButton(onClick = onReconnect) {
+                                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                                    Text(stringResource(R.string.reconnect), modifier = Modifier.padding(start = 8.dp))
+                                }
                             }
-                            TextButton(onClick = onReconnect) {
-                                Icon(Icons.Filled.Refresh, contentDescription = null)
-                                Text("  " + stringResource(R.string.reconnect))
-                            }
-                            TextButton(onClick = onClose) {
+                            TextButton(onClick = { requestClose() }) {
                                 Icon(Icons.Filled.Close, contentDescription = null)
-                                Text("  " + stringResource(R.string.action_close))
+                                Text(stringResource(R.string.action_close), modifier = Modifier.padding(start = 8.dp))
                             }
                         }
                     }
@@ -546,18 +563,24 @@ fun TerminalScreen(
         )
     }
 
-    if (showCloseConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.close_connection),
-            message = if (remoteTmuxName != null) {
-                stringResource(R.string.close_tmux_connection_confirm, title)
-            } else {
-                stringResource(R.string.close_connection_confirm, title)
-            },
-            confirmLabel = stringResource(R.string.action_close),
-            destructive = true,
-            onConfirm = { showCloseConfirm = false; onClose() },
-            onDismiss = { showCloseConfirm = false },
+    closeTarget?.let { target ->
+        SessionCloseDialog(
+            target = target,
+            state = sessionClosePresentationState(tmuxState, target, observeCurrent),
+            onDisconnect = { closeTarget = null; onClose() },
+            onEnd = onEndTmux,
+            onDismiss = { closeTarget = null },
+            onRefresh = onTmuxRefresh,
+        )
+    }
+    if (showNewTmux) {
+        TmuxNameDialog(
+            initial = "",
+            state = tmuxState,
+            onDismiss = { showNewTmux = false },
+            onSubmit = onTmuxNew,
+            onSuccess = { showNewTmux = false },
+            fromEndNotice = true,
         )
     }
 
@@ -575,16 +598,15 @@ fun TerminalScreen(
     if (showTmux) {
         TmuxPanel(
             state = tmuxState,
-            currentTmuxName = remoteTmuxName,
             targetLabel = tmuxTargetLabel,
             onDismiss = { showTmux = false },
             onRefresh = onTmuxRefresh,
             onAttach = onTmuxAttach,
             onTakeOver = onTmuxTakeOver,
-            onRename = { s, name -> onTmuxRename(s.id, name) },
-            onDetach = { onTmuxDetach(it.id) },
-            onKill = { onTmuxKill(it.id) },
-            onNew = { onTmuxNew(it) },
+            onRename = onTmuxRename,
+            onDetach = { revealTerminalAfterTmuxAction(onTmuxDetach(it)) },
+            onKill = { revealTerminalAfterTmuxAction(onTmuxKill(it)) },
+            onNew = onTmuxNew,
         )
     }
 }
@@ -677,13 +699,11 @@ private fun TerminalTopBar(
     title: String,
     useMosh: Boolean,
     alive: Boolean,
-    tmuxDetached: Boolean = false,
     latencyMs: Int?,
     showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
     keyboardMode: KeyboardMode,
-    tmuxAvailable: Boolean,
     tmuxCount: Int,
     onOpenTmux: () -> Unit,
     forwardCount: Int,
@@ -726,9 +746,7 @@ private fun TerminalTopBar(
                 Box(Modifier.padding(start = 6.dp)) { ProtocolBadge(useMosh) }
                 when {
                     !alive -> Text(
-                        "· " + stringResource(
-                            if (tmuxDetached) R.string.tmux_left_short else R.string.offline,
-                        ),
+                        "· " + stringResource(R.string.offline),
                         fontFamily = MokeMono,
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -770,24 +788,20 @@ private fun TerminalTopBar(
                     }
                 }
             }
-            // tmux 入口（⋮ 左侧）：远端**装了 tmux 就常驻**（零会话也能从面板新建），没装则完全不出现。
-            // 角标只在有会话时显示会话数，避免挂一个「0」在那里。
-            if (tmuxAvailable) {
-                IconButton(onClick = onOpenTmux) {
-                    // 角标是"远端有几个 tmux 会话"这条信息，不是告警：Material 默认的 error 红
-                    // 看着像未读消息/出错了，用次要容器色表达"可点进去看"。
-                    BadgedBox(
-                        badge = {
-                            if (tmuxCount > 0) {
-                                Badge(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                ) { Text(tmuxCount.toString()) }
-                            }
-                        },
-                    ) {
-                        Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
-                    }
+            // Keep discovery/retry discoverable even when tmux is missing or not yet checked.
+            // The badge is a list count, never proof of this terminal's current identity.
+            IconButton(onClick = onOpenTmux) {
+                BadgedBox(
+                    badge = {
+                        if (tmuxCount > 0) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ) { Text(tmuxCount.toString()) }
+                        }
+                    },
+                ) {
+                    Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
                 }
             }
             // 右上角折叠菜单：底部快捷键显隐 · 字号 ±0.5 · 恢复默认字号。
@@ -879,7 +893,7 @@ private fun TerminalTopBar(
                         onClick = { menuOpen = false; onToggleExtraKeys() },
                     )
                     HorizontalDivider()
-                    // 关闭连接：结束会话并返回。
+                    // The shared close layer separates disconnecting from ending the verified remote session.
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.close_connection), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp)) },

@@ -30,7 +30,22 @@ data class TmuxUiState(
     val sessions: List<TmuxSession> = emptyList(),
     val busy: Boolean = false,
     val message: String? = null,
-)
+    val snapshot: TmuxSnapshot? = null,
+    val presence: TmuxPresence = TmuxPresence.Pending,
+    val lastBinding: TmuxBinding? = null,
+    val restoreMissing: Boolean = false,
+    val targetChanged: Boolean = false,
+    val canStartNewConnection: Boolean = false,
+) {
+    val currentBinding: TmuxBinding? get() = (presence as? TmuxPresence.Attached)?.binding
+    /** Losing the original target does not discard a witnessed list on a still-live source. */
+    val canManage: Boolean get() = !busy && phase == TmuxPhase.READY &&
+        snapshot?.verified == true && snapshot.observation.server?.witnessed == true &&
+        (presence !is TmuxPresence.Ended || presence.remoteEnded)
+    val canCreate: Boolean get() = !busy && !targetChanged && !restoreMissing && phase == TmuxPhase.READY &&
+        snapshot?.verified == true && snapshot.observation.kind in setOf(TmuxProbeKind.READY, TmuxProbeKind.NO_SERVER) &&
+        presence !is TmuxPresence.Ended
+}
 
 sealed interface TmuxDiscovery {
     data object NotInstalled : TmuxDiscovery

@@ -38,7 +38,7 @@
     <string name="tmux_take_over">Take over</string>
     <string name="tmux_rename">Rename</string>
     <string name="tmux_detach">Detach all clients</string>
-    <string name="tmux_kill">Kill</string>
+    <string name="tmux_kill">End session</string>
     <plurals name="tmux_windows">
         <item quantity="one">%1$d window</item>
         <item quantity="other">%1$d windows</item>
@@ -47,17 +47,17 @@
         <item quantity="one">%1$d client</item>
         <item quantity="other">%1$d clients</item>
     </plurals>
-    <string name="tmux_current">current</string>
+    <string name="tmux_current">Current</string>
     <string name="tmux_empty">No tmux sessions</string>
     <string name="tmux_name_hint">Session name</string>
     <string name="tmux_refresh">Refresh tmux sessions</string>
     <string name="tmux_retry">Retry</string>
     <string name="tmux_checking">Checking tmux…</string>
     <string name="tmux_not_installed">tmux is not installed on the remote host</string>
-    <string name="tmux_control_unavailable">Could not connect to tmux. Check the network.</string>
+    <string name="tmux_control_unavailable">Could not verify remote tmux. Refresh to retry.</string>
     <string name="tmux_invalid_response">The remote tmux response could not be understood</string>
     <string name="tmux_action_failed">tmux action failed</string>
-    <string name="tmux_target">Current host: %1$s</string>
+    <string name="tmux_target">Target: %1$s</string>
     <string name="tmux_via_jump">via %1$s</string>
     <string name="tmux_take_over_confirm_title">Take over tmux session?</string>
     <plurals name="tmux_take_over_confirm_message">
@@ -70,12 +70,34 @@
         <item quantity="one">Detach %1$d client from “%2$s”? Programs in the session will keep running.</item>
         <item quantity="other">Detach %1$d clients from “%2$s”? Programs in the session will keep running.</item>
     </plurals>
-    <string name="tmux_kill_confirm_title">Kill tmux session?</string>
+    <string name="tmux_kill_confirm_title">End tmux session?</string>
     <string name="tmux_kill_confirm_message">Programs in “%1$s” will be terminated. This cannot be undone.</string>
-    <string name="tmux_plain_shell">Open a plain shell</string>
-    <string name="tmux_left">Left tmux. The remote session is still running.</string>
+    <string name="tmux_plain_shell">Use a plain shell</string>
+    <string name="tmux_create_open">Create and open</string>
+    <string name="tmux_more_for">Actions for %1$s</string>
+    <string name="tmux_current_unknown">Current session unconfirmed.</string>
+    <string name="tmux_result_unknown">Operation result unconfirmed.</string>
+    <string name="tmux_session_changed">Session changed. Try again.</string>
+    <string name="tmux_name_exists">Session name already exists.</string>
+    <string name="tmux_disconnected">Disconnected.</string>
+    <string name="session_disconnect">Disconnect</string>
+    <string name="tmux_disconnect_hint">Remote session keeps running.</string>
+    <string name="tmux_end_hint">Terminates programs in this session.</string>
+    <string name="tmux_close_unknown">Unable to confirm the current session. Refresh, then reopen close options.</string>
+    <plurals name="tmux_close_other_clients">
+        <item quantity="one">Ending also disconnects %1$d other client.</item>
+        <item quantity="other">Ending also disconnects %1$d other clients.</item>
+    </plurals>
+    <plurals name="tmux_end_clients">
+        <item quantity="one">This also disconnects %1$d client.</item>
+        <item quantity="other">This also disconnects %1$d clients.</item>
+    </plurals>
+    <string name="tmux_remote_ended">Remote session ended</string>
+    <string name="tmux_target_changed">Connection target changed. Select a session again.</string>
+    <string name="tmux_select_session">Select session</string>
+    <string name="tmux_left">Left tmux. Refresh to check the remote session.</string>
     <string name="tmux_left_short">left tmux</string>
-    <string name="tmux_attach_unconfirmed">Could not enter tmux. Opened a plain shell.</string>
+    <string name="tmux_attach_unconfirmed">Could not confirm the current tmux session.</string>
     <string name="host_edit">Edit</string>
     <string name="host_duplicate">Duplicate</string>
     <string name="host_copy_command">Copy connect command</string>
@@ -335,7 +357,7 @@
     <!-- 关闭会话二次确认 -->
     <string name="menu_confirm_close">Ask before closing</string>
     <string name="session_close">Close session</string>
-    <string name="close_connection_confirm">End “%1$s”? Anything running in it will be terminated.</string>
+    <string name="close_connection_confirm">Close the connection to “%1$s”?</string>
 
     <!-- 凭据显隐 -->
     <string name="action_reveal">Show</string>

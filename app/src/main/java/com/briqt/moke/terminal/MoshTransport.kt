@@ -16,7 +16,6 @@ import com.termux.terminal.JNI
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
-import net.schmizz.sshj.common.IOUtils
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -52,7 +51,21 @@ class MoshTransport(
     private val network: NetworkEntry? = null,
     /** 经网络连不上时报给会话（需要登录时失败条给出「登录」）。 */
     private val onNetworkError: (NetworkException) -> Unit = {},
-) : TerminalTransport, ForwardCapable {
+    private val observerNonce: String? = null,
+    private val tmuxScripts: TmuxScripts? = null,
+) : TerminalTransport, ForwardCapable, TmuxConnection {
+
+    @Volatile override var tmuxNonce: String? = null
+        private set
+    override val tmuxOwnerRequired: Boolean = true
+
+    override fun execTmuxOperation(command: String): String? {
+        if (closed) return null
+        // Never register this short-lived owner in data resources or the reusable control slot.
+        return runCatching {
+            execTmuxOwned(SshConnector(appContext), host, jumpHost, network, command, bootstrapDialHost)
+        }.getOrNull()
+    }
 
     /** 本次交给 `mosh-server … -- …` 的程序；null=远端默认 shell。 */
     private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
@@ -70,6 +83,7 @@ class MoshTransport(
     private val childExited get() = child?.exited == true
     private val auxiliaryStopped = AtomicBoolean()
     private val server = MoshServerProcess(::killOrphanServer)
+    private val bootstrapOperation = MoshBootstrapOperation<SshConnector.Connected>()
     private val nativeOps = object : MoshProcessOps {
         override fun waitFor(pid: Int) = JNI.waitFor(pid)
         override fun kill(pid: Int) = android.system.Os.kill(pid, android.system.OsConstants.SIGKILL)
@@ -120,7 +134,6 @@ class MoshTransport(
                 feed(session, "\r\n" + appContext.localized(R.string.mosh_bootstrapping) + "\r\n")
                 check(!closed) { "session closed during bootstrap" }
                 val bootstrap = sshBootstrap()
-                server.register(MoshBootstrap.parsePid(bootstrap.stderr))
                 check(!closed) { "session closed during bootstrap" }
                 val connect = MoshBootstrap.parse(bootstrap.stdout)
                     ?: throw IllegalStateException(
@@ -130,6 +143,7 @@ class MoshTransport(
                                 .joinToString("\n").trim(),
                         )
                     )
+                tmuxNonce = bootstrap.nonce
                 relay.get()?.let { networks.startRelay(it, udpNetwork!!, connect.port, connect.key) }
                 feed(session, appContext.localized(R.string.mosh_client_starting, connect.port) + "\r\n")
                 val clientHost = if (relay.get() != null) "127.0.0.1" else host.host
@@ -249,28 +263,52 @@ class MoshTransport(
     /** 经网络引导时实际拨的地址（tailnet 内已解析的 IP，与中继同一个）；null = 按主机名。 */
     @Volatile private var bootstrapDialHost: String? = null
 
-    private class BootstrapOutput(val stdout: String, val stderr: String)
+    private class BootstrapOutput(val stdout: String, val stderr: String, val nonce: String?)
+    private class BootstrapCommand(val command: String, val nonce: String?)
 
-    /** 引导只跑一次，用完即弃的短连接（此时控制连接还没有存在的理由）。 */
+    /** 引导只跑一次；capability 与身份捕获都复用此条已认证连接，不触碰数据面。 */
     private fun sshBootstrap(): BootstrapOutput {
-        return SshConnector(appContext).use(host, jumpHost, network, bootstrapDialHost) { client ->
-            client.startSession().use { s ->
-                val cmd = s.exec(MoshBootstrap.serverCommand(startupCommand = effectiveStartup))
-                val stdout = IOUtils.readFully(cmd.inputStream).toString()
-                val stderr = IOUtils.readFully(cmd.errorStream).toString()
-                cmd.join()
-                BootstrapOutput(stdout, stderr)
-            }
-        }
+        // Not an authentication key, and deliberately independent of the tmux owner nonce.
+        val instanceNonce = java.util.UUID.randomUUID().toString().replace("-", "")
+        return bootstrapOperation.run(
+            connect = { SshConnector(appContext).connect(host, jumpHost, network, dialHost = bootstrapDialHost) },
+            prepare = { connected ->
+                val startup = tmuxStartup(effectiveStartup, observerNonce, tmuxScripts) { supportsTmuxObserver(connected.client) }
+                BootstrapCommand(MoshOrphanGuard.serverCommand(startup.command, instanceNonce), startup.nonce)
+            },
+            startSession = { it.client.startSession() },
+            startup = { s, startup ->
+                s.exec(startup.command).use { cmd ->
+                    cmd.join(10, TimeUnit.SECONDS)
+                    check(!cmd.isOpen && cmd.exitStatus == 0) { "mosh bootstrap did not complete" }
+                    val stdout = readTmuxResult(cmd.inputStream) ?: error("invalid mosh bootstrap output")
+                    val stderr = readTmuxResult(cmd.errorStream) ?: error("invalid mosh bootstrap diagnostics")
+                    BootstrapOutput(stdout, stderr, startup.nonce)
+                }
+            },
+            witness = { connected, result ->
+                // Submission may have won just before close. Still capture on this original authenticated
+                // connection; register() hands late proof straight to nonce/pidfd cleanup, never new data.
+                val identity = MoshBootstrap.parsePid(result.stderr)?.let { pid ->
+                    runCatching {
+                        execTmuxChannel(connected.client, MoshOrphanGuard.captureCommand(pid, instanceNonce))?.let {
+                            MoshOrphanGuard.parseCapture(it, pid, instanceNonce)
+                        }
+                    }.getOrNull()
+                }
+                server.register(identity)
+            },
+        )
     }
 
-    /** 尽力结束刚引导起来、却没有客户端接上的 mosh-server（后台进行，失败只剩 24h 兜底）。 */
-    private fun killOrphanServer(pid: Int) {
+    /** No bare PID signal: unavailable pidfd/proof means leave the existing 24h self-expiry in charge. */
+    private fun killOrphanServer(identity: MoshServerIdentity) {
         Thread({
             runCatching {
-                SshConnector(appContext).use(host, jumpHost, network, bootstrapDialHost) { client ->
-                    client.startSession().use { s -> s.exec("kill $pid").join(5, TimeUnit.SECONDS) }
-                }
+                execTmuxOwned(
+                    SshConnector(appContext), host, jumpHost, network,
+                    MoshOrphanGuard.cleanupCommand(identity), bootstrapDialHost,
+                )
             }
         }, "moke-mosh-orphan").start()
     }
@@ -281,17 +319,7 @@ class MoshTransport(
     override fun exec(command: String): String? {
         if (closed) return null
         return runCatching {
-            withControlClient { client ->
-                client.startSession().use { s ->
-                    val cmd = s.exec(command)
-                    cmd.join(10, TimeUnit.SECONDS)
-                    if (cmd.isOpen) {
-                        runCatching { cmd.close() }
-                        return@withControlClient null
-                    }
-                    cmd.inputStream.readBytes().toString(StandardCharsets.UTF_8)
-                }
-            }
+            withControlClient { client -> execTmuxChannel(client, command) }
         }.getOrNull()
     }
 
@@ -335,16 +363,15 @@ class MoshTransport(
      * 还可能把自己封掉。反过来也不能长期挂着 TCP —— 那会抵消 mosh「关屏/换网不断线」的意义。
      * 折中就是这里：忙的时候复用，空闲 [CONTROL_IDLE_MS] 后自动断开。
      *
-     * 复用的连接可能在两次调用之间被中间设备掐断，所以失败重连一次再试（与 SftpSession 同口径）。
+     * 失效连接在下次调用时重建；绝不自动重放命令（失败不等于远端未执行）。
      */
     private fun <T> withControlClient(block: (SSHClient) -> T): T = controlLock.withLock {
         check(!closed) { "transport closed" }
         try {
             block(controlClient())
         } catch (t: Throwable) {
-            if (closed) throw t
             closeControl()
-            block(controlClient())
+            throw t
         } finally {
             controlIdleSince = System.currentTimeMillis()
             scheduleReap()
@@ -354,7 +381,7 @@ class MoshTransport(
     private fun controlClient(): SSHClient {
         control?.takeIf { it.client.isConnected && it.client.isAuthenticated }?.let { return it.client }
         closeControl()
-        val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true)
+        val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true, dialHost = bootstrapDialHost)
         control = c
         if (closed) {
             closeControl()
@@ -411,6 +438,9 @@ class MoshTransport(
 
     override fun close() {
         if (!closeRequested.compareAndSet(false, true)) return
+        // Linearize cancellation against final startup submission before changing the data lifetime.
+        // This only takes a short metadata lock; the returned SSH cleanup stays on the close worker.
+        val bootstrapCleanup = bootstrapOperation.cancel()
         val cleanup = resources.stop()
         val process = child
         val stream = out
@@ -418,6 +448,7 @@ class MoshTransport(
         // Keep mosh's own quit protocol, but never queue the only closer behind a blocked PTY write.
         // A separate timeout worker closes/kills even when sending the escape sequence itself blocks.
         Thread({
+            bootstrapCleanup()
             if (process != null && !process.exited && stream != null) {
                 Thread({
                     runCatching { stream.write(MOSH_QUIT_SEQUENCE); stream.flush() }

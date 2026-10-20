@@ -169,16 +169,21 @@ class MoshChildProcessTest {
     }
 
     @Test fun `orphan cleanup requested before bootstrap result also takes the late server once`() {
-        val kills = mutableListOf<Int>()
+        val kills = mutableListOf<MoshServerIdentity>()
+        fun identity(pid: Int) = MoshServerIdentity(
+            pid, 1000, "01234567-89ab-cdef-0123-456789abcdef", 4567, "0123456789abcdef0123456789abcdef",
+        )
+        val first = identity(123)
         val orphan = MoshServerProcess { kills.add(it) }
         orphan.cleanup()
-        orphan.register(123)
+        orphan.register(first)
+        orphan.register(first) // A duplicate late registration is not a second cleanup authority.
         orphan.cleanup()
-        assertEquals(listOf(123), kills)
+        assertEquals(listOf(first), kills)
         val normal = MoshServerProcess { kills.add(it) }
-        normal.register(456)
+        normal.register(identity(456))
         normal.disarm()
         normal.cleanup()
-        assertEquals(listOf(123), kills)
+        assertEquals(listOf(first), kills)
     }
 }

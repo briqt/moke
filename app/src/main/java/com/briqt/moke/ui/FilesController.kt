@@ -6,12 +6,20 @@ import com.briqt.moke.localized
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.TmuxTargetStamp
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.networkRecovery
 import com.briqt.moke.terminal.TermSession
-import com.briqt.moke.terminal.Tmux
+import com.briqt.moke.terminal.TmuxBinding
+import com.briqt.moke.terminal.TmuxConnection
+import com.briqt.moke.terminal.TmuxCoordinatorRules
+import com.briqt.moke.terminal.TmuxProbeKind
+import com.briqt.moke.terminal.TmuxRemote
+import com.briqt.moke.terminal.TmuxScope
+import com.briqt.moke.terminal.TmuxUiState
+import com.briqt.moke.terminal.sameInstance
 import com.briqt.moke.terminal.sftp.RemoteEntry
 import com.briqt.moke.terminal.sftp.RemotePath
 import com.briqt.moke.terminal.sftp.SftpSession
@@ -65,7 +73,9 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
     private val work = FilesWork<SftpSession>()
     private var job: Job? = null
-    private data class Configuration(val host: Host, val jump: Host?, val network: NetworkEntry?, val refusal: String?, val recovery: NetworkRecovery?)
+    private data class Configuration(val host: Host, val jump: Host?, val network: NetworkEntry?, val refusal: String?, val recovery: NetworkRecovery?) {
+        val targetStamp: String = TmuxTargetStamp.of(host, jump, network)
+    }
     private var configuration: Configuration? = null
     val isPaused: Boolean get() = _state.value.host != null && !work.isAttached()
     val canAutoRefresh: Boolean get() = work.isAttached() && _state.value.canUpload
@@ -125,7 +135,7 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         work.commit(ticket) { _state.update { it.copy(browsingActive = true) } }
         job = scope.launch {
             operation(ticket, { connection ->
-                val terminalPath = from?.let { probeTerminalPath(it, connection) } ?: previous.terminalPath
+                val terminalPath = from?.let { probeTerminalPath(it, connection, config.targetStamp) } ?: previous.terminalPath
                 val start = previous.path.ifBlank { terminalPath.ifBlank { connection.homePath() } }
                 Triple(start, connection.list(start), terminalPath)
             }) { state, (start, entries, terminalPath) ->
@@ -292,11 +302,38 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         return visible.sortedWith(compareByDescending<RemoteEntry> { it.isDir }.then(cmp))
     }
 
-    private fun probeTerminalPath(from: TermSession, s: SftpSession): String {
-        val name = from.remoteTmuxName.value ?: return ""
-        val out = runCatching { from.transport.exec(Tmux.paneCwdCmd(name)) }.getOrNull()?.trim().orEmpty()
-        if (out.isBlank() || !out.startsWith("/")) return ""
-        val path = out.lineSequence().first().trim()
-        return runCatching { s.canonicalize(path) }.getOrDefault(path)
+    private fun probeTerminalPath(from: TermSession, s: SftpSession, actualTargetStamp: String): String {
+        if (!from.dataReady.value || !from.alive.value) return ""
+        val binding = TerminalPathProbe.capture(from.scopeKey, actualTargetStamp, from.tmuxState.value) ?: return ""
+        val connection = from.transport as? TmuxConnection ?: return ""
+        val nonce = connection.tmuxNonce?.takeIf { it == binding.owner.nonce } ?: return ""
+        val path = runCatching {
+            val command = TmuxRemote.guardPeer(from.scripts, nonce, connection.tmuxOwnerRequired, binding.server.bootId,
+                TmuxRemote.paneCwd(binding.session, binding.client))
+            from.transport.exec(command)?.let(TmuxRemote::parsePaneCwd)
+        }.getOrNull() ?: return ""
+        fun stillCurrent(): Boolean = from.dataReady.value && from.alive.value && connection.tmuxNonce == nonce &&
+            TerminalPathProbe.stillCurrent(binding, TerminalPathProbe.capture(from.scopeKey, actualTargetStamp, from.tmuxState.value))
+        if (!stillCurrent()) return ""
+        val canonical = runCatching { s.canonicalize(path) }.getOrDefault(path)
+        return canonical.takeIf { stillCurrent() }.orEmpty()
     }
+}
+
+/** A directory hint may cross connections only within the exact source route and witnessed object. */
+internal object TerminalPathProbe {
+    fun capture(source: TmuxScope, actualTargetStamp: String, state: TmuxUiState): TmuxBinding? {
+        if (source.targetStamp != actualTargetStamp || state.targetChanged || !state.canManage) return null
+        val snapshot = state.snapshot ?: return null
+        val binding = state.currentBinding ?: return null
+        if (snapshot.scope != source || binding.scope != source || snapshot.observation.kind != TmuxProbeKind.READY) return null
+        // Reuse the coordinator's witness validation rather than add a weaker file-browser variant.
+        if (!TmuxCoordinatorRules.verified(snapshot.observation, binding.owner.nonce, true, binding.server.socketPath)) return null
+        val observed = TmuxCoordinatorRules.binding(source, snapshot.observation)
+        return binding.takeIf { stillCurrent(it, observed) }
+    }
+
+    fun stillCurrent(captured: TmuxBinding, current: TmuxBinding?): Boolean = current != null &&
+        captured.scope == current.scope && captured.owner == current.owner && captured.client == current.client &&
+        captured.session.sameInstance(current.session)
 }

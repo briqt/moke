@@ -102,6 +102,7 @@ import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.ListState
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
@@ -111,6 +112,7 @@ import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.terminal.TermSession
+import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
@@ -169,6 +171,8 @@ fun HomeScreen(
     hostsState: ListState<Host> = if (credentialsUnreadable) ListState.Unreadable else ListState.Ready(hosts),
     networkState: ListState<NetworkEntry> = ListState.Ready(networks),
     onRetryReads: () -> Unit = {},
+    onEndTmux: suspend (String, TmuxSelection) -> Boolean = { _, _ -> false },
+    onTmuxRefresh: (String) -> Unit = {},
     onRecover: (Host, NetworkRecovery) -> Unit = { host, recovery ->
         when (recovery.kind) {
             RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> recovery.network?.let(onLoginNetwork)
@@ -184,9 +188,21 @@ fun HomeScreen(
             else -> pendingPreflight = host to p
         }
     }
-    // 会话列表里点「关闭」也走二次确认（与终端页 ⋮ 一致），避免误触断掉正在跑的活。
-    var pendingClose by remember { mutableStateOf<String?>(null) }
-    val closeRequest: (String) -> Unit = { id -> if (confirmClose) pendingClose = id else onCloseSession(id) }
+    // Capture the actual current client/session at the request, not a later title or selection.
+    val closeResources = LocalResources.current
+    var pendingClose by remember { mutableStateOf<Pair<String, SessionCloseTarget>?>(null) }
+    val closeRequest: (String) -> Unit = { id ->
+        sessions.firstOrNull { it.id == id }?.let { session ->
+            val state = session.tmuxState.value
+            val observeCurrent = observesCurrentTmux(session.host.useMosh,
+                session.host.persistence == SessionPersistence.TMUX, session.tmuxIntent)
+            if (requiresSessionCloseChoice(state, confirmClose, observeCurrent)) {
+                val viaJump = session.jumpHost?.let { closeResources.getString(R.string.tmux_via_jump, it.displayName) }.orEmpty()
+                val label = tmuxTargetLabel(session.host.protocol, session.host.username, session.host.host, session.host.port, viaJump)
+                pendingClose = id to freezeSessionCloseTarget(state, session.displayTitle.value, label, observeCurrent)
+            } else onCloseSession(id)
+        }
+    }
     // 删除主机会连同密码 / 私钥 / 指纹一起删掉且无法恢复：一律二次确认（危险操作不走"撤销"）。
     var pendingDeleteHost by remember { mutableStateOf<Host?>(null) }
 
@@ -313,24 +329,20 @@ fun HomeScreen(
         }
     }
 
-    pendingClose?.let { id ->
-        val pendingSession = sessions.firstOrNull { it.id == id }
-        val name = pendingSession?.displayTitle?.collectAsState()?.value.orEmpty()
-        val tmuxName = pendingSession?.remoteTmuxName?.collectAsState()?.value
-        ConfirmDialog(
-            title = stringResource(R.string.session_close),
-            // 按**名称**判定，与终端页一致：从选择器「新建」出来的会话在第一次刷新前
-            // remoteTmuxId 还是 null，只看 ID 会漏掉它，弹出的确认里就不会说明「远端 tmux 仍在跑」。
-            message = if (tmuxName != null) {
-                stringResource(R.string.close_tmux_connection_confirm, name)
-            } else {
-                stringResource(R.string.close_connection_confirm, name)
-            },
-            confirmLabel = stringResource(R.string.action_close),
-            destructive = true,
-            onConfirm = { pendingClose = null; onCloseSession(id) },
-            onDismiss = { pendingClose = null },
-        )
+    pendingClose?.let { (id, target) ->
+        sessions.firstOrNull { it.id == id }?.let { session ->
+            val state by session.tmuxState.collectAsState()
+            val observeCurrent = observesCurrentTmux(session.host.useMosh,
+                session.host.persistence == SessionPersistence.TMUX, session.tmuxIntent)
+            SessionCloseDialog(
+                target = target,
+                state = sessionClosePresentationState(state, target, observeCurrent),
+                onDisconnect = { pendingClose = null; onCloseSession(id) },
+                onEnd = { selection -> onEndTmux(id, selection) },
+                onDismiss = { pendingClose = null },
+                onRefresh = { onTmuxRefresh(id) },
+            )
+        }
     }
 }
 

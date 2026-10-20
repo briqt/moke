@@ -23,11 +23,17 @@ private val Context.networkDataStore: DataStore<Preferences> by preferencesDataS
 
 /** Encrypted network settings. Failed reads and failed encryption never replace the stored data. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class NetworkStore(private val context: Context) {
+class NetworkStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    private val encrypt: (String) -> String,
+    private val decrypt: (String) -> String,
+) {
+    constructor(context: Context) : this(context.networkDataStore, CredentialCrypto::encrypt, CredentialCrypto::decrypt)
+
     private val key = stringPreferencesKey("networks_json")
     private val reads = MutableStateFlow(0)
     private val decoded: Flow<DecodedHosts> = reads.flatMapLatest {
-        context.networkDataStore.data.map { decode(it[key]) }
+        dataStore.data.map { decode(it[key]) }
             .catch { emit(DecodedHosts("[]", true)) }
     }.flowOn(Dispatchers.IO)
 
@@ -36,18 +42,18 @@ class NetworkStore(private val context: Context) {
     }
 
     fun refresh() { reads.update { it + 1 } }
-    private fun decode(raw: String?): DecodedHosts = decodeHosts(raw, CredentialCrypto::decrypt)
+    private fun decode(raw: String?): DecodedHosts = decodeHosts(raw, decrypt)
 
     suspend fun commit(entry: NetworkEntry, editing: Boolean): StoreResult<NetworkEntry> = withContext(Dispatchers.IO) {
         try {
             var result: StoreResult<NetworkEntry> = StoreResult.Failed(StoreFailure.UNREADABLE)
-            context.networkDataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 val decoded = decode(prefs[key])
                 if (decoded.unreadable) return@edit
                 when (val prepared = prepareNetworkEdit(parseNetworks(decoded.json), entry, editing)) {
                     is StoreResult.Failed -> result = prepared
                     is StoreResult.Saved -> {
-                        val encrypted = encodeNetworks(prepared.value.items, CredentialCrypto::encrypt)
+                        val encrypted = encodeNetworks(prepared.value.items, encrypt)
                         if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
                             prefs[key] = encrypted
                             result = StoreResult.Saved(prepared.value.saved)
@@ -63,15 +69,44 @@ class NetworkStore(private val context: Context) {
         }
     }
 
+    /** Advance the durable tailnet identity before an explicit login or identity reset. */
+    suspend fun advanceTailnetIdentity(id: String): StoreResult<NetworkEntry> = withContext(Dispatchers.IO) {
+        try {
+            var result: StoreResult<NetworkEntry> = StoreResult.Failed(StoreFailure.UNREADABLE)
+            dataStore.edit { prefs ->
+                val decoded = decode(prefs[key])
+                if (decoded.unreadable) return@edit
+                val current = parseNetworks(decoded.json)
+                val old = current.firstOrNull { it.id == id }
+                if (old == null) { result = StoreResult.Failed(StoreFailure.MISSING); return@edit }
+                if (old.kind != NetworkKind.TAILSCALE || old.revision == Int.MAX_VALUE) {
+                    result = StoreResult.Failed(StoreFailure.INVALID)
+                    return@edit
+                }
+                val saved = old.copy(revision = old.revision + 1)
+                val encrypted = encodeNetworks(current.map { if (it.id == id) saved else it }, encrypt)
+                if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
+                    prefs[key] = encrypted
+                    result = StoreResult.Saved(saved)
+                }
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            StoreResult.Failed(StoreFailure.IO)
+        }
+    }
+
     suspend fun remove(id: String): StoreResult<Unit> = withContext(Dispatchers.IO) {
         try {
             var result: StoreResult<Unit> = StoreResult.Failed(StoreFailure.UNREADABLE)
-            context.networkDataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 val decoded = decode(prefs[key])
                 if (decoded.unreadable) return@edit
                 val current = parseNetworks(decoded.json)
                 if (current.none { it.id == id }) { result = StoreResult.Saved(Unit); return@edit }
-                val encrypted = encodeNetworks(current.filterNot { it.id == id }, CredentialCrypto::encrypt)
+                val encrypted = encodeNetworks(current.filterNot { it.id == id }, encrypt)
                 if (encrypted == null) result = StoreResult.Failed(StoreFailure.ENCRYPTION) else {
                     prefs[key] = encrypted
                     result = StoreResult.Saved(Unit)
@@ -86,9 +121,9 @@ class NetworkStore(private val context: Context) {
     }
 
     suspend fun save(list: List<NetworkEntry>): Boolean = withContext(Dispatchers.IO) {
-        val encrypted = encodeNetworks(list, CredentialCrypto::encrypt) ?: return@withContext false
+        val encrypted = encodeNetworks(list, encrypt) ?: return@withContext false
         var written = false
-        context.networkDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             if (decode(prefs[key]).unreadable) return@edit
             prefs[key] = encrypted
             written = true
@@ -98,11 +133,11 @@ class NetworkStore(private val context: Context) {
 
     suspend fun update(transform: (List<NetworkEntry>) -> List<NetworkEntry>?): Boolean = withContext(Dispatchers.IO) {
         var written = false
-        context.networkDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = decode(prefs[key])
             if (current.unreadable) return@edit
             val next = transform(parseNetworks(current.json)) ?: return@edit
-            prefs[key] = encodeNetworks(next, CredentialCrypto::encrypt) ?: return@edit
+            prefs[key] = encodeNetworks(next, encrypt) ?: return@edit
             written = true
         }
         written

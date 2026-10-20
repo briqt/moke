@@ -38,7 +38,7 @@
     <string name="tmux_take_over">接管</string>
     <string name="tmux_rename">重命名</string>
     <string name="tmux_detach">断开所有客户端</string>
-    <string name="tmux_kill">关闭</string>
+    <string name="tmux_kill">结束会话</string>
     <plurals name="tmux_windows">
         <item quantity="other">%1$d 个窗口</item>
     </plurals>
@@ -52,10 +52,10 @@
     <string name="tmux_retry">重试</string>
     <string name="tmux_checking">正在检查 tmux…</string>
     <string name="tmux_not_installed">远端没有安装 tmux</string>
-    <string name="tmux_control_unavailable">无法连接 tmux，请检查网络。</string>
+    <string name="tmux_control_unavailable">无法核验远端 tmux，请刷新重试。</string>
     <string name="tmux_invalid_response">无法识别远端 tmux 的返回结果</string>
     <string name="tmux_action_failed">tmux 操作失败</string>
-    <string name="tmux_target">当前主机：%1$s</string>
+    <string name="tmux_target">目标：%1$s</string>
     <string name="tmux_via_jump">经 %1$s</string>
     <string name="tmux_take_over_confirm_title">接管 tmux 会话？</string>
     <plurals name="tmux_take_over_confirm_message">
@@ -66,12 +66,32 @@
     <plurals name="tmux_detach_confirm_message">
         <item quantity="other">将断开当前附加到“%2$s”的 %1$d 个客户端，但不会终止其中的程序。</item>
     </plurals>
-    <string name="tmux_kill_confirm_title">关闭 tmux 会话？</string>
+    <string name="tmux_kill_confirm_title">结束 tmux 会话？</string>
     <string name="tmux_kill_confirm_message">“%1$s”中的程序将被终止，此操作无法撤销。</string>
-    <string name="tmux_plain_shell">打开纯 shell</string>
-    <string name="tmux_left">已离开 tmux，远端会话仍在运行</string>
+    <string name="tmux_plain_shell">使用普通 shell</string>
+    <string name="tmux_create_open">新建并打开</string>
+    <string name="tmux_more_for">“%1$s”的操作</string>
+    <string name="tmux_current_unknown">无法确认当前会话。</string>
+    <string name="tmux_result_unknown">操作结果未确认。</string>
+    <string name="tmux_session_changed">会话已更改，请重试。</string>
+    <string name="tmux_name_exists">同名会话已存在。</string>
+    <string name="tmux_disconnected">连接已断开。</string>
+    <string name="session_disconnect">断开连接</string>
+    <string name="tmux_disconnect_hint">远端继续运行。</string>
+    <string name="tmux_end_hint">终止其中程序。</string>
+    <string name="tmux_close_unknown">无法确认当前会话。请刷新后重新打开关闭选项。</string>
+    <plurals name="tmux_close_other_clients">
+        <item quantity="other">结束也会断开其他 %1$d 个客户端。</item>
+    </plurals>
+    <plurals name="tmux_end_clients">
+        <item quantity="other">同时断开 %1$d 个客户端。</item>
+    </plurals>
+    <string name="tmux_remote_ended">远端会话已结束</string>
+    <string name="tmux_target_changed">连接目标已更改，请重新选择。</string>
+    <string name="tmux_select_session">选择会话</string>
+    <string name="tmux_left">已离开 tmux，请刷新查看远端状态。</string>
     <string name="tmux_left_short">已离开 tmux</string>
-    <string name="tmux_attach_unconfirmed">未能进入 tmux，已打开普通 shell。</string>
+    <string name="tmux_attach_unconfirmed">无法确认当前 tmux 会话。</string>
     <string name="host_edit">编辑</string>
     <string name="host_duplicate">创建副本</string>
     <string name="host_copy_command">复制连接命令</string>
@@ -331,7 +351,7 @@
     <!-- 关闭会话二次确认 -->
     <string name="menu_confirm_close">关闭前询问</string>
     <string name="session_close">关闭会话</string>
-    <string name="close_connection_confirm">结束「%1$s」？其中正在运行的内容会一并终止。</string>
+    <string name="close_connection_confirm">关闭「%1$s」的连接？</string>
 
     <!-- 凭据显隐 -->
     <string name="action_reveal">显示</string>

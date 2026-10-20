@@ -1,12 +1,16 @@
 package com.briqt.moke.ui
 
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.StoreFailure
 import com.briqt.moke.data.StoreResult
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +19,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal class NetworkLoginPreparationException(val reason: StoreFailure) : Exception("Network login preparation failed: $reason")
+
 internal interface NetworkLoginBackend {
+    suspend fun prepare(entry: NetworkEntry): StoreResult<NetworkEntry> = StoreResult.Saved(entry)
     fun hold(entry: NetworkEntry, attempt: Long)
     fun begin(entry: NetworkEntry, authKey: String, attempt: Long): String
     fun end(entry: NetworkEntry, attempt: Long)
@@ -53,49 +60,27 @@ internal class NetworkLoginController(
     suspend fun login(entry: NetworkEntry, authKey: String, editing: Boolean): StoreResult<NetworkEntry> {
         cancel(entry)
         val attempt = synchronized(lock) { sequence.incrementAndGet().also { attempts[entry.id] = it } }
-        var held = false
+        var heldEntry: NetworkEntry? = null
         var started = false
         try {
             val result = save(entry, editing)
             if (result !is StoreResult.Saved) return result
             val saved = result.value
-            synchronized(lock) {
+            val job = synchronized(lock) {
                 if (!scope.isActive || attempts[entry.id] != attempt) throw CancellationException("login superseded")
-                // hold is metadata-only, so cancel cannot pass between owning the attempt and its hold.
+                // Install the hold, flow and worker together; preparation cannot run before cancel owns its job.
                 backend.hold(saved, attempt)
-                held = true
+                heldEntry = saved
                 entries[saved.id] = saved
                 _flows.update { it + (saved.id to MokeViewModel.LoginFlow(attempt = attempt)) }
-            }
-            val job = scope.launch {
-                try {
-                    val target = withContext(Dispatchers.IO) { backend.begin(saved, authKey.trim(), attempt) }
-                    synchronized(lock) {
-                        if (attempts[saved.id] == attempt) {
-                            _flows.update { it + (saved.id to MokeViewModel.LoginFlow(url = target, busy = target.isEmpty(), attempt = attempt)) }
-                            if (target.isNotEmpty()) _url.value = MokeViewModel.LoginUrlRequest(saved.id, attempt, target)
-                        }
-                    }
-                } catch (e: CancellationException) {
-                    complete(saved, attempt)
-                    throw e
-                } catch (t: Exception) {
-                    val text = describe(t)
-                    synchronized(lock) {
-                        if (attempts[saved.id] == attempt) {
-                            _flows.update { it + (saved.id to MokeViewModel.LoginFlow(error = text, busy = false, attempt = attempt)) }
-                        }
-                    }
-                    backend.end(saved, attempt)
-                } finally {
-                    if (!current(saved.id, attempt)) backend.end(saved, attempt)
+                scope.launch(start = CoroutineStart.LAZY) { runAttempt(saved, authKey, attempt) }.also {
+                    jobs[saved.id] = it
+                    started = true
                 }
             }
             job.invokeOnCompletion { if (it is CancellationException) complete(saved, attempt) }
-            started = synchronized(lock) {
-                if (attempts[saved.id] != attempt || job.isCancelled) false else { jobs[saved.id] = job; true }
-            }
-            if (!started) { job.cancel(); throw CancellationException("login superseded") }
+            job.start()
+            // Background preparation / registration failures belong to the login flow, not the successful save.
             return result
         } finally {
             if (!started) {
@@ -103,10 +88,56 @@ internal class NetworkLoginController(
                     if (attempts[entry.id] == attempt) {
                         attempts.remove(entry.id)
                         entries.remove(entry.id)
+                        _flows.update { if (it[entry.id]?.attempt == attempt) it - entry.id else it }
                     }
                 }
-                if (held) backend.end(entry, attempt)
+                heldEntry?.let { backend.end(it, attempt) }
             }
+        }
+    }
+
+    private suspend fun runAttempt(saved: NetworkEntry, authKey: String, attempt: Long) {
+        var owner = saved
+        try {
+            val target = withContext(Dispatchers.IO) {
+                currentCoroutineContext().ensureActive()
+                if (!current(saved.id, attempt)) throw CancellationException("login superseded")
+                val prepared = when (val result = backend.prepare(saved)) {
+                    is StoreResult.Saved -> result.value
+                    is StoreResult.Failed -> throw NetworkLoginPreparationException(result.reason)
+                }
+                currentCoroutineContext().ensureActive()
+                if (prepared.id != saved.id || prepared.kind != saved.kind || prepared.controlUrl != saved.controlUrl) {
+                    throw NetworkLoginPreparationException(StoreFailure.CONFLICT)
+                }
+                synchronized(lock) {
+                    if (!scope.isActive || attempts[saved.id] != attempt) throw CancellationException("login superseded")
+                    owner = prepared
+                    entries[saved.id] = prepared
+                }
+                currentCoroutineContext().ensureActive()
+                if (!current(saved.id, attempt)) throw CancellationException("login superseded")
+                backend.begin(prepared, authKey.trim(), attempt)
+            }
+            synchronized(lock) {
+                if (attempts[saved.id] == attempt) {
+                    _flows.update { it + (saved.id to MokeViewModel.LoginFlow(url = target, busy = target.isEmpty(), attempt = attempt)) }
+                    if (target.isNotEmpty()) _url.value = MokeViewModel.LoginUrlRequest(saved.id, attempt, target)
+                }
+            }
+        } catch (e: CancellationException) {
+            complete(owner, attempt)
+            throw e
+        } catch (t: Exception) {
+            val text = describe(t)
+            synchronized(lock) {
+                if (attempts[saved.id] == attempt) {
+                    _flows.update { it + (saved.id to MokeViewModel.LoginFlow(error = text, busy = false, attempt = attempt)) }
+                }
+            }
+            backend.end(owner, attempt)
+        } finally {
+            if (!current(saved.id, attempt)) backend.end(owner, attempt)
         }
     }
 
@@ -122,15 +153,15 @@ internal class NetworkLoginController(
     }
 
     fun complete(entry: NetworkEntry, attempt: Long) {
-        val job = synchronized(lock) {
+        val (job, owner) = synchronized(lock) {
             if (attempts[entry.id] != attempt) return
             attempts.remove(entry.id)
-            entries.remove(entry.id)
+            val owned = entries.remove(entry.id) ?: entry
             _flows.update { if (it[entry.id]?.attempt == attempt) it - entry.id else it }
             _url.update { if (it?.networkId == entry.id && it.attempt == attempt) null else it }
-            jobs.remove(entry.id)
+            jobs.remove(entry.id) to owned
         }
-        backend.end(entry, attempt)
+        backend.end(owner, attempt)
         job?.cancel()
     }
 

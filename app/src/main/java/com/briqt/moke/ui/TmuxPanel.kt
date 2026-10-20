@@ -1,13 +1,23 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
@@ -22,354 +32,464 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.terminal.TmuxPhase
+import com.briqt.moke.terminal.TmuxPresence
+import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.terminal.TmuxSession
 import com.briqt.moke.terminal.TmuxUiState
-import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.terminal.selectionFor
+import kotlinx.coroutines.launch
 
-/**
- * tmux 管理面板（BottomSheet）：列出远端 tmux 会话，支持打开 / 重命名 / 关闭 + 新建。
- * 所有状态与失败都显式展示；打开由上层切到专用 Moke 终端连接，不注入当前前台输入。
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TmuxPanel(
     state: TmuxUiState,
-    currentTmuxName: String?,
     targetLabel: String,
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
-    onAttach: (TmuxSession) -> Unit,
-    onTakeOver: (TmuxSession) -> Unit,
-    onRename: suspend (TmuxSession, String) -> Boolean,
-    onDetach: (TmuxSession) -> Unit,
-    onKill: (TmuxSession) -> Unit,
+    onAttach: suspend (TmuxSelection) -> Boolean,
+    onTakeOver: suspend (TmuxSelection) -> Boolean,
+    onRename: suspend (TmuxSelection, String) -> Boolean,
+    onDetach: suspend (TmuxSelection) -> Boolean,
+    onKill: suspend (TmuxSelection) -> Boolean,
     onNew: suspend (String) -> Boolean,
 ) {
-    // null=closed; a failed asynchronous action keeps this in-memory draft.
-    var dialog by remember { mutableStateOf<Pair<String, suspend (String) -> Boolean>?>(null) }
-    var detachTarget by remember { mutableStateOf<TmuxSession?>(null) }
-    var takeOverTarget by remember { mutableStateOf<TmuxSession?>(null) }
-    var killTarget by remember { mutableStateOf<TmuxSession?>(null) }
+    TmuxSessionSheet(
+        state = state,
+        targetLabel = targetLabel,
+        defaultName = "",
+        onDismiss = onDismiss,
+        onRefresh = onRefresh,
+        onOpen = onAttach,
+        onOpened = onDismiss,
+        onReturnCurrent = onDismiss,
+        onNew = onNew,
+        management = TmuxManagement(onTakeOver, onRename, onDetach, onKill),
+    )
+}
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 24.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+internal data class TmuxManagement(
+    val takeOver: suspend (TmuxSelection) -> Boolean,
+    val rename: suspend (TmuxSelection, String) -> Boolean,
+    val detach: suspend (TmuxSelection) -> Boolean,
+    val kill: suspend (TmuxSelection) -> Boolean,
+)
+
+private data class TmuxRowTarget(val selection: TmuxSelection, val clients: Int, val targetLabel: String)
+private enum class TmuxConfirmAction { TAKE_OVER, DETACH, END }
+private data class TmuxConfirmation(val action: TmuxConfirmAction, val target: TmuxRowTarget)
+
+/** Both entry points share rows, safety gates and the same create-and-open editor. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun TmuxSessionSheet(
+    state: TmuxUiState,
+    targetLabel: String,
+    defaultName: String,
+    onDismiss: () -> Unit,
+    onOpen: suspend (TmuxSelection) -> Boolean,
+    onOpened: () -> Unit,
+    onNew: suspend (String) -> Boolean,
+    onRefresh: (() -> Unit)? = null,
+    onReturnCurrent: (() -> Unit)? = null,
+    onPlainShell: (() -> Unit)? = null,
+    management: TmuxManagement? = null,
+) {
+    var creating by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
+    var confirmation by remember { mutableStateOf<TmuxConfirmation?>(null) }
+    var opening by remember { mutableStateOf(false) }
+    var openFailed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val busy by androidx.compose.runtime.rememberUpdatedState(state.busy)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { value -> value != SheetValue.Hidden || (!opening && !busy) },
+    )
+    ModalBottomSheet(
+        onDismissRequest = { if (!opening && !state.busy) onDismiss() },
+        sheetState = sheetState,
+    ) {
+        // The sheet supplies bounded window/IME constraints. Only the list takes remaining space;
+        // it wraps short lists instead of reserving a fixed-height empty region.
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(R.string.tmux_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onRefresh, enabled = !state.busy) {
-                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.tmux_refresh))
-                }
-                TextButton(
-                    enabled = state.phase == TmuxPhase.READY && !state.busy,
-                    onClick = { dialog = "" to { name -> onNew(name) } },
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  " + stringResource(R.string.tmux_new))
+                if (onRefresh != null) {
+                    IconButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.tmux_refresh))
+                    }
                 }
             }
-            HorizontalDivider()
+            val targetDescription = stringResource(R.string.tmux_target, targetLabel)
             Text(
-                stringResource(R.string.tmux_target, targetLabel),
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, end = 8.dp),
+                targetDescription,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    .clearAndSetSemantics { contentDescription = targetDescription },
             )
-
-            state.message?.takeIf { state.phase == TmuxPhase.READY }?.let { message ->
-                Text(
-                    message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp),
-                )
-            }
-
-            when (state.phase) {
-                TmuxPhase.IDLE, TmuxPhase.CHECKING -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text(
-                            stringResource(R.string.tmux_checking),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            HorizontalDivider()
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                if (openFailed || state.message != null) {
+                    item("message") {
+                        InfoNote(state.message ?: stringResource(R.string.tmux_action_failed), error = true,
+                            modifier = Modifier.padding(vertical = 8.dp))
                     }
                 }
-                TmuxPhase.NOT_INSTALLED -> EmptyTmuxText(stringResource(R.string.tmux_not_installed))
-                TmuxPhase.ERROR -> {
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
-                        Text(
-                            state.message ?: stringResource(R.string.tmux_control_unavailable),
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        TextButton(onClick = onRefresh, enabled = !state.busy) {
-                            Text(stringResource(R.string.tmux_retry))
-                        }
-                    }
+                if (opening || state.busy) {
+                    item("working") { TmuxStatusText(stringResource(R.string.action_working), loading = true) }
                 }
-                TmuxPhase.READY -> {
-                    if (state.sessions.isEmpty()) {
-                        EmptyTmuxText(stringResource(R.string.tmux_empty))
-                    } else {
-                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                            state.sessions.forEach { s ->
-                                TmuxRow(
-                                    session = s,
-                                    current = currentTmuxName == s.name,
-                                    enabled = !state.busy,
-                                    onAttach = { onAttach(s); onDismiss() },
-                                    onTakeOver = { takeOverTarget = s },
-                                    onRename = { dialog = s.name to { name -> onRename(s, name) } },
-                                    onDetach = { detachTarget = s },
-                                    onKill = { killTarget = s },
-                                )
+                when (state.phase) {
+                    TmuxPhase.IDLE, TmuxPhase.CHECKING -> item("checking") {
+                        TmuxStatusText(stringResource(R.string.tmux_checking), loading = true)
+                    }
+                    TmuxPhase.NOT_INSTALLED -> item("not-installed") {
+                        TmuxStatusText(stringResource(R.string.tmux_not_installed))
+                    }
+                    TmuxPhase.ERROR -> item("error") {
+                        if (state.message == null) TmuxStatusText(stringResource(R.string.tmux_control_unavailable))
+                        if (onRefresh != null) {
+                            TextButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.tmux_retry))
                             }
                         }
                     }
+                    TmuxPhase.READY -> {
+                        if (state.presence is TmuxPresence.Unknown && state.message == null) item("unknown") {
+                            TmuxStatusText(stringResource(R.string.tmux_current_unknown))
+                        }
+                        if (state.sessions.isEmpty()) item("empty") {
+                            TmuxStatusText(stringResource(R.string.tmux_empty))
+                        }
+                        items(state.sessions, key = { "${it.id}:${it.created}" }) { row ->
+                            val selected = state.selectionFor(row)
+                            val current = isCurrentTmuxRow(state, row)
+                            val canReturn = current && onReturnCurrent != null && !state.busy && !opening
+                            val enabled = !opening && state.canManage && selected != null
+                            TmuxSessionRow(
+                                session = row,
+                                current = current,
+                                enabled = enabled || canReturn,
+                                showManagement = management != null,
+                                managementEnabled = enabled,
+                                onOpen = {
+                                    if (canReturn) onReturnCurrent.invoke()
+                                    else if (selected != null && !opening) {
+                                        opening = true
+                                        openFailed = false
+                                        scope.launch {
+                                            try {
+                                                completeTmuxUiAction({ onOpen(selected) }, onOpened, { openFailed = true })
+                                            } finally { opening = false }
+                                        }
+                                    }
+                                },
+                                // Freeze both the identity and the impact shown in each confirmation.
+                                target = selected?.let { TmuxRowTarget(it, row.clients, targetLabel) },
+                                onRename = { renameTarget = it },
+                                onConfirm = { action, target -> confirmation = TmuxConfirmation(action, target) },
+                            )
+                        }
+                    }
+                }
+            }
+            HorizontalDivider()
+            Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                TextButton(onClick = { creating = true }, enabled = canCreateTmuxFromEndNotice(state) && !opening,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.tmux_new), modifier = Modifier.padding(start = 8.dp))
+                }
+                if (onPlainShell != null) {
+                    TextButton(onClick = onPlainShell, enabled = !opening && !state.busy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.tmux_plain_shell))
+                    }
                 }
             }
         }
     }
-
-    dialog?.let { (initial, action) ->
-        var text by remember(initial) { mutableStateOf(initial) }
-        var submitted by remember(initial) { mutableStateOf(false) }
-        var submitting by remember(initial) { mutableStateOf(false) }
-        var failed by remember(initial) { mutableStateOf(false) }
-        val scope = rememberCoroutineScope()
-        val target = remember(initial) { EditorTarget() }
-        val validName = FormValidation.tmuxName(text)
-        fun submit() {
-            if (submitting) return
-            submitted = true
-            if (!validName) { scope.launch { target.reveal() }; return }
-            submitting = true
-            failed = false
-            scope.launch {
-                try {
-                    if (action(text.trim())) dialog = null else failed = true
-                } catch (cancelled: CancellationException) { throw cancelled
-                } catch (_: Exception) { failed = true
-                } finally { submitting = false }
-            }
-        }
-        AlertDialog(
-            onDismissRequest = { if (!submitting) dialog = null },
-            title = { Text(stringResource(if (initial.isEmpty()) R.string.tmux_new else R.string.tmux_rename_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FormTextField(text, { text = it }, stringResource(R.string.tmux_name_hint),
-                        error = if (!validName) stringResource(R.string.tmux_name_invalid) else null, submitted = submitted,
-                        enabled = !submitting, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { submit() }), modifier = Modifier.editorTarget(target))
-                    if (failed) InfoNote(state.message ?: stringResource(R.string.form_action_failed), error = true)
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = !submitting, onClick = { submit() }) {
-                    Text(stringResource(if (submitting) R.string.action_working else if (initial.isEmpty()) R.string.action_create else R.string.action_rename))
-                }
-            },
-            dismissButton = { TextButton(enabled = !submitting, onClick = { dialog = null }) { Text(stringResource(R.string.action_cancel)) } },
+    if (creating) {
+        TmuxNameDialog(
+            initial = defaultName,
+            state = state,
+            onDismiss = { creating = false },
+            onSubmit = onNew,
+            onSuccess = { creating = false; onOpened() },
         )
     }
-
-    detachTarget?.let { target ->
-        ConfirmDialog(
-            title = stringResource(R.string.tmux_detach_confirm_title),
-            message = pluralStringResource(
-                R.plurals.tmux_detach_confirm_message,
-                target.clients,
-                target.clients,
-                target.name,
-            ),
-            confirmLabel = stringResource(R.string.tmux_detach),
-            onConfirm = {
-                detachTarget = null
-                onDetach(target)
-            },
-            onDismiss = { detachTarget = null },
+    renameTarget?.let { target ->
+        TmuxNameDialog(
+            initial = target.selection.session.name,
+            originalName = target.selection.session.name,
+            state = state,
+            onDismiss = { renameTarget = null },
+            onSubmit = { management?.rename?.invoke(target.selection, it) == true },
+            onSuccess = { renameTarget = null },
         )
     }
-
-    takeOverTarget?.let { target ->
-        ConfirmDialog(
-            title = stringResource(R.string.tmux_take_over_confirm_title),
-            message = pluralStringResource(
-                R.plurals.tmux_take_over_confirm_message,
-                target.clients,
-                target.clients,
-                target.name,
-            ),
-            confirmLabel = stringResource(R.string.tmux_take_over),
-            onConfirm = {
-                takeOverTarget = null
-                onTakeOver(target)
-                onDismiss()
+    confirmation?.let { pending ->
+        val target = pending.target
+        val name = target.selection.session.name
+        val action = pending.action
+        AsyncTmuxConfirmDialog(
+            title = stringResource(when (action) {
+                TmuxConfirmAction.TAKE_OVER -> R.string.tmux_take_over_confirm_title
+                TmuxConfirmAction.DETACH -> R.string.tmux_detach_confirm_title
+                TmuxConfirmAction.END -> R.string.tmux_kill_confirm_title
+            }),
+            message = stringResource(R.string.tmux_target, target.targetLabel) + "\n\n" + when (action) {
+                TmuxConfirmAction.TAKE_OVER -> pluralStringResource(R.plurals.tmux_take_over_confirm_message, target.clients, target.clients, name)
+                TmuxConfirmAction.DETACH -> pluralStringResource(R.plurals.tmux_detach_confirm_message, target.clients, target.clients, name)
+                TmuxConfirmAction.END -> stringResource(R.string.tmux_kill_confirm_message, name) +
+                    if (target.clients > 0) "\n" + pluralStringResource(R.plurals.tmux_end_clients, target.clients, target.clients) else ""
             },
-            onDismiss = { takeOverTarget = null },
-        )
-    }
-
-    killTarget?.let { target ->
-        ConfirmDialog(
-            title = stringResource(R.string.tmux_kill_confirm_title),
-            message = stringResource(R.string.tmux_kill_confirm_message, target.name),
-            confirmLabel = stringResource(R.string.tmux_kill),
-            destructive = true,
+            confirmLabel = stringResource(when (action) {
+                TmuxConfirmAction.TAKE_OVER -> R.string.tmux_take_over
+                TmuxConfirmAction.DETACH -> R.string.tmux_detach
+                TmuxConfirmAction.END -> R.string.tmux_kill
+            }),
+            state = state,
+            destructive = action == TmuxConfirmAction.END,
+            onDismiss = { confirmation = null },
             onConfirm = {
-                killTarget = null
-                onKill(target)
+                when (action) {
+                    TmuxConfirmAction.TAKE_OVER -> management?.takeOver?.invoke(target.selection)
+                    TmuxConfirmAction.DETACH -> management?.detach?.invoke(target.selection)
+                    TmuxConfirmAction.END -> management?.kill?.invoke(target.selection)
+                } == true
             },
-            onDismiss = { killTarget = null },
+            onSuccess = { confirmation = null; if (action == TmuxConfirmAction.TAKE_OVER) onOpened() },
         )
     }
 }
 
 @Composable
-private fun EmptyTmuxText(text: String) {
-    Text(
-        text,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.padding(vertical = 24.dp),
+private fun TmuxStatusText(text: String, loading: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TmuxSessionRow(
+    session: TmuxSession,
+    current: Boolean,
+    enabled: Boolean,
+    showManagement: Boolean,
+    managementEnabled: Boolean,
+    onOpen: () -> Unit,
+    target: TmuxRowTarget?,
+    onRename: (TmuxRowTarget) -> Unit,
+    onConfirm: (TmuxConfirmAction, TmuxRowTarget) -> Unit,
+) {
+    var menuTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
+    val openLabel = stringResource(if (current) R.string.tmux_return else R.string.tmux_attach)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            Modifier.weight(1f).heightIn(min = 72.dp)
+                .clickable(enabled = enabled, onClickLabel = openLabel, onClick = onOpen)
+                .padding(vertical = 12.dp, horizontal = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                session.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+                modifier = Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = session.name },
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (current) Text(stringResource(R.string.tmux_current), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(pluralStringResource(R.plurals.tmux_windows, session.windows, session.windows),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(pluralStringResource(R.plurals.tmux_clients, session.clients, session.clients),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (showManagement) Box {
+            IconButton(onClick = { menuTarget = target }, enabled = managementEnabled,
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.tmux_more_for, session.name))
+            }
+            DropdownMenu(expanded = menuTarget != null, onDismissRequest = { menuTarget = null }) {
+                menuTarget?.let { frozen ->
+                    Text(frozen.selection.session.name, style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.tmux_rename)) },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                        enabled = managementEnabled,
+                        onClick = { menuTarget = null; onRename(frozen) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.tmux_take_over)) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null) },
+                        enabled = managementEnabled && frozen.clients > 0 && !current,
+                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.TAKE_OVER, frozen) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.tmux_detach)) },
+                        leadingIcon = { Icon(Icons.Filled.LinkOff, contentDescription = null) },
+                        enabled = managementEnabled && frozen.clients > 0,
+                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.DETACH, frozen) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.tmux_kill), color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        enabled = managementEnabled,
+                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.END, frozen) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A small, IME-resized editor; a failed request never discards the user's draft. */
+@Composable
+internal fun TmuxNameDialog(
+    initial: String,
+    state: TmuxUiState,
+    onDismiss: () -> Unit,
+    onSubmit: suspend (String) -> Boolean,
+    onSuccess: () -> Unit,
+    originalName: String? = null,
+    fromEndNotice: Boolean = false,
+) {
+    var text by remember { mutableStateOf(initial) }
+    var submitted by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val target = remember { EditorTarget() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { target.reveal() }
+    val validName = FormValidation.tmuxName(text)
+    val allowed = when {
+        originalName != null -> state.canManage
+        fromEndNotice -> canCreateTmuxFromEndNotice(state)
+        else -> canCreateTmuxFromEndNotice(state)
+    }
+    fun submit() {
+        if (submitting || !allowed) return
+        submitted = true
+        if (!validName) { scope.launch { target.reveal() }; return }
+        submitting = true
+        failed = false
+        scope.launch {
+            try {
+                completeTmuxUiAction({ onSubmit(text.trim()) }, onSuccess, { failed = true })
+            } finally { submitting = false }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text(stringResource(if (originalName == null) R.string.tmux_new else R.string.tmux_rename_title), style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (originalName != null) Text(originalName, style = MaterialTheme.typography.bodyMedium)
+                FormTextField(
+                    value = text, onValueChange = { text = it }, label = stringResource(R.string.tmux_name_hint),
+                    error = if (!validName) stringResource(R.string.tmux_name_invalid) else null, submitted = submitted,
+                    enabled = !submitting && !state.busy,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }), modifier = Modifier.editorTarget(target),
+                )
+                if (failed || state.message != null) InfoNote(state.message ?: stringResource(R.string.form_action_failed), error = true)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !submitting && allowed, onClick = { submit() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(if (submitting) R.string.action_working else if (originalName == null) R.string.tmux_create_open else R.string.action_rename))
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !submitting, onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.action_cancel)) }
+        },
     )
 }
 
 @Composable
-private fun TmuxRow(
-    session: TmuxSession,
-    current: Boolean,
-    enabled: Boolean,
-    onAttach: () -> Unit,
-    onTakeOver: () -> Unit,
-    onRename: () -> Unit,
-    onDetach: () -> Unit,
-    onKill: () -> Unit,
+private fun AsyncTmuxConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    state: TmuxUiState,
+    destructive: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: suspend () -> Boolean,
+    onSuccess: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                session.name + if (current) "  · " + stringResource(R.string.tmux_current) else "",
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-            )
-            val sub = pluralStringResource(R.plurals.tmux_windows, session.windows, session.windows) +
-                (if (session.clients > 0) {
-                    "  · " + pluralStringResource(R.plurals.tmux_clients, session.clients, session.clients)
-                } else "")
-            Text(
-                sub,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = MokeMono,
-                maxLines = 1,
-            )
-        }
-        FilledTonalButton(
-            onClick = onAttach,
-            enabled = enabled,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-        ) {
-            Text(
-                stringResource(
-                    when {
-                        current -> R.string.tmux_return
-                        session.clients > 0 -> R.string.tmux_join
-                        else -> R.string.tmux_resume
+    var submitting by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(message)
+                if (failed || state.message != null) InfoNote(state.message ?: stringResource(R.string.tmux_action_failed), error = true)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !submitting && state.canManage, modifier = Modifier.heightIn(min = 48.dp), onClick = {
+                if (!submitting) {
+                    submitting = true
+                    failed = false
+                    scope.launch {
+                        try {
+                            completeTmuxUiAction(onConfirm, onSuccess, { failed = true })
+                        } finally { submitting = false }
                     }
-                )
-            )
-        }
-        Box {
-            IconButton(onClick = { menuOpen = true }, enabled = enabled) {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = stringResource(R.string.action_more),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                }
+            }) {
+                Text(if (submitting) stringResource(R.string.action_working) else confirmLabel,
+                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.tmux_rename)) },
-                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                    onClick = {
-                        menuOpen = false
-                        onRename()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.tmux_take_over)) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null) },
-                    enabled = session.clients > 0 && !current,
-                    onClick = {
-                        menuOpen = false
-                        onTakeOver()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.tmux_detach)) },
-                    leadingIcon = { Icon(Icons.Filled.LinkOff, contentDescription = null) },
-                    enabled = session.clients > 0,
-                    onClick = {
-                        menuOpen = false
-                        onDetach()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.tmux_kill), color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onKill()
-                    },
-                )
-            }
-        }
-    }
+        },
+        dismissButton = {
+            TextButton(enabled = !submitting, onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
 }
