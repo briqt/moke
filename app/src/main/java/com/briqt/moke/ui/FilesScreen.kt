@@ -11,9 +11,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -60,10 +63,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -127,6 +136,13 @@ fun FilesScreen(
     var gotoOpen by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<RemoteEntry?>(null) }
     var showQueue by remember { mutableStateOf(false) }
+    var uploadFabTop by remember { mutableStateOf<Float?>(null) }
+    var entriesBottom by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    // Measure overlap after Scaffold insets and the transfer bar have been consumed.
+    val tailPadding = if (state.canUpload) uploadFabTop?.let { top ->
+        with(density) { (entriesBottom - top).coerceAtLeast(0f).toDp() } + 12.dp
+    } ?: 0.dp else 0.dp
 
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -149,13 +165,15 @@ fun FilesScreen(
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                         )
-                        Text(
-                            state.path.ifBlank { stringResource(R.string.files_connecting) },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = MokeMono,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
+                        if (state.path.isNotBlank() || state.loading) {
+                            Text(
+                                state.path.ifBlank { stringResource(R.string.files_connecting) },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = MokeMono,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -237,6 +255,7 @@ fun FilesScreen(
                     text = { Text(stringResource(R.string.files_upload_here)) },
                     icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
                     onClick = { if (onBeforePickUpload()) uploadLauncher.launch(arrayOf("*/*")) },
+                    modifier = Modifier.onGloballyPositioned { uploadFabTop = it.boundsInRoot().top },
                 )
             }
         },
@@ -250,16 +269,19 @@ fun FilesScreen(
                 ErrorBanner(state.error, onClearError, recovery, onRecover)
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { entriesBottom = it.boundsInRoot().bottom }) {
                 when {
                     state.loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    visible.isEmpty() && state.path.isNotBlank() -> Text(
-                        stringResource(R.string.files_empty),
+                    visible.isEmpty() && state.path.isNotBlank() && state.error.isBlank() -> Text(
+                        stringResource(if (state.entries.isEmpty()) R.string.files_empty else R.string.files_only_hidden),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.Center),
                     )
-                    else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = tailPadding),
+                    ) {
                         if (state.path != RemotePath.ROOT && state.path.isNotBlank()) {
                             item {
                                 EntryRow(
@@ -276,6 +298,10 @@ fun FilesScreen(
                                 icon = if (e.isDir) Icons.Filled.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
                                 title = e.name,
                                 subtitle = subtitleOf(e),
+                                titleDescription = stringResource(
+                                    if (e.isDir) R.string.files_folder_description else R.string.files_file_description,
+                                    e.name,
+                                ),
                                 onClick = { if (e.isDir) onNavigate(e.path) else selected = e },
                                 onLongClick = { selected = e },
                             )
@@ -340,6 +366,7 @@ fun FilesScreen(
                 Text(
                     stringResource(R.string.files_overwrite_message, conflict.names.joinToString("\n")),
                     style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                 )
             },
             confirmButton = {
@@ -460,6 +487,7 @@ private fun EntryRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
+    titleDescription: String = title,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
 ) {
@@ -477,7 +505,13 @@ private fun EntryRow(
             modifier = Modifier.size(22.dp),
         )
         Column(modifier = Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                // Replace only the spoken title; the row still merges its metadata and click actions.
+                modifier = Modifier.clearAndSetSemantics { text = AnnotatedString(titleDescription) },
+            )
             if (subtitle.isNotBlank()) {
                 Text(
                     subtitle,
@@ -628,46 +662,48 @@ private fun TransferQueueSheet(
                 TextButton(onClick = onClearFinished) { Text(stringResource(R.string.files_transfer_clear)) }
             }
             HorizontalDivider()
-            tasks.forEach { t ->
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(t.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.weight(1f))
-                        when {
-                            t.active -> TextButton(onClick = { onCancel(t.id) }) {
-                                Text(stringResource(R.string.files_transfer_cancel))
-                            }
-                            t.state == TransferState.DONE -> TextButton(onClick = { onRemove(t.id) }) {
-                                Text(stringResource(R.string.files_transfer_remove))
-                            }
-                            else -> TextButton(onClick = { onResume(t.id) }) {
-                                Text(stringResource(R.string.files_transfer_resume))
+            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                items(tasks, key = { it.id }) { t ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(t.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.weight(1f))
+                            when {
+                                t.active -> TextButton(onClick = { onCancel(t.id) }) {
+                                    Text(stringResource(R.string.files_transfer_cancel))
+                                }
+                                t.state == TransferState.DONE -> TextButton(onClick = { onRemove(t.id) }) {
+                                    Text(stringResource(R.string.files_transfer_remove))
+                                }
+                                else -> TextButton(onClick = { onResume(t.id) }) {
+                                    Text(stringResource(R.string.files_transfer_resume))
+                                }
                             }
                         }
-                    }
-                    Text(
-                        buildString {
-                            append(t.hostLabel)
-                            append(" · ")
-                            append(RemotePath.formatSize(t.done))
-                            if (t.total > 0) {
-                                append(" / ")
-                                append(RemotePath.formatSize(t.total))
-                            }
-                            append(" · ")
-                            append(stateLabel(t))
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (t.error.isNotBlank()) {
                         Text(
-                            t.error,
+                            buildString {
+                                append(t.hostLabel)
+                                append(" · ")
+                                append(RemotePath.formatSize(t.done))
+                                if (t.total > 0) {
+                                    append(" / ")
+                                    append(RemotePath.formatSize(t.total))
+                                }
+                                append(" · ")
+                                append(stateLabel(t))
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (t.error.isNotBlank()) {
+                            Text(
+                                t.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
+                    HorizontalDivider()
                 }
-                HorizontalDivider()
             }
         }
     }

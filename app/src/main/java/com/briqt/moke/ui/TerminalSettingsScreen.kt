@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
-import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.ui.theme.MokeDimens
 
 /**
@@ -45,7 +44,6 @@ import com.briqt.moke.ui.theme.MokeDimens
 @Composable
 fun TerminalSettingsScreen(
     keyboardMode: KeyboardMode,
-    scrollMode: ScrollMode,
     tmuxScrollSetup: Boolean,
     keepScreenOn: Boolean,
     confirmClose: Boolean,
@@ -55,7 +53,6 @@ fun TerminalSettingsScreen(
     onExtraKeysLayout: (String) -> Unit,
     onTerminalAlerts: (Boolean) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
-    onScrollMode: (ScrollMode) -> Unit,
     onTmuxScrollSetup: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onConfirmClose: (Boolean) -> Unit,
@@ -63,7 +60,6 @@ fun TerminalSettingsScreen(
     onBack: () -> Unit,
 ) {
     var kbDialog by remember { mutableStateOf(false) }
-    var scrollDialog by remember { mutableStateOf(false) }
     var keysDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -105,12 +101,6 @@ fun TerminalSettingsScreen(
                 stringResource(R.string.menu_extra_keys),
                 onClick = { keysDialog = true },
             )
-            NavRow(
-                Icons.Filled.SwipeVertical,
-                stringResource(R.string.scroll_mode),
-                stringResource(scrollModeLabel(scrollMode)),
-                onClick = { scrollDialog = true },
-            )
             SwitchRow(
                 icon = Icons.Filled.SwipeVertical,
                 title = stringResource(R.string.menu_tmux_scroll_setup),
@@ -149,14 +139,6 @@ fun TerminalSettingsScreen(
             stored = extraKeysLayout,
             onChange = onExtraKeysLayout,
             onDismiss = { keysDialog = false },
-        )
-    }
-
-    if (scrollDialog) {
-        ScrollModeDialog(
-            current = scrollMode,
-            onPick = { onScrollMode(it); scrollDialog = false },
-            onDismiss = { scrollDialog = false },
         )
     }
 

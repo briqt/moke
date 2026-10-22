@@ -13,6 +13,7 @@ import com.briqt.moke.net.UdpRelay
 import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.networkException
 import com.termux.terminal.JNI
+import com.termux.terminal.TerminalScrollToken
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
@@ -77,9 +78,9 @@ class MoshTransport(
     @Volatile private var child: MoshChildProcess? = null
     @Volatile private var out: FileOutputStream? = null
     @Volatile private var loginThread: Thread? = null
-    private val writeExec = Executors.newSingleThreadExecutor()
     private val resources = TransportResources()
     private val closed get() = resources.closed
+    private val inputQueue = TerminalInputQueue("moke-mosh-input") { if (closed) null else out }
     private val childExited get() = child?.exited == true
     private val auxiliaryStopped = AtomicBoolean()
     private val server = MoshServerProcess(::killOrphanServer)
@@ -202,8 +203,8 @@ class MoshTransport(
                             // 换行用 CR（真实回车），与 SSH/附加键/文本段一致；多行逐行执行。
                             val payload = host.loginCommand.replace("\r\n", "\n").replace("\n", "\r")
                                 .let { if (it.endsWith("\r")) it else it + "\r" }
-                            out?.write(payload.toByteArray(StandardCharsets.UTF_8))
-                            out?.flush()
+                            val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+                            write(bytes, 0, bytes.size)
                         }
                     }, "moke-mosh-login").also { it.start() }
                 }
@@ -419,18 +420,20 @@ class MoshTransport(
     }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
-        if (closed) return
-        val copy = data.copyOfRange(offset, offset + count)
-        runCatching {
-            writeExec.execute {
-                if (!closed) runCatching { out?.write(copy); out?.flush() }
-            }
-        }
+        if (!closed) inputQueue.write(data, offset, count)
+    }
+
+    override fun writeScroll(data: ByteArray, offset: Int, count: Int, token: TerminalScrollToken) {
+        if (!closed) inputQueue.writeScroll(data, offset, count, token)
     }
 
     override fun updateSize(columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
-        if (!closed) child?.withFd { fd ->
-            runCatching { JNI.setPtyWindowSize(fd, rows, columns, cellWidthPixels, cellHeightPixels) }
+        if (closed) return
+        val process = child ?: return
+        inputQueue.execute {
+            if (!closed) process.withFd { fd ->
+                JNI.setPtyWindowSize(fd, rows, columns, cellWidthPixels, cellHeightPixels)
+            }
         }
     }
 
@@ -461,7 +464,7 @@ class MoshTransport(
     }
 
     private fun stopAuxiliaryWork() {
-        writeExec.shutdownNow()
+        inputQueue.shutdownNow()
         loginThread?.interrupt()
         if (!auxiliaryStopped.compareAndSet(false, true)) return
         // No main-thread sshj I/O or controlLock wait. A late connector checks closed after publishing.

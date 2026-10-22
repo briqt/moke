@@ -32,7 +32,12 @@ import android.view.autofill.AutofillValue;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
-import android.widget.Scroller;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.IdentityHashMap;
+
+import com.termux.terminal.TerminalBuffer;
+import com.termux.terminal.TerminalScrollToken;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -73,15 +78,52 @@ public final class TerminalView extends View {
     float mScaleFactor = 1.f;
     final GestureAndScaleRecognizer mGestureRecognizer;
 
-    /** Keep track of where mouse touch event started which we report as mouse scroll. */
-    private int mMouseScrollStartX = -1, mMouseScrollStartY = -1;
-    /** Keep track of the time when a touch event leading to sending mouse scroll events started. */
-    private long mMouseStartDownTime = -1;
+    private final IdentityHashMap<TerminalBuffer, ScrollViewport> mViewports = new IdentityHashMap<>();
+    private ScrollViewport mViewport = new ScrollViewport();
+    private TerminalBuffer mViewportBuffer;
+    private final ScrollMotion mMotion = new ScrollMotion();
+    private ScrollGesture mScrollGesture;
+    private long mBindingGeneration, mGeometryGeneration;
+    private long mObservedInputGeneration = -1;
+    private int mObservedScrollMode;
+    private int mGeometryWidth, mGeometryHeight, mGeometryLineHeight;
+    private float mGeometryFontWidth;
+    private boolean mFontGeometryDirty;
+    private float mTouchStartX, mTouchStartY;
+    private boolean mMouseStopSequence;
+    private int mMouseButton;
+    private final ScrollMotion.WheelAccumulator mPhysicalWheel = new ScrollMotion.WheelAccumulator();
+    private int mUserInputDepth;
+    private boolean mScrollFramePosted, mPreserveScaleOnCancel;
+    private double mPendingScrollPixels;
+    private final ByteArrayOutputStream mPhysicalWheelBatch = new ByteArrayOutputStream();
+    private int mPhysicalWheelBatchUnits;
 
-    final Scroller mScroller;
+    private void postScrollFrame() {
+        if (!mScrollFramePosted) {
+            mScrollFramePosted = true;
+            postOnAnimation(mScrollFrame);
+        }
+    }
 
-    /** What was left in from scrolling movement. */
-    float mScrollRemainder;
+    private final Runnable mScrollFrame = new Runnable() {
+        @Override public void run() {
+            mScrollFramePosted = false;
+            ScrollGesture gesture = mScrollGesture;
+            if (gesture == null || !isScrollValid(gesture)) { cancelScrollMotion(); checkInputContext(); return; }
+            double pixels = mPendingScrollPixels + mMotion.step(SystemClock.uptimeMillis());
+            mPendingScrollPixels = 0;
+            if (gesture.physical && mPhysicalWheelBatch.size() > 0) {
+                byte[] bytes = mPhysicalWheelBatch.toByteArray();
+                mPhysicalWheelBatch.reset();
+                mPhysicalWheelBatchUnits = 0;
+                gesture.session.writeScroll(bytes, 0, bytes.length, gesture.token);
+            } else {
+                dispatchScrollPixels(gesture, pixels);
+            }
+            if (mMotion.isRunning() && isScrollValid(gesture)) postScrollFrame();
+        }
+    };
 
     /** If non-zero, this is the last unicode code point received if that was a combining character. */
     int mCombiningAccent;
@@ -136,127 +178,80 @@ public final class TerminalView extends View {
     public TerminalView(Context context, AttributeSet attributes) { // NO_UCD (unused code)
         super(context, attributes);
         mGestureRecognizer = new GestureAndScaleRecognizer(context, new GestureAndScaleRecognizer.Listener() {
-
-            boolean scrolledWithFinger;
-
-            @Override
-            public boolean onUp(MotionEvent event) {
-                mScrollRemainder = 0.0f;
-                if (mEmulator != null && mEmulator.isMouseTrackingActive() && !event.isFromSource(InputDevice.SOURCE_MOUSE) && !isSelectingText() && !scrolledWithFinger) {
-                    // Quick event processing when mouse tracking is active - do not wait for check of double tapping
-                    // for zooming.
+            @Override public boolean onUp(MotionEvent event) {
+                if (mEmulator == null || checkInputContext()) return true;
+                if (!isSelectingText() && mEmulator.isMouseTrackingActive()) {
+                    followCurrentScreen();
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
                     return true;
                 }
-                scrolledWithFinger = false;
                 return false;
             }
 
-            @Override
-            public boolean onSingleTapUp(MotionEvent event) {
+            @Override public boolean onSingleTapUp(MotionEvent event) {
                 if (mEmulator == null) return true;
-
+                if (checkInputContext()) return true;
                 if (isSelectingText()) {
                     stopTextSelectionMode();
-                    return true;
-                }
-                requestFocus();
-                mClient.onSingleTapUp(event);
-                return true;
-            }
-
-            @Override
-            public boolean onScroll(MotionEvent e, float distanceX, float distanceY) {
-                if (mEmulator == null) return true;
-                if (mEmulator.isMouseTrackingActive() && e.isFromSource(InputDevice.SOURCE_MOUSE)) {
-                    // If moving with mouse pointer while pressing button, report that instead of scroll.
-                    // This means that we never report moving with button press-events for touch input,
-                    // since we cannot just start sending these events without a starting press event,
-                    // which we do not do for touch input, only mouse in onTouchEvent().
-                    sendMouseEventCode(e, TerminalEmulator.MOUSE_LEFT_BUTTON_MOVED, true);
+                } else if (mEmulator.isMouseTrackingActive()) {
+                    // The remote click consumes the tap; never also open a link or keyboard.
+                    followCurrentScreen();
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
                 } else {
-                    scrolledWithFinger = true;
-                    distanceY += mScrollRemainder;
-                    int deltaRows = (int) (distanceY / mRenderer.mFontLineSpacing);
-                    mScrollRemainder = distanceY - deltaRows * mRenderer.mFontLineSpacing;
-                    doScroll(e, deltaRows);
+                    requestFocus();
+                    mClient.onSingleTapUp(event);
                 }
                 return true;
             }
 
-            @Override
-            public boolean onScale(float focusX, float focusY, float scale) {
+            @Override public boolean onScroll(MotionEvent event, float dx, float dy) {
+                if (mEmulator == null) return true;
+                if (mScrollGesture == null) {
+                    if (checkInputContext()) return true;
+                    mScrollGesture = new ScrollGesture(mTouchStartX, mTouchStartY, isSelectingText());
+                }
+                queueScrollPixels(mScrollGesture, dy);
+                return true;
+            }
+
+            @Override public boolean onScale(float focusX, float focusY, float scale) {
                 if (mEmulator == null || isSelectingText()) return true;
                 mScaleFactor *= scale;
                 mScaleFactor = mClient.onScale(mScaleFactor);
                 return true;
             }
 
-            @Override
-            public boolean onFling(final MotionEvent e2, float velocityX, float velocityY) {
-                if (mEmulator == null) return true;
-                // Do not start scrolling until last fling has been taken care of:
-                if (!mScroller.isFinished()) return true;
-
-                final boolean mouseTrackingAtStartOfFling = mEmulator.isMouseTrackingActive();
-                float SCALE = 0.25f;
-                if (mouseTrackingAtStartOfFling) {
-                    mScroller.fling(0, 0, 0, -(int) (velocityY * SCALE), 0, 0, -mEmulator.mRows / 2, mEmulator.mRows / 2);
-                } else {
-                    mScroller.fling(0, mTopRow, 0, -(int) (velocityY * SCALE), 0, 0, -mEmulator.getScreen().getActiveTranscriptRows(), 0);
-                }
-
-                post(new Runnable() {
-                    private int mLastY = 0;
-
-                    @Override
-                    public void run() {
-                        if (mouseTrackingAtStartOfFling != mEmulator.isMouseTrackingActive()) {
-                            mScroller.abortAnimation();
-                            return;
-                        }
-                        if (mScroller.isFinished()) return;
-                        boolean more = mScroller.computeScrollOffset();
-                        int newY = mScroller.getCurrY();
-                        int diff = mouseTrackingAtStartOfFling ? (newY - mLastY) : (newY - mTopRow);
-                        doScroll(e2, diff);
-                        mLastY = newY;
-                        if (more) post(this);
-                    }
-                });
-
+            @Override public boolean onFling(MotionEvent event, float vx, float vy) {
+                ScrollGesture gesture = mScrollGesture;
+                if (gesture == null || !isScrollValid(gesture) || isSelectingText() || gesture.action == MokeScroll.ACTION_NONE) return true;
+                mMotion.start(-vy, SystemClock.uptimeMillis(), gesture.action != MokeScroll.ACTION_LOCAL, gesture.unitPixels);
+                postScrollFrame();
                 return true;
             }
 
-            @Override
-            public boolean onDown(float x, float y) {
-                // Why is true not returned here?
-                // https://developer.android.com/training/gestures/detector.html#detect-a-subset-of-supported-gestures
-                // Although setting this to true still does not solve the following errors when long pressing in terminal view text area
-                // ViewDragHelper: Ignoring pointerId=0 because ACTION_DOWN was not received for this pointer before ACTION_MOVE
-                // Commenting out the call to mGestureDetector.onTouchEvent(event) in GestureAndScaleRecognizer#onTouchEvent() removes
-                // the error logging, so issue is related to GestureDetector
-                return false;
+            @Override public boolean onDown(float x, float y) {
+                boolean stopping = mMotion.isRunning();
+                cancelScrollMotion();
+                checkInputContext();
+                mTouchStartX = x;
+                mTouchStartY = y;
+                return stopping;
             }
 
-            @Override
-            public boolean onDoubleTap(MotionEvent event) {
-                // Do not treat is as a single confirmed tap - it may be followed by zoom.
-                return false;
-            }
+            @Override public void onCancel() { cancelScrollMotion(); }
+            @Override public boolean onDoubleTap(MotionEvent event) { return true; }
 
-            @Override
-            public void onLongPress(MotionEvent event) {
-                if (mGestureRecognizer.isInProgress()) return;
-                if (mClient.onLongPress(event)) return;
+            @Override public void onLongPress(MotionEvent event) {
+                cancelScrollMotion();
+                if (mGestureRecognizer.isInProgress() || mClient.onLongPress(event)) return;
                 if (!isSelectingText()) {
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                     startTextSelectionMode(event);
                 }
             }
         });
-        mScroller = new Scroller(context);
         AccessibilityManager am = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
         mAccessibilityEnabled = am.isEnabled();
     }
@@ -289,7 +284,15 @@ public final class TerminalView extends View {
      */
     public boolean attachSession(TerminalSession session) {
         if (session == mTermSession) return false;
+        mokeCancelScroll();
+        forceStopTextSelection();
+        mBindingGeneration++;
+        mViewports.clear();
+        mViewport = new ScrollViewport();
+        mViewportBuffer = null;
+        mObservedInputGeneration = -1;
         mTopRow = 0;
+        mokeNotifiedTopRow = Integer.MIN_VALUE;
 
         mTermSession = session;
         mEmulator = null;
@@ -377,8 +380,12 @@ public final class TerminalView extends View {
             }
 
             void sendTextToTerminal(CharSequence text) {
-                stopTextSelectionMode();
                 final int textLengthInChars = text.length();
+                if (textLengthInChars == 0) return;
+                mokePrepareForUserInput();
+                stopTextSelectionMode();
+                mUserInputDepth++;
+                try {
                 for (int i = 0; i < textLengthInChars; i++) {
                     char firstChar = text.charAt(i);
                     int codePoint;
@@ -430,6 +437,9 @@ public final class TerminalView extends View {
 
                     inputCodePoint(KEY_EVENT_SOURCE_SOFT_KEYBOARD, codePoint, ctrlHeld, false);
                 }
+                } finally {
+                    mUserInputDepth--;
+                }
             }
 
         };
@@ -437,17 +447,17 @@ public final class TerminalView extends View {
 
     @Override
     protected int computeVerticalScrollRange() {
-        return mEmulator == null ? 1 : mEmulator.getScreen().getActiveRows();
+        return mEmulator == null || mRenderer == null ? 1 : mEmulator.getScreen().getActiveRows() * mRenderer.mFontLineSpacing;
     }
 
     @Override
     protected int computeVerticalScrollExtent() {
-        return mEmulator == null ? 1 : mEmulator.mRows;
+        return mEmulator == null || mRenderer == null ? 1 : mEmulator.mRows * mRenderer.mFontLineSpacing;
     }
 
     @Override
     protected int computeVerticalScrollOffset() {
-        return mEmulator == null ? 1 : mEmulator.getScreen().getActiveRows() + mTopRow - mEmulator.mRows;
+        return mEmulator == null || mRenderer == null ? 1 : (int) Math.round((mEmulator.getScreen().getActiveTranscriptRows() + mViewport.position()) * mRenderer.mFontLineSpacing);
     }
 
     public void onScreenUpdated() {
@@ -457,41 +467,10 @@ public final class TerminalView extends View {
     public void onScreenUpdated(boolean skipScrolling) {
         if (mEmulator == null) return;
 
-        int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
-        if (mTopRow < -rowsInHistory) mTopRow = -rowsInHistory;
-
-        if (isSelectingText() || mEmulator.isAutoScrollDisabled()) {
-
-            // Do not scroll when selecting text.
-            int rowShift = mEmulator.getScrollCounter();
-            if (-mTopRow + rowShift > rowsInHistory) {
-                // .. unless we're hitting the end of history transcript, in which
-                // case we abort text selection and scroll to end.
-                if (isSelectingText())
-                    stopTextSelectionMode();
-
-                if (mEmulator.isAutoScrollDisabled()) {
-                    mTopRow = -rowsInHistory;
-                    skipScrolling = true;
-                }
-            } else {
-                skipScrolling = true;
-                mTopRow -= rowShift;
-                decrementYTextSelectionCursors(rowShift);
-            }
-        }
-
-        if (!skipScrolling && mTopRow != 0) {
-            // Scroll down if not already there.
-            if (mTopRow < -3) {
-                // Awaken scroll bars only if scrolling a noticeable amount
-                // - we do not want visible scroll bars during normal typing
-                // of one row at a time.
-                awakenScrollBars();
-            }
-            mTopRow = 0;
-        }
-
+        checkInputContext();
+        syncViewport();
+        // Following/Reading is explicit. Normal output never turns Reading into Following.
+        // In particular, the emulator scroll counter also counts non-history margin copies.
         mEmulator.clearScrollCounter();
 
         invalidate();
@@ -516,11 +495,15 @@ public final class TerminalView extends View {
     private float mLetterSpacingEm = 0f;
 
     public void setTextSize(int textSize) {
+        if (mRenderer != null && mRenderer.mTextSize == textSize) return;
+        mFontGeometryDirty = true;
         mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface, mLineSpacingMul, mLetterSpacingEm);
         updateSize();
     }
 
     public void setTypeface(Typeface newTypeface) {
+        if (java.util.Objects.equals(mRenderer.mTypeface, newTypeface)) return;
+        mFontGeometryDirty = true;
         mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface, mLineSpacingMul, mLetterSpacingEm);
         updateSize();
         invalidate();
@@ -528,6 +511,8 @@ public final class TerminalView extends View {
 
     /** moke 扩展：设置行距倍数与字间距（em），重建渲染器并重算行列。 */
     public void setFontSpacing(float lineSpacingMul, float letterSpacingEm) {
+        if (mLineSpacingMul == lineSpacingMul && mLetterSpacingEm == letterSpacingEm) return;
+        mFontGeometryDirty = true;
         mLineSpacingMul = lineSpacingMul;
         mLetterSpacingEm = letterSpacingEm;
         if (mRenderer != null) {
@@ -559,10 +544,11 @@ public final class TerminalView extends View {
      * @return Array with the column and row.
      */
     public int[] getColumnAndRow(MotionEvent event, boolean relativeToScroll) {
-        int column = (int) (event.getX() / mRenderer.mFontWidth);
-        int row = (int) ((event.getY() - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing);
-        if (relativeToScroll) {
-            row += mTopRow;
+        int column = (int) Math.floor(event.getX() / mRenderer.mFontWidth);
+        int row = relativeToScroll ? getCursorY(event.getY()) : currentScreenRow(event.getY());
+        if (relativeToScroll && mEmulator != null) {
+            column = Math.max(0, Math.min(mEmulator.mColumns - 1, column));
+            row = Math.max(-mEmulator.getScreen().getActiveTranscriptRows(), Math.min(mEmulator.mRows - 1, row));
         }
         return new int[] { column, row };
     }
@@ -572,113 +558,265 @@ public final class TerminalView extends View {
         int[] columnAndRow = getColumnAndRow(e, false);
         int x = columnAndRow[0] + 1;
         int y = columnAndRow[1] + 1;
-        if (pressed && (button == TerminalEmulator.MOUSE_WHEELDOWN_BUTTON || button == TerminalEmulator.MOUSE_WHEELUP_BUTTON)) {
-            if (mMouseStartDownTime == e.getDownTime()) {
-                x = mMouseScrollStartX;
-                y = mMouseScrollStartY;
-            } else {
-                mMouseStartDownTime = e.getDownTime();
-                mMouseScrollStartX = x;
-                mMouseScrollStartY = y;
-            }
-        }
         mEmulator.sendMouseEvent(button, x, y, pressed);
     }
 
-    /**
-     * Swipe/wheel behaviour in full-screen (alternate buffer) programs — moke addition.
-     * 0 = smart (default), 1 = always wheel, 2 = always arrow keys (pre-0.1.17 behaviour).
-     */
-    public int mokeScrollMode = 0;
-
-    /**
-     * moke: 本会话走的是 mosh。
-     *
-     * <p>mosh-client 自己就是全屏程序，连上即切到备用屏，而它**不转发**远端程序的备用屏切换
-     * （1049）与应用光标键（1）。所以在 mosh 会话里「当前处于备用屏」恒为真、不含任何信息：
-     * 既不能据此断定远端在跑翻页器（发方向键在 shell 提示符上就是翻命令历史），本地也确实没有
-     * 历史可滚（滚动缓冲根本不在 mosh 协议里）。这种滑动什么都不发。
-     */
-    public boolean mokeMoshSession = false;
-
-    /**
-     * moke: 滚屏位置变化回调（参数 = topRow，0 表示在底部）。
-     *
-     * 产品层据此显示「跳到底部」——翻到 300 行历史深处时，回到底部原本只能反复滑动或随便敲个键
-     * （敲键会把字节发给远端，不是无害操作）。在 onDraw 里比较、只在变化时 post 出去：所有改动
-     * mTopRow 的路径（滑动 / 惯性 / 新输出 / 附加会话）都会经过绘制，不必逐个埋点；post 出去是
-     * 为了不在绘制期间回写 Compose 状态。
-     */
+    /** Current-connection temporary override: 0 automatic, 1 wheel, 2 arrow keys. */
+    public int mokeScrollMode;
+    public Runnable mokeOnUserInput;
+    public Runnable mokeOnInputContextChanged;
     public java.util.function.IntConsumer mokeOnTopRowChanged;
+    private int mokeNotifiedTopRow;
 
-    private int mokeNotifiedTopRow = 0;
+    public void setMokeScrollMode(int mode) {
+        if (mode < MokeScroll.MODE_SMART || mode > MokeScroll.MODE_ARROWS) mode = MokeScroll.MODE_SMART;
+        if (mokeScrollMode == mode && mObservedScrollMode == mode) return;
+        mokeScrollMode = mObservedScrollMode = mode;
+        if (mEmulator != null) mObservedInputGeneration = mEmulator.getInputModeGeneration();
+        mokeCancelScroll();
+    }
+
+    /** Invalidate queued scroll writes as well as every view-side continuation and delayed tap. */
+    public void mokeCancelScroll() {
+        cancelScrollMotion();
+        mMouseButton = 0;
+        if (mGestureRecognizer != null && !mPreserveScaleOnCancel) mGestureRecognizer.cancel();
+    }
+
+    private void cancelScrollMotion() {
+        mMotion.cancel();
+        removeCallbacks(mScrollFrame);
+        mScrollFramePosted = false;
+        mPendingScrollPixels = 0;
+        mPhysicalWheelBatch.reset();
+        mPhysicalWheelBatchUnits = 0;
+        if (mScrollGesture != null) mScrollGesture.token.cancel();
+        mScrollGesture = null;
+        mPhysicalWheel.clear();
+    }
+
+    /** Call immediately before actual external keyboard/text/paste submission, never for protocol replies. */
+    public void mokePrepareForUserInput() {
+        if (mUserInputDepth != 0) return;
+        mUserInputDepth++;
+        try {
+            forceStopTextSelection();
+            mokeScrollToBottom();
+            if (mokeOnUserInput != null) mokeOnUserInput.run();
+        } finally {
+            mUserInputDepth--;
+        }
+    }
+
+    public void mokeScrollToBottom() {
+        mokeCancelScroll();
+        forceStopTextSelection();
+        followCurrentScreen();
+    }
+
+    private void followCurrentScreen() {
+        if (mEmulator != null) syncViewport();
+        mViewport.follow();
+        mTopRow = 0;
+        refreshViewportAnchor();
+        invalidate();
+    }
 
     private void mokeNotifyTopRow() {
         if (mokeOnTopRowChanged == null || mTopRow == mokeNotifiedTopRow) return;
         final int row = mTopRow;
+        final long binding = mBindingGeneration;
         mokeNotifiedTopRow = row;
-        post(new Runnable() {
-            @Override
-            public void run() {
-                if (mokeOnTopRowChanged != null) mokeOnTopRowChanged.accept(row);
-            }
+        post(() -> {
+            if (binding == mBindingGeneration && row == mTopRow && mokeOnTopRowChanged != null)
+                mokeOnTopRowChanged.accept(row);
         });
     }
 
-    /** moke: 跳回最新输出（等价于把滚屏位置归零）。 */
-    public void mokeScrollToBottom() {
-        if (mTopRow == 0) return;
-        mTopRow = 0;
-        invalidate();
+    private boolean checkInputContext() {
+        if (mEmulator == null) return false;
+        long generation = mEmulator.getInputModeGeneration();
+        boolean changed = mObservedInputGeneration != -1 && mObservedInputGeneration != generation;
+        boolean modeChanged = mObservedScrollMode != mokeScrollMode;
+        if (changed || modeChanged) mokeCancelScroll();
+        mObservedScrollMode = mokeScrollMode;
+        mObservedInputGeneration = generation;
+        // Set the snapshot before notifying: the app may synchronously reset the override.
+        if (changed && mokeOnInputContextChanged != null) mokeOnInputContextChanged.run();
+        return changed || modeChanged;
     }
 
-    /**
-     * Perform a scroll, either from dragging the screen or by scrolling a mouse wheel.
-     *
-     * <p>moke: 决策本身抽到 {@link MokeScroll#decide}（纯函数、有单测）。这里只负责把结论
-     * 落到具体动作上。关键边界是「全屏程序内滑动」那三档**只在备用屏内生效**——主屏幕永远滚
-     * 本地历史，否则在 shell 提示符上滑动会翻命令历史（方向键）或把 {@code \033[M…} 打进
-     * 命令行（滚轮），而那里恰恰有真正可滚的 scrollback。
-     */
-    void doScroll(MotionEvent event, int rowsDown) {
-        boolean up = rowsDown < 0;
-        int amount = Math.abs(rowsDown);
-        for (int i = 0; i < amount; i++) {
-            int action = MokeScroll.decide(
-                mokeScrollMode,
-                mEmulator.isAlternateBufferActive(),
-                mEmulator.isMouseTrackingActive(),
-                mokeMoshSession,
-                mEmulator.isBracketedPasteMode()
-            );
-            switch (action) {
-                case MokeScroll.ACTION_ARROWS:
-                    handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
-                    break;
-                case MokeScroll.ACTION_WHEEL:
-                    sendMouseEventCode(event, up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, true);
-                    break;
-                case MokeScroll.ACTION_NONE:
-                    return;
-                case MokeScroll.ACTION_LOCAL:
-                default:
-                    mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));
-                    if (!awakenScrollBars()) invalidate();
-                    break;
+    private void syncViewport() {
+        TerminalBuffer screen = mEmulator.getScreen();
+        if (mViewportBuffer != screen) {
+            if (isSelectingText()) forceStopTextSelection();
+            mViewportBuffer = screen;
+            mViewport = mViewports.computeIfAbsent(screen, ignored -> new ScrollViewport());
+        }
+        if (isSelectingText() || mEmulator.isAutoScrollDisabled()) mViewport.hold();
+        if (mViewport.hasObservation() && mViewport.historyGeneration() != screen.getHistoryGeneration()) {
+            // A saved main-buffer mark may have been reflowed lazily while the alternate buffer was shown.
+            int[] mapped = mEmulator.takeResizeAnchor();
+            if (mapped != null && !mViewport.isFollowing()) {
+                mViewport.restore(mapped[1] + mViewport.fraction(), false, screen.getHistoryShift(),
+                    screen.getHistoryGeneration(), screen.getActiveTranscriptRows());
+            }
+            forceStopTextSelection();
+        }
+        long delta = mViewport.observe(screen.getHistoryShift(), screen.getHistoryGeneration(), screen.getActiveTranscriptRows());
+        if (isSelectingText()) {
+            if (delta == Long.MIN_VALUE || delta > Integer.MAX_VALUE) {
+                forceStopTextSelection();
+            } else if (delta > 0) {
+                decrementYTextSelectionCursors((int) delta);
+                int[] selection = new int[4];
+                mTextSelectionCursorController.getSelectors(selection);
+                if (selection[0] < -screen.getActiveTranscriptRows()) forceStopTextSelection();
             }
         }
+        mTopRow = mViewport.topRow();
+        refreshViewportAnchor();
+        if (mScrollGesture != null && !isScrollValid(mScrollGesture)) mokeCancelScroll();
     }
 
-    /** Overriding {@link View#onGenericMotionEvent(MotionEvent)}. */
-    @Override
-    public boolean onGenericMotionEvent(MotionEvent event) {
-        if (mEmulator != null && event.isFromSource(InputDevice.SOURCE_MOUSE) && event.getAction() == MotionEvent.ACTION_SCROLL) {
-            // Handle mouse wheel scrolling.
-            boolean up = event.getAxisValue(MotionEvent.AXIS_VSCROLL) > 0.0f;
-            doScroll(event, up ? -3 : 3);
-            return true;
+    private void refreshViewportAnchor() {
+        if (mEmulator == null) return;
+        if (mViewport.isFollowing()) mEmulator.takeResizeAnchor();
+        else mEmulator.setResizeAnchor(mViewport.topRow(), 0);
+    }
+
+    private int currentScreenRow(float y) {
+        return (int) Math.floor((y - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing);
+    }
+
+    private final class ScrollGesture {
+        final TerminalSession session = mTermSession;
+        final TerminalEmulator emulator = mEmulator;
+        final TerminalBuffer screen = mEmulator.getScreen();
+        final long inputGeneration = mEmulator.getInputModeGeneration();
+        final long historyGeneration = screen.getHistoryGeneration();
+        final long binding = mBindingGeneration, geometry = mGeometryGeneration;
+        final int mode = mokeScrollMode;
+        final boolean running = session.isRunning();
+        final int action;
+        final int x, y;
+        final double unitPixels;
+        final boolean physical;
+        final TerminalScrollToken token = new TerminalScrollToken();
+        final ScrollMotion.Quantizer quantizer = new ScrollMotion.Quantizer();
+
+        ScrollGesture(float px, float py, boolean selection) { this(px, py, selection, false); }
+
+        ScrollGesture(float px, float py, boolean selection, boolean physicalWheel) {
+            physical = physicalWheel;
+            int route = selection ? MokeScroll.ACTION_LOCAL : MokeScroll.decide(mode,
+                emulator.isAlternateBufferActive(), emulator.isMouseTrackingActive(), emulator.isAlternateScrollEnabled());
+            action = running || route == MokeScroll.ACTION_LOCAL ? route : MokeScroll.ACTION_NONE;
+            if (action == MokeScroll.ACTION_WHEEL || action == MokeScroll.ACTION_ARROWS) followCurrentScreen();
+            x = Math.max(1, Math.min(emulator.mColumns, (int) Math.floor(px / mRenderer.mFontWidth) + 1));
+            y = Math.max(1, Math.min(emulator.mRows, currentScreenRow(py) + 1));
+            // One wheel notch is not one program row. No phone-side acceleration is added.
+            unitPixels = mRenderer.mFontLineSpacing * (action == MokeScroll.ACTION_WHEEL ? 3.0 : 1.0);
         }
-        return false;
+    }
+
+    private boolean isScrollValid(ScrollGesture gesture) {
+        return gesture.token.isValid() && gesture.session == mTermSession && gesture.emulator == mEmulator
+            && gesture.binding == mBindingGeneration && gesture.geometry == mGeometryGeneration
+            && gesture.running == gesture.session.isRunning()
+            && gesture.mode == mokeScrollMode && gesture.screen == mEmulator.getScreen()
+            && gesture.inputGeneration == mEmulator.getInputModeGeneration()
+            && gesture.historyGeneration == gesture.screen.getHistoryGeneration();
+    }
+
+    private void queueScrollPixels(ScrollGesture gesture, double pixels) {
+        if (gesture.action == MokeScroll.ACTION_LOCAL) {
+            dispatchScrollPixels(gesture, pixels);
+        } else if (gesture.action != MokeScroll.ACTION_NONE) {
+            // A busy UI cannot accumulate an unbounded amount of old input between frames.
+            double bound = gesture.unitPixels * ScrollMotion.MAX_UNITS_PER_FRAME;
+            mPendingScrollPixels = Math.max(-bound, Math.min(bound, mPendingScrollPixels + pixels));
+            postScrollFrame();
+        }
+    }
+
+    private void dispatchScrollPixels(ScrollGesture gesture, double pixels) {
+        if (!isScrollValid(gesture)) { mokeCancelScroll(); checkInputContext(); return; }
+        if (pixels == 0) return;
+        if (gesture.action == MokeScroll.ACTION_LOCAL) {
+            syncViewport();
+            if (!mViewport.movePixels(pixels, mRenderer.mFontLineSpacing)) mMotion.cancel();
+            mTopRow = mViewport.topRow();
+            refreshViewportAnchor();
+            if (!awakenScrollBars()) invalidate();
+        } else if (gesture.action != MokeScroll.ACTION_NONE) {
+            int units = gesture.quantizer.add(pixels, gesture.unitPixels, ScrollMotion.MAX_UNITS_PER_FRAME);
+            dispatchRemoteUnits(gesture, units, gesture.x, gesture.y);
+        }
+    }
+
+    private void dispatchRemoteUnits(ScrollGesture gesture, int units, int x, int y) {
+        if (units == 0 || !isScrollValid(gesture)) return;
+        byte[] unit = encodeScrollUnit(gesture, units, x, y);
+        if (unit == null || unit.length == 0) return;
+        ByteArrayOutputStream batch = new ByteArrayOutputStream();
+        for (int i = 0; i < Math.min(Math.abs(units), ScrollMotion.MAX_UNITS_PER_FRAME); i++) {
+            if (batch.size() + unit.length > 1024) break;
+            batch.write(unit, 0, unit.length);
+        }
+        byte[] bytes = batch.toByteArray();
+        if (bytes.length > 0 && isScrollValid(gesture)) gesture.session.writeScroll(bytes, 0, bytes.length, gesture.token);
+    }
+
+    private byte[] encodeScrollUnit(ScrollGesture gesture, int units, int x, int y) {
+        if (gesture.action == MokeScroll.ACTION_ARROWS) {
+            String code = KeyHandler.getCode(units < 0 ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN,
+                0, gesture.emulator.isCursorKeysApplicationMode(), gesture.emulator.isKeypadApplicationMode());
+            return code == null ? null : code.getBytes(StandardCharsets.UTF_8);
+        }
+        return gesture.emulator.encodeMouseEvent(units < 0 ? TerminalEmulator.MOUSE_WHEELUP_BUTTON
+            : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, x, y, true);
+    }
+
+    /** Row adapter retained for callers/tests; asynchronous work keeps only the frozen snapshot. */
+    void doScroll(MotionEvent event, int rowsDown) {
+        if (mEmulator == null || rowsDown == 0) return;
+        cancelScrollMotion();
+        checkInputContext();
+        mScrollGesture = new ScrollGesture(event.getX(), event.getY(), isSelectingText());
+        queueScrollPixels(mScrollGesture, (double) rowsDown * mRenderer.mFontLineSpacing);
+    }
+
+    @Override public boolean onGenericMotionEvent(MotionEvent event) {
+        if (mEmulator == null || !event.isFromSource(InputDevice.SOURCE_MOUSE)
+            || event.getActionMasked() != MotionEvent.ACTION_SCROLL) return false;
+        float axis = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+        if (axis == 0 || !Float.isFinite(axis)) return true;
+        checkInputContext();
+        if (mScrollGesture == null || !mScrollGesture.physical || !isScrollValid(mScrollGesture)) {
+            cancelScrollMotion();
+            mScrollGesture = new ScrollGesture(event.getX(), event.getY(), isSelectingText(), true);
+        }
+        if (mScrollGesture.action == MokeScroll.ACTION_LOCAL) {
+            dispatchScrollPixels(mScrollGesture, -axis * 3.0 * mRenderer.mFontLineSpacing);
+        } else if (mScrollGesture.action != MokeScroll.ACTION_NONE) {
+            int limit = ScrollMotion.MAX_UNITS_PER_FRAME - mPhysicalWheelBatchUnits;
+            int units = mPhysicalWheel.add(-axis, limit);
+            if (units != 0) {
+                // Each physical event targets its own cell, never the previous touch's starting pane.
+                int x = Math.max(1, Math.min(mEmulator.mColumns, getCursorX(event.getX()) + 1));
+                int y = Math.max(1, Math.min(mEmulator.mRows, currentScreenRow(event.getY()) + 1));
+                byte[] unit = encodeScrollUnit(mScrollGesture, units, x, y);
+                if (unit != null) {
+                    for (int i = 0; i < Math.abs(units) && mPhysicalWheelBatch.size() + unit.length <= 1024; i++) {
+                        mPhysicalWheelBatch.write(unit, 0, unit.length);
+                        mPhysicalWheelBatchUnits++;
+                    }
+                    postScrollFrame();
+                }
+            }
+        }
+        return true;
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -686,39 +824,56 @@ public final class TerminalView extends View {
     @TargetApi(23)
     public boolean onTouchEvent(MotionEvent event) {
         if (mEmulator == null) return true;
-        final int action = event.getAction();
-
+        final int action = event.getActionMasked();
+        checkInputContext();
         if (isSelectingText()) {
             updateFloatingToolbarVisibility(event);
             mGestureRecognizer.onTouchEvent(event);
             return true;
-        } else if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-            if (event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)) {
+        }
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            if (action == MotionEvent.ACTION_DOWN) {
+                mMouseStopSequence = mMotion.isRunning();
+                cancelScrollMotion();
+                mMouseButton = event.isButtonPressed(MotionEvent.BUTTON_SECONDARY) ? MotionEvent.BUTTON_SECONDARY
+                    : event.isButtonPressed(MotionEvent.BUTTON_TERTIARY) ? MotionEvent.BUTTON_TERTIARY : MotionEvent.BUTTON_PRIMARY;
+            }
+            int button = mMouseButton;
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) mMouseButton = 0;
+            if (button == 0) return true;
+            if (mMouseStopSequence) {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) mMouseStopSequence = false;
+                return true;
+            }
+            if (button == MotionEvent.BUTTON_SECONDARY) {
+                mGestureRecognizer.cancel();
                 if (action == MotionEvent.ACTION_DOWN) showContextMenu();
                 return true;
-            } else if (event.isButtonPressed(MotionEvent.BUTTON_TERTIARY)) {
+            }
+            if (button == MotionEvent.BUTTON_TERTIARY) {
+                mGestureRecognizer.cancel();
+                if (action != MotionEvent.ACTION_DOWN) return true;
                 ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                 ClipData clipData = clipboardManager.getPrimaryClip();
-                if (clipData != null) {
-                    ClipData.Item clipItem = clipData.getItemAt(0);
-                    if (clipItem != null) {
-                        CharSequence text = clipItem.coerceToText(getContext());
-                        if (!TextUtils.isEmpty(text)) mEmulator.paste(text.toString());
+                if (clipData != null && clipData.getItemCount() > 0) {
+                    CharSequence text = clipData.getItemAt(0).coerceToText(getContext());
+                    if (!TextUtils.isEmpty(text)) {
+                        mokePrepareForUserInput();
+                        mEmulator.paste(text.toString());
                     }
                 }
-            } else if (mEmulator.isMouseTrackingActive()) { // BUTTON_PRIMARY.
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                    case MotionEvent.ACTION_UP:
-                        sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, event.getAction() == MotionEvent.ACTION_DOWN);
-                        break;
-                    case MotionEvent.ACTION_MOVE:
-                        sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON_MOVED, true);
-                        break;
-                }
+                return true;
+            }
+            if (mEmulator.isMouseTrackingActive()) {
+                mGestureRecognizer.cancel();
+                if (action == MotionEvent.ACTION_DOWN) followCurrentScreen();
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP)
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, action == MotionEvent.ACTION_DOWN);
+                else if (action == MotionEvent.ACTION_MOVE && event.isButtonPressed(MotionEvent.BUTTON_PRIMARY))
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON_MOVED, true);
+                return true;
             }
         }
-
         mGestureRecognizer.onTouchEvent(event);
         return true;
     }
@@ -851,17 +1006,16 @@ public final class TerminalView extends View {
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
             mClient.logInfo(LOG_TAG, "onKeyDown(keyCode=" + keyCode + ", isSystem()=" + event.isSystem() + ", event=" + event + ")");
         if (mEmulator == null) return true;
-        if (isSelectingText()) {
-            stopTextSelectionMode();
-        }
-
         if (mClient.onKeyDown(keyCode, event, mTermSession)) {
             invalidate();
             return true;
         } else if (event.isSystem() && (!mClient.shouldBackButtonBeMappedToEscape() || keyCode != KeyEvent.KEYCODE_BACK)) {
             return super.onKeyDown(keyCode, event);
         } else if (event.getAction() == KeyEvent.ACTION_MULTIPLE && keyCode == KeyEvent.KEYCODE_UNKNOWN) {
-            mTermSession.write(event.getCharacters());
+            if (!TextUtils.isEmpty(event.getCharacters())) {
+                mokePrepareForUserInput();
+                mTermSession.write(event.getCharacters());
+            }
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_LANGUAGE_SWITCH) {
             return super.onKeyDown(keyCode, event);
@@ -985,12 +1139,14 @@ public final class TerminalView extends View {
             }
 
             // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
+            mokePrepareForUserInput();
             mTermSession.writeCodePoint(altDown, codePoint);
         }
     }
 
     /** Input the specified keyCode if applicable and return if the input was consumed. */
     public boolean handleKeyCode(int keyCode, int keyMod) {
+        if (mTermSession == null || mEmulator == null) return false;
         // Ensure cursor is shown when a key is pressed down like long hold on (arrow) keys
         if (mEmulator != null)
             mEmulator.setCursorBlinkState(true);
@@ -1001,6 +1157,7 @@ public final class TerminalView extends View {
         TerminalEmulator term = mTermSession.getEmulator();
         String code = KeyHandler.getCode(keyCode, keyMod, term.isCursorKeysApplicationMode(), term.isKeypadApplicationMode());
         if (code == null) return false;
+        mokePrepareForUserInput();
         mTermSession.write(code);
         return true;
     }
@@ -1014,10 +1171,13 @@ public final class TerminalView extends View {
                 // shift+page_up and shift+page_down should scroll scrollback history instead of
                 // scrolling command history or changing pages
                 if (shiftDown) {
-                    long time = SystemClock.uptimeMillis();
-                    MotionEvent motionEvent = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 0, 0, 0);
-                    doScroll(motionEvent, keyCode == KeyEvent.KEYCODE_PAGE_UP ? -mEmulator.mRows : mEmulator.mRows);
-                    motionEvent.recycle();
+                    mokeCancelScroll();
+                    syncViewport();
+                    mViewport.movePixels((keyCode == KeyEvent.KEYCODE_PAGE_UP ? -1.0 : 1.0)
+                        * mEmulator.mRows * mRenderer.mFontLineSpacing, mRenderer.mFontLineSpacing);
+                    mTopRow = mViewport.topRow();
+                    refreshViewportAnchor();
+                    if (!awakenScrollBars()) invalidate();
                     return true;
                 }
         }
@@ -1058,6 +1218,10 @@ public final class TerminalView extends View {
      */
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        if (w != oldw || h != oldh) {
+            mGeometryGeneration++;
+            mokeCancelScroll();
+        }
         updateSize();
     }
 
@@ -1071,22 +1235,58 @@ public final class TerminalView extends View {
     public void updateSize() {
         int viewWidth = getWidth();
         int viewHeight = getHeight();
-        if (viewWidth == 0 || viewHeight == 0 || mTermSession == null) return;
+        if (viewWidth == 0 || viewHeight == 0 || mTermSession == null || mRenderer == null) return;
+        boolean geometryChanged = mFontGeometryDirty || viewWidth != mGeometryWidth || viewHeight != mGeometryHeight
+            || mRenderer.mFontLineSpacing != mGeometryLineHeight || mRenderer.mFontWidth != mGeometryFontWidth;
+        if (geometryChanged) {
+            mFontGeometryDirty = false;
+            mGeometryGeneration++;
+            cancelScrollMotion();
+            // Font changes made by an active pinch must not end that pinch after its first frame.
+            if (!mGestureRecognizer.isInProgress()) mGestureRecognizer.cancel();
+            mGeometryWidth = viewWidth;
+            mGeometryHeight = viewHeight;
+            mGeometryLineHeight = mRenderer.mFontLineSpacing;
+            mGeometryFontWidth = mRenderer.mFontWidth;
+        }
 
         // Set to 80 and 24 if you want to enable vttest.
         int newColumns = Math.max(4, (int) (viewWidth / mRenderer.mFontWidth));
         int newRows = Math.max(4, (viewHeight - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing);
 
         if (mEmulator == null || (newColumns != mEmulator.mColumns || newRows != mEmulator.mRows)) {
+            boolean following = true;
+            double fraction = 0;
+            if (mEmulator != null) {
+                syncViewport();
+                following = mViewport.isFollowing();
+                fraction = mViewport.fraction();
+                if (!following) mEmulator.setResizeAnchor(mViewport.topRow(), 0);
+                forceStopTextSelection();
+            }
+            cancelScrollMotion();
             mTermSession.updateSize(newColumns, newRows, (int) mRenderer.getFontWidth(), mRenderer.getFontLineSpacing());
             mEmulator = mTermSession.getEmulator();
+            if (mEmulator == null) return;
+            TerminalBuffer screen = mEmulator.getScreen();
+            int[] anchor = mEmulator.takeResizeAnchor();
+            mViewportBuffer = screen;
+            mViewport = mViewports.computeIfAbsent(screen, ignored -> new ScrollViewport());
+            double row = anchor == null ? -screen.getActiveTranscriptRows() : anchor[1] + fraction;
+            mViewport.restore(row, following, screen.getHistoryShift(), screen.getHistoryGeneration(), screen.getActiveTranscriptRows());
+            mTopRow = mViewport.topRow();
+            refreshViewportAnchor();
+            mPreserveScaleOnCancel = mGestureRecognizer.isInProgress();
+            try {
+                checkInputContext();
+            } finally {
+                mPreserveScaleOnCancel = false;
+            }
             mClient.onEmulatorSet();
 
-            // Update mTerminalCursorBlinkerRunnable inner class mEmulator on session change
             if (mTerminalCursorBlinkerRunnable != null)
                 mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
 
-            mTopRow = 0;
             scrollTo(0, 0);
             invalidate();
         }
@@ -1097,13 +1297,15 @@ public final class TerminalView extends View {
         if (mEmulator == null) {
             canvas.drawColor(0XFF000000);
         } else {
-            // render the terminal view and highlight any selected text
+            checkInputContext();
+            syncViewport();
+            // Render and hit-test with the same fractional viewport, only for local history.
             int[] sel = mDefaultSelectors;
             if (mTextSelectionCursorController != null) {
                 mTextSelectionCursorController.getSelectors(sel);
             }
 
-            mRenderer.render(mEmulator, canvas, mTopRow, sel[0], sel[1], sel[2], sel[3]);
+            mRenderer.render(mEmulator, canvas, mTopRow, (float) mViewport.fraction(), sel[0], sel[1], sel[2], sel[3]);
 
             // render the text selection handles
             renderTextSelection();
@@ -1120,11 +1322,11 @@ public final class TerminalView extends View {
     }
 
     public int getCursorX(float x) {
-        return (int) (x / mRenderer.mFontWidth);
+        return (int) Math.floor(x / mRenderer.mFontWidth);
     }
 
     public int getCursorY(float y) {
-        return (int) (((y - 40) / mRenderer.mFontLineSpacing) + mTopRow);
+        return mViewport.rowAt(y, mRenderer.mFontLineSpacing, mRenderer.mFontLineSpacingAndAscent);
     }
 
     public int getPointX(int cx) {
@@ -1135,15 +1337,19 @@ public final class TerminalView extends View {
     }
 
     public int getPointY(int cy) {
-        return Math.round((cy - mTopRow) * mRenderer.mFontLineSpacing);
+        return Math.round(mViewport.rowTop(cy, mRenderer.mFontLineSpacing, mRenderer.mFontLineSpacingAndAscent));
     }
 
     public int getTopRow() {
         return mTopRow;
     }
 
-    public void setTopRow(int mTopRow) {
-        this.mTopRow = mTopRow;
+    public void setTopRow(int row) {
+        if (mEmulator != null) syncViewport();
+        mViewport.setPosition(row);
+        if (isSelectingText()) mViewport.hold();
+        mTopRow = mViewport.topRow();
+        refreshViewportAnchor();
     }
 
 
@@ -1154,7 +1360,8 @@ public final class TerminalView extends View {
     @RequiresApi(api = Build.VERSION_CODES.O)
     @Override
     public void autofill(AutofillValue value) {
-        if (value.isText()) {
+        if (value.isText() && !TextUtils.isEmpty(value.getTextValue())) {
+            mokePrepareForUserInput();
             mTermSession.write(value.getTextValue().toString());
         }
 
@@ -1499,6 +1706,11 @@ public final class TerminalView extends View {
             return;
         }
 
+        cancelScrollMotion();
+        mGestureRecognizer.claimSelection();
+        syncViewport();
+        mViewport.hold();
+        refreshViewportAnchor();
         showTextSelectionCursors(event);
         mClient.copyModeChanged(isSelectingText());
 
@@ -1512,6 +1724,13 @@ public final class TerminalView extends View {
         }
     }
 
+    private void forceStopTextSelection() {
+        if (mTextSelectionCursorController != null && mTextSelectionCursorController.hide(true)) {
+            mClient.copyModeChanged(false);
+            invalidate();
+        }
+    }
+
     private void decrementYTextSelectionCursors(int decrement) {
         if (mTextSelectionCursorController != null) {
             mTextSelectionCursorController.decrementYTextSelectionCursors(decrement);
@@ -1521,6 +1740,9 @@ public final class TerminalView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        mBindingGeneration++;
+        mokeCancelScroll();
+        mokeNotifiedTopRow = Integer.MIN_VALUE;
 
         if (mTextSelectionCursorController != null) {
             getViewTreeObserver().addOnTouchModeChangeListener(mTextSelectionCursorController);
@@ -1529,6 +1751,10 @@ public final class TerminalView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
+        mBindingGeneration++;
+        mokeCancelScroll();
+        removeCallbacks(mShowFloatingToolbar);
+        forceStopTextSelection();
         super.onDetachedFromWindow();
 
         if (mTextSelectionCursorController != null) {
@@ -1542,6 +1768,16 @@ public final class TerminalView extends View {
     }
 
 
+
+    @Override public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (!hasWindowFocus) mokeCancelScroll();
+    }
+
+    @Override protected void onFocusChanged(boolean gainFocus, int direction, android.graphics.Rect previous) {
+        super.onFocusChanged(gainFocus, direction, previous);
+        if (!gainFocus) mokeCancelScroll();
+    }
 
     /**
      * Define functions required for long hold toolbar.

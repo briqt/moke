@@ -181,6 +181,8 @@
     <string name="show_extra_keys">显示底部快捷键</string>
     <string name="menu_extra_keys">底部快捷键</string>
     <string name="extra_keys_reset">恢复默认</string>
+    <string name="extra_keys_reset_title">恢复默认键位？</string>
+    <string name="extra_keys_reset_message">当前自定义键位将被替换。</string>
     <string name="extra_keys_pick">选择按键</string>
     <string name="key_mod_once">%1$s，下一次按键</string>
     <string name="key_mod_locked">%1$s，已锁定</string>
@@ -228,7 +230,7 @@
 
     <!-- 字体管理 -->
     <string name="fonts_title">字体</string>
-    <string name="font_upload">上传本地字体（TTF / OTF）</string>
+    <string name="font_upload">导入字体（TTF / OTF）</string>
     <string name="font_importing">导入中…</string>
     <string name="font_imported">已导入「%1$s」</string>
     <string name="role_primary">主字体</string>
@@ -275,6 +277,9 @@
     <string name="files_open">文件</string>
     <string name="files_connecting">连接中…</string>
     <string name="files_empty">空目录</string>
+    <string name="files_only_hidden">仅有隐藏文件</string>
+    <string name="files_folder_description">文件夹：%1$s</string>
+    <string name="files_file_description">文件：%1$s</string>
     <string name="files_parent">上级目录</string>
     <string name="files_new_folder">新建文件夹</string>
     <string name="files_folder_name">文件夹名</string>
@@ -305,7 +310,7 @@
     <string name="files_transfer_done">已完成</string>
     <string name="files_transfer_cancelled">已取消</string>
     <string name="files_transfer_queued">排队中</string>
-    <string name="transfer_interrupted">已中断——应用被系统停止</string>
+    <string name="transfer_interrupted">传输已中断</string>
     <string name="transfer_host_gone">这台主机已经不存在了</string>
     <string name="transfer_remote_missing">远端文件已不存在</string>
     <string name="transfer_local_unwritable">无法写入本地文件</string>
@@ -385,10 +390,10 @@
     <string name="persistence_none">无</string>
     <string name="persistence_tmux">tmux</string>
     <string name="scroll_jump_bottom">跳到底部</string>
-    <string name="scroll_mode">全屏程序内滑动</string>
-    <string name="scroll_mode_smart">智能</string>
-    <string name="scroll_mode_wheel">始终发滚轮</string>
-    <string name="scroll_mode_arrows">始终发方向键</string>
+    <string name="scroll_mode">滑动方式</string>
+    <string name="scroll_mode_smart">自动</string>
+    <string name="scroll_mode_wheel">发送滚轮</string>
+    <string name="scroll_mode_arrows">发送方向键</string>
     <string name="include_prerelease">包含预览版</string>
     <string name="github_repo">GitHub 仓库</string>
 
@@ -446,7 +451,7 @@
     <string name="fwd_empty">还没有转发</string>
     <string name="fwd_connecting">远端 %1$d · 正在建立…</string>
     <string name="fwd_row_remote">远端 %1$d</string>
-    <string name="fwd_failed">已断开</string>
+    <string name="fwd_failed">转发不可用</string>
     <string name="fwd_copy_address">复制地址</string>
     <string name="fwd_stop">停止</string>
     <string name="fwd_remote_port">远端端口</string>

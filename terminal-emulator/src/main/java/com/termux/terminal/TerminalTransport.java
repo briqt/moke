@@ -31,6 +31,16 @@ public interface TerminalTransport {
     /** 用户输入字节 -> 远端。 */
     void write(byte[] data, int offset, int count);
 
+    /**
+     * One complete encoded scroll batch, separate from reliable keyboard/paste/protocol input.
+     * Asynchronous transports must retain the token and recheck it immediately before stream I/O,
+     * bound both pending scroll input and individual batches, and preserve normal input/resize FIFO.
+     * The default keeps synchronous/demo transports compatible; it cannot retract an entered write.
+     */
+    default void writeScroll(byte[] data, int offset, int count, TerminalScrollToken token) {
+        if (token.isValid()) write(data, offset, count);
+    }
+
     /** 终端尺寸变化 -> 通知远端（SSH window-change / mosh resize）。 */
     void updateSize(int columns, int rows, int cellWidthPixels, int cellHeightPixels);
 

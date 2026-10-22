@@ -68,7 +68,10 @@ class TerminalController(
         val clip = clipboard.primaryClip ?: return
         if (clip.itemCount > 0) {
             val text = clip.getItemAt(0).coerceToText(appContext)?.toString()
-            if (!text.isNullOrEmpty()) session?.write(text)
+            if (!text.isNullOrEmpty() && session != null) {
+                view?.mokePrepareForUserInput()
+                session.write(text)
+            }
         }
     }
 

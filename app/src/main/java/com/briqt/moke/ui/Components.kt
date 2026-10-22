@@ -3,6 +3,9 @@ package com.briqt.moke.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.clickable
@@ -151,7 +154,7 @@ private fun keyboardModeDesc(m: KeyboardMode): Int = when (m) {
  * 键盘模式选择弹窗：三档带说明的单选。终端页 ⋮ 与设置页共用同一个，
  * 保证"在哪儿改都是同一个开关"。
  */
-/** 全屏程序内滑动语义选择（社区反馈：codex/snow-cli 里滑动被当成翻命令历史）。 */
+/** 当前连接的临时滑动输入方式，选择后立即生效。 */
 @Composable
 fun ScrollModeDialog(
     current: ScrollMode,
@@ -162,19 +165,30 @@ fun ScrollModeDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.scroll_mode), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    stringResource(R.string.scroll_temporary),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
                 ScrollMode.entries.forEach { m ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clip(MokeShapes.control).clickable { onPick(m) }
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MokeShapes.control).clickable { onPick(m) }
                             .padding(vertical = 6.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = current == m, onClick = { onPick(m) })
-                        Text(
-                            stringResource(scrollModeLabel(m)),
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f).padding(start = 8.dp),
-                        )
+                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                            Text(stringResource(scrollModeLabel(m)), style = MaterialTheme.typography.bodyLarge)
+                            if (m != ScrollMode.SMART) {
+                                Text(
+                                    stringResource(if (m == ScrollMode.WHEEL) R.string.scroll_wheel_description else R.string.scroll_arrows_description),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }

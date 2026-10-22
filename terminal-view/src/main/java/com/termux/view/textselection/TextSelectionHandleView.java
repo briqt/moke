@@ -290,6 +290,7 @@ public class TextSelectionHandleView extends View {
         terminalView.updateFloatingToolbarVisibility(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
+                terminalView.mokeCancelScroll();
                 final float rawX = event.getRawX();
                 final float rawY = event.getRawY();
                 mTouchToWindowOffsetX = rawX - mPointX;

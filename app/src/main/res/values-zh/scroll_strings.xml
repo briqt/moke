@@ -1,0 +1,9 @@
+<resources>
+    <string name="terminal_input">输入</string>
+    <string name="scroll_temporary">仅当前连接；输入或离开后恢复自动。</string>
+    <string name="scroll_wheel_description">作为鼠标滚轮输入发送。</string>
+    <string name="scroll_arrows_description">可能改变光标、选项或输入历史。</string>
+    <string name="scroll_temporary_wheel">滚轮</string>
+    <string name="scroll_temporary_arrows">方向键</string>
+    <string name="scroll_reset_automatic">恢复自动</string>
+</resources>

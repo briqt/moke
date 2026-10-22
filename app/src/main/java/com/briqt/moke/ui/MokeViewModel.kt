@@ -18,6 +18,7 @@ import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.RefusedTransport
 import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.TmuxPhase
+import com.briqt.moke.terminal.TmuxOperationCode
 import com.briqt.moke.terminal.TmuxConnection
 import com.briqt.moke.terminal.TmuxIntent
 import com.briqt.moke.terminal.TmuxLaunchPolicy
@@ -41,7 +42,6 @@ import com.briqt.moke.data.StoreFailure
 import com.briqt.moke.data.StoreResult
 import com.briqt.moke.data.Route
 import com.briqt.moke.data.clearDanglingJumps
-import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
@@ -186,8 +186,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val keyboardMode: StateFlow<KeyboardMode> = settings.keyboardMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.SECURE)
-    val scrollMode: StateFlow<ScrollMode> = settings.scrollMode
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ScrollMode.SMART)
     val tmuxScrollSetup: StateFlow<Boolean> = settings.tmuxScrollSetup
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val confirmCloseSession: StateFlow<Boolean> = settings.confirmCloseSession
@@ -704,12 +702,22 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                         it.id == binding.session.id && it.created == binding.session.created
                     } ?: return@collect)?.copy(expectedClient = binding.client)
                     if (selection != null && ts.tmuxCoordinator.validateSelection(selection, requireCurrent = true)) {
-                        withContext(Dispatchers.IO) {
+                        val result = withContext(Dispatchers.IO) {
                             val connection = ts.transport as? TmuxConnection
-                            if (connection != null) runCatching { connection.execTmuxOperation(TmuxRemote.guardPeer(
-                                ts.scripts, connection.tmuxNonce, connection.tmuxOwnerRequired, binding.server.bootId,
-                                TmuxRemote.scrollSetup(binding.session),
-                            )) }
+                            if (connection == null) null else runCatching {
+                                connection.execTmuxOperation(TmuxRemote.guardPeer(
+                                    ts.scripts, connection.tmuxNonce, connection.tmuxOwnerRequired, binding.server.bootId,
+                                    TmuxRemote.scrollSetup(binding.session),
+                                ))?.let(TmuxRemote::parseOperation)
+                            }.getOrNull()
+                        }
+                        if (result?.ok != true && sessions.get(ts.id) === ts) {
+                            val message = str(when (result?.code) {
+                                TmuxOperationCode.STALE -> R.string.tmux_session_changed
+                                TmuxOperationCode.FAILED -> R.string.tmux_action_failed
+                                else -> R.string.tmux_result_unknown
+                            })
+                            ts.tmuxState.update { if (it.currentBinding == binding) it.copy(message = message) else it }
                         }
                     }
                 }
@@ -1184,7 +1192,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setDynamicColor(on: Boolean) = viewModelScope.launch { settings.setDynamicColor(on) }
 
     fun setKeyboardMode(m: KeyboardMode) = viewModelScope.launch { settings.setKeyboardMode(m) }
-    fun setScrollMode(m: ScrollMode) = viewModelScope.launch { settings.setScrollMode(m) }
 
     fun setTmuxScrollSetup(on: Boolean) = viewModelScope.launch { settings.setTmuxScrollSetup(on) }
 

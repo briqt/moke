@@ -179,6 +179,23 @@ public class TerminalSession extends TerminalOutput {
         }
     }
 
+    /** Scroll-only input: retain its cancellation identity all the way to the transport writer. */
+    public void writeScroll(byte[] data, int offset, int count, TerminalScrollToken token) {
+        if (mFinished || !token.isValid()) return;
+        try {
+            mTransport.writeScroll(data, offset, count, token);
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(mClient, LOG_TAG, "transport scroll write error", e);
+        }
+    }
+
+    /** Write one complete UTF-8 scroll batch without passing through ordinary input. */
+    public void writeScroll(String data, TerminalScrollToken token) {
+        if (data == null || mFinished || !token.isValid()) return;
+        byte[] bytes = data.getBytes(StandardCharsets.UTF_8);
+        writeScroll(bytes, 0, bytes.length, token);
+    }
+
     /** 将 Unicode code point 以 UTF-8 编码写入终端（沿用 termux 实现）。 */
     public void writeCodePoint(boolean prependEscape, int codePoint) {
         if (codePoint > 1114111 || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {

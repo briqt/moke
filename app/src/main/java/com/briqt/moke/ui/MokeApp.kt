@@ -126,7 +126,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val hostKeyChange by vm.hostKeyChange.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
-    val scrollMode by vm.scrollMode.collectAsState()
     val includePrerelease by vm.includePrerelease.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
     val openSessionsRequest by vm.openSessionsRequest.collectAsState()
@@ -430,7 +429,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         extraKeysVisible = extraKeysVisible,
                         extraKeysLayout = extraKeysLayout,
                         keyboardMode = keyboardMode,
-                        scrollMode = scrollMode,
                         confirmClose = confirmClose,
                         keepScreenOn = keepScreenOn,
                         resolveTypeface = vm.fonts::resolveTypeface,
@@ -549,7 +547,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
         is Screen.TerminalSettings -> TerminalSettingsScreen(
             keyboardMode = keyboardMode,
-            scrollMode = scrollMode,
             tmuxScrollSetup = tmuxScrollSetup,
             keepScreenOn = keepScreenOn,
             confirmClose = confirmClose,
@@ -557,7 +554,6 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             terminalAlerts = terminalAlerts,
             onTerminalAlerts = { vm.setTerminalAlerts(it) },
             onKeyboardMode = { vm.setKeyboardMode(it) },
-            onScrollMode = { vm.setScrollMode(it) },
             onTmuxScrollSetup = { vm.setTmuxScrollSetup(it) },
             onKeepScreenOn = { vm.setKeepScreenOn(it) },
             onConfirmClose = { vm.setConfirmCloseSession(it) },

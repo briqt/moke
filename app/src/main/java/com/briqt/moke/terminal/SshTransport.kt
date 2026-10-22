@@ -8,13 +8,13 @@ import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.networkException
+import com.termux.terminal.TerminalScrollToken
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.SessionChannel
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -66,9 +66,9 @@ class SshTransport(
     @Volatile private var ssh: SSHClient? = null
     @Volatile private var sshSession: SessionChannel? = null
     @Volatile private var out: OutputStream? = null
-    private val writeExec = Executors.newSingleThreadExecutor()
     private val resources = TransportResources()
     private val closed get() = resources.closed
+    private val inputQueue = TerminalInputQueue("moke-ssh-input") { if (closed) null else out }
     /** shell / exec 通道已经打开：此后的异常是"中断"，此前的是"连接失败"。 */
     private val established get() = resources.established
     @Volatile private var latencyThread: Thread? = null
@@ -167,8 +167,8 @@ class SshTransport(
                             if (!closed) runCatching {
                                 val payload = loginCmd.replace("\r\n", "\n").replace("\n", "\r")
                                     .let { if (it.endsWith("\r")) it else it + "\r" }
-                                out?.write(payload.toByteArray(StandardCharsets.UTF_8))
-                                out?.flush()
+                                val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+                                write(bytes, 0, bytes.size)
                             }
                         }, "moke-ssh-login-${host.host}").also { it.start() }
                     }
@@ -246,13 +246,11 @@ class SshTransport(
     }
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
-        if (closed) return
-        val copy = data.copyOfRange(offset, offset + count)
-        runCatching {
-            writeExec.execute {
-                if (!closed) runCatching { out?.write(copy); out?.flush() }
-            }
-        }
+        if (!closed) inputQueue.write(data, offset, count)
+    }
+
+    override fun writeScroll(data: ByteArray, offset: Int, count: Int, token: TerminalScrollToken) {
+        if (!closed) inputQueue.writeScroll(data, offset, count, token)
     }
 
     override fun updateSize(columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
@@ -260,10 +258,8 @@ class SshTransport(
         // 否则远端 PTY 尺寸不变，全屏 TUI（vim/htop/tmux）的底栏/状态行会错位。
         if (closed) return
         val s = sshSession ?: return
-        runCatching {
-            writeExec.execute {
-                if (!closed) runCatching { s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels) }
-            }
+        inputQueue.execute {
+            if (!closed) s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels)
         }
     }
 
@@ -280,7 +276,7 @@ class SshTransport(
     private fun stopAuxiliaryWork() {
         latencyThread?.interrupt()
         loginThread?.interrupt()
-        writeExec.shutdownNow()
+        inputQueue.shutdownNow()
     }
 
     override fun close() {

@@ -65,8 +65,14 @@ public final class TerminalRenderer {
     /** Render the terminal to a canvas with at a specified row scroll, and an optional rectangular selection. */
     public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow,
                              int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
+        render(mEmulator, canvas, topRow, 0, selectionY1, selectionY2, selectionX1, selectionX2);
+    }
+
+    /** Fractional local history draws one extra row; remote/current-screen coordinates stay unchanged. */
+    public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow, float fraction,
+                             int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
         final boolean reverseVideo = mEmulator.isReverseVideo();
-        final int endRow = topRow + mEmulator.mRows;
+        final int endRow = Math.min(mEmulator.mRows, topRow + mEmulator.mRows + (fraction > 0 ? 1 : 0));
         final int columns = mEmulator.mColumns;
         final int cursorCol = mEmulator.getCursorCol();
         final int cursorRow = mEmulator.getCursorRow();
@@ -78,6 +84,9 @@ public final class TerminalRenderer {
         if (reverseVideo)
             canvas.drawColor(palette[TextStyle.COLOR_INDEX_FOREGROUND], PorterDuff.Mode.SRC);
 
+        int viewportSave = canvas.save();
+        canvas.clipRect(0, mFontLineSpacingAndAscent, canvas.getWidth(), canvas.getHeight());
+        canvas.translate(0, -fraction * mFontLineSpacing);
         float heightOffset = mFontLineSpacingAndAscent;
         for (int row = topRow; row < endRow; row++) {
             heightOffset += mFontLineSpacing;
@@ -163,6 +172,7 @@ public final class TerminalRenderer {
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
                 measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
         }
+        canvas.restoreToCount(viewportSave);
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,

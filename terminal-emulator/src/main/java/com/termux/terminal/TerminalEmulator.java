@@ -129,6 +129,27 @@ public final class TerminalEmulator {
     private static final int DECSET_BIT_LEFTRIGHT_MARGIN_MODE = 1 << 11;
     /** Not really DECSET bit... - http://www.vt100.net/docs/vt510-rm/DECSACE */
     private static final int DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE = 1 << 12;
+    /** DECSET 1007 - request cursor keys for alternate-screen scrolling. */
+    private static final int DECSET_BIT_ALTERNATE_SCROLL = 1 << 13;
+
+    private static final int INPUT_MODE_FLAGS = DECSET_BIT_APPLICATION_CURSOR_KEYS | DECSET_BIT_APPLICATION_KEYPAD
+        | DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE | DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT
+        | DECSET_BIT_SEND_FOCUS_EVENTS | DECSET_BIT_MOUSE_PROTOCOL_SGR | DECSET_BIT_ALTERNATE_SCROLL;
+
+    /** Advances at each scroll-routing/encoding or buffer transition, including transitions in one append. */
+    private long mInputModeGeneration;
+    private ResizeAnchor mMainResizeAnchor, mAltResizeAnchor;
+
+    private static final class ResizeAnchor {
+        final int[] cell;
+        long historyGeneration, historyShift;
+
+        ResizeAnchor(int row, int column, TerminalBuffer buffer) {
+            cell = new int[]{column, row};
+            historyGeneration = buffer.getHistoryGeneration();
+            historyShift = buffer.getHistoryShift();
+        }
+    }
 
 
     private String mTitle;
@@ -282,19 +303,19 @@ public final class TerminalEmulator {
     }
 
     private void setDecsetinternalBit(int internalBit, boolean set) {
+        int previousFlags = mCurrentDecSetFlags;
         if (set) {
             // The mouse modes are mutually exclusive.
             if (internalBit == DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE) {
-                setDecsetinternalBit(DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT, false);
+                mCurrentDecSetFlags &= ~DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT;
             } else if (internalBit == DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT) {
-                setDecsetinternalBit(DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE, false);
+                mCurrentDecSetFlags &= ~DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE;
             }
-        }
-        if (set) {
             mCurrentDecSetFlags |= internalBit;
         } else {
             mCurrentDecSetFlags &= ~internalBit;
         }
+        if (((previousFlags ^ mCurrentDecSetFlags) & INPUT_MODE_FLAGS) != 0) mInputModeGeneration++;
     }
 
     static int mapDecSetBitToInternalBit(int decsetBit) {
@@ -325,6 +346,8 @@ public final class TerminalEmulator {
                 return DECSET_BIT_SEND_FOCUS_EVENTS;
             case 1006:
                 return DECSET_BIT_MOUSE_PROTOCOL_SGR;
+            case 1007:
+                return DECSET_BIT_ALTERNATE_SCROLL;
             case 2004:
                 return DECSET_BIT_BRACKETED_PASTE_MODE;
             default:
@@ -371,24 +394,31 @@ public final class TerminalEmulator {
      * @param mouseButton one of the MOUSE_* constants of this class.
      */
     public void sendMouseEvent(int mouseButton, int column, int row, boolean pressed) {
+        byte[] data = encodeMouseEvent(mouseButton, column, row, pressed);
+        if (data != null) mSession.write(data, 0, data.length);
+    }
+
+    /** Encode without writing, using the same one-based coordinates and legacy bounds as mouse input. */
+    public byte[] encodeMouseEvent(int mouseButton, int column, int row, boolean pressed) {
         if (column < 1) column = 1;
         if (column > mColumns) column = mColumns;
         if (row < 1) row = 1;
         if (row > mRows) row = mRows;
 
         if (mouseButton == MOUSE_LEFT_BUTTON_MOVED && !isDecsetInternalBitSet(DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT)) {
-            // Do not send tracking.
+            return null;
         } else if (isDecsetInternalBitSet(DECSET_BIT_MOUSE_PROTOCOL_SGR)) {
-            mSession.write(String.format("\033[<%d;%d;%d" + (pressed ? 'M' : 'm'), mouseButton, column, row));
+            return String.format(Locale.US, "\033[<%d;%d;%d" + (pressed ? 'M' : 'm'), mouseButton, column, row)
+                .getBytes(StandardCharsets.UTF_8);
         } else {
             mouseButton = pressed ? mouseButton : 3; // 3 for release of all buttons.
             // Clip to screen, and clip to the limits of 8-bit data.
             boolean out_of_bounds = column > 255 - 32 || row > 255 - 32;
             if (!out_of_bounds) {
-                byte[] data = {'\033', '[', 'M', (byte) (32 + mouseButton), (byte) (32 + column), (byte) (32 + row)};
-                mSession.write(data, 0, data.length);
+                return new byte[]{'\033', '[', 'M', (byte) (32 + mouseButton), (byte) (32 + column), (byte) (32 + row)};
             }
         }
+        return null;
     }
 
     public void resize(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
@@ -401,6 +431,7 @@ public final class TerminalEmulator {
             throw new IllegalArgumentException("rows=" + rows + ", columns=" + columns);
         }
 
+        // Geometry cancels view motion independently; it does not change the program's input protocol.
         if (mRows != rows) {
             mRows = rows;
             mTopMargin = 0;
@@ -421,10 +452,54 @@ public final class TerminalEmulator {
         resizeScreen();
     }
 
+    /**
+     * Mark an existing cell in the current buffer. Main-buffer marks survive a visit to the alternate buffer.
+     * History rows use negative coordinates; an out-of-range cell clears this buffer's mark.
+     */
+    public void setResizeAnchor(int row, int column) {
+        ResizeAnchor anchor = row >= -mScreen.getActiveTranscriptRows() && row < mScreen.mScreenRows
+            && column >= 0 && column < mScreen.mColumns ? new ResizeAnchor(row, column, mScreen) : null;
+        setCurrentResizeAnchor(anchor);
+    }
+
+    private void setCurrentResizeAnchor(ResizeAnchor anchor) {
+        if (mScreen == mMainBuffer) mMainResizeAnchor = anchor;
+        else mAltResizeAnchor = anchor;
+    }
+
+    private ResizeAnchor getCurrentResizeAnchor() {
+        ResizeAnchor anchor = mScreen == mMainBuffer ? mMainResizeAnchor : mAltResizeAnchor;
+        if (anchor == null) return null;
+        long row = anchor.cell[1] - (mScreen.getHistoryShift() - anchor.historyShift);
+        if (anchor.historyGeneration != mScreen.getHistoryGeneration()
+            || row < -mScreen.getActiveTranscriptRows() || row >= mScreen.mScreenRows) {
+            setCurrentResizeAnchor(null);
+            return null;
+        }
+        anchor.cell[1] = (int) row;
+        anchor.historyShift = mScreen.getHistoryShift();
+        return anchor;
+    }
+
+    /** Consume this buffer's mapped {column, row}, or null after loss, clear/reset, or no mark. */
+    public int[] takeResizeAnchor() {
+        ResizeAnchor anchor = getCurrentResizeAnchor();
+        setCurrentResizeAnchor(null);
+        return anchor == null ? null : anchor.cell;
+    }
+
     private void resizeScreen() {
         final int[] cursor = {mCursorCol, mCursorRow};
+        ResizeAnchor anchor = getCurrentResizeAnchor();
         int newTotalRows = (mScreen == mAltBuffer) ? mRows : mMainBuffer.mTotalRows;
-        mScreen.resize(mColumns, mRows, newTotalRows, cursor, getStyle(), isAlternateBufferActive());
+        mScreen.resize(mColumns, mRows, newTotalRows, cursor, getStyle(), isAlternateBufferActive(), anchor == null ? null : anchor.cell);
+        if (anchor != null) {
+            if (anchor.cell[0] < 0) setCurrentResizeAnchor(null);
+            else {
+                anchor.historyGeneration = mScreen.getHistoryGeneration();
+                anchor.historyShift = mScreen.getHistoryShift();
+            }
+        }
         mCursorCol = cursor[0];
         mCursorRow = cursor[1];
     }
@@ -494,15 +569,18 @@ public final class TerminalEmulator {
         return isDecsetInternalBitSet(DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE) || isDecsetInternalBitSet(DECSET_BIT_MOUSE_TRACKING_BUTTON_EVENT);
     }
 
-    /**
-     * If the remote program enabled bracketed paste mode (DECSET 2004) — moke addition.
-     *
-     * Used to tell line editors / REPL-style TUIs (readline, Ink-based CLIs) apart from pagers:
-     * the former enable it to receive pasted text, the latter (less, man) do not. Sending arrow
-     * keys to scroll is right for a pager but walks the command history in a line editor.
-     */
+    /** Whether the remote program enabled bracketed paste (DECSET 2004). */
     public boolean isBracketedPasteMode() {
         return isDecsetInternalBitSet(DECSET_BIT_BRACKETED_PASTE_MODE);
+    }
+
+    /** Protocol state only: this request takes effect for scrolling when the alternate buffer is active. */
+    public boolean isAlternateScrollEnabled() {
+        return isDecsetInternalBitSet(DECSET_BIT_ALTERNATE_SCROLL);
+    }
+
+    public long getInputModeGeneration() {
+        return mInputModeGeneration;
     }
 
     private void setDefaultTabStops() {
@@ -1226,7 +1304,7 @@ public final class TerminalEmulator {
                         Logger.logWarn(mClient, LOG_TAG, "Ignoring request to save/recall decset bit=" + externalBit);
                     } else {
                         if (b == 's') {
-                            mSavedDecSetFlags |= internalBit;
+                            mSavedDecSetFlags = (mSavedDecSetFlags & ~internalBit) | (mCurrentDecSetFlags & internalBit);
                         } else {
                             doDecSetOrReset((mSavedDecSetFlags & internalBit) != 0, externalBit);
                         }
@@ -1295,6 +1373,7 @@ public final class TerminalEmulator {
             case 1004:
             case 1005: // UTF-8 mouse mode, ignore.
             case 1006: // SGR Mouse Mode
+            case 1007: // Alternate Scroll Mode - protocol state only.
             case 1015:
             case 1034: // Interpret "meta" key, sets eighth bit.
                 break;
@@ -1314,6 +1393,11 @@ public final class TerminalEmulator {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
                     if (setting) saveCursor();
                     mScreen = newScreen;
+                    mInputModeGeneration++;
+                    if (setting) {
+                        mAltResizeAnchor = null;
+                        mAltBuffer.invalidateHistory();
+                    }
                     if (!setting) {
                         int col = mSavedStateMain.mSavedCursorCol;
                         int row = mSavedStateMain.mSavedCursorRow;
@@ -2629,6 +2713,10 @@ public final class TerminalEmulator {
 
     /** Reset terminal state so user can interact with it regardless of present state. */
     public void reset() {
+        mInputModeGeneration++;
+        mMainBuffer.invalidateHistory();
+        mAltBuffer.invalidateHistory();
+        mMainResizeAnchor = mAltResizeAnchor = null;
         setCursorStyle();
         mArgIndex = 0;
         mContinueSequence = false;

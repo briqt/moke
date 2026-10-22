@@ -18,7 +18,59 @@ public class HistoryTest extends TerminalTestCase {
 		assertHistoryStartsWith("666", "555");
 	}
 
-	public void testHistoryWithScrollRegion() {
+	public void testHistoryShiftTracksRingMovementAfterCapacityIsFull() {
+        TerminalBuffer buffer = new TerminalBuffer(3, 5, 3);
+        long generation = buffer.getHistoryGeneration();
+        for (int i = 0; i < 8; i++) {
+            buffer.scrollDownOneLine(0, 3, TextStyle.NORMAL);
+            assertEquals(i + 1L, buffer.getHistoryShift());
+            assertEquals(Math.min(i + 1, 2), buffer.getActiveTranscriptRows());
+        }
+        assertEquals(generation, buffer.getHistoryGeneration());
+        long shift = buffer.getHistoryShift();
+        buffer.clearTranscript();
+        assertEquals(0, buffer.getActiveTranscriptRows());
+        assertEquals(shift, buffer.getHistoryShift());
+        assertTrue(buffer.getHistoryGeneration() > generation);
+        buffer.scrollDownOneLine(0, 3, TextStyle.NORMAL);
+        assertEquals(shift + 1, buffer.getHistoryShift());
+    }
+
+    public void testHorizontalMarginScrollDoesNotShiftHistoryOrigin() {
+        withTerminalSized(5, 4).enterString("\033[?69h\033[2;4s\033[4;2H");
+        TerminalBuffer buffer = mTerminal.getScreen();
+        long shift = buffer.getHistoryShift();
+        long generation = buffer.getHistoryGeneration();
+        int scrollCounter = mTerminal.getScrollCounter();
+        enterString("\n\n\n");
+        assertEquals(scrollCounter + 3, mTerminal.getScrollCounter());
+        assertEquals(shift, buffer.getHistoryShift());
+        assertEquals(generation, buffer.getHistoryGeneration());
+        assertEquals(0, buffer.getActiveTranscriptRows());
+        enterString("\033[?69l\n");
+        assertEquals(shift + 1, buffer.getHistoryShift());
+    }
+
+    public void testHistoryGenerationInvalidatesClearAndResetAndStaysPerBuffer() {
+        withTerminalSized(3, 3).enterString("a\r\nb\r\nc\r\nd");
+        TerminalBuffer main = mTerminal.getScreen();
+        long generation = main.getHistoryGeneration();
+        long shift = main.getHistoryShift();
+        enterString("\033[3J");
+        assertTrue(main.getHistoryGeneration() > generation);
+        assertEquals(shift, main.getHistoryShift());
+        generation = main.getHistoryGeneration();
+        enterString("\033[!p");
+        assertTrue(main.getHistoryGeneration() > generation);
+        enterString("\033[?1049h\033[3;1H\n\n");
+        assertEquals(shift, main.getHistoryShift());
+        assertEquals(2, mTerminal.getScreen().getHistoryShift());
+        enterString("\033[?1049l");
+        assertSame(main, mTerminal.getScreen());
+        assertEquals(shift, main.getHistoryShift());
+    }
+
+    public void testHistoryWithScrollRegion() {
 		// "CSI P_s ; P_s r" - set Scrolling Region [top;bottom] (default = full size of window) (DECSTBM).
 		withTerminalSized(3, 4).enterString("111222333444");
 		assertLinesAre("111", "222", "333", "444");

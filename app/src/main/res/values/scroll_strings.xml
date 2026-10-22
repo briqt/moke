@@ -1,0 +1,9 @@
+<resources>
+    <string name="terminal_input">Input</string>
+    <string name="scroll_temporary">This connection only. Resets to automatic when you type or leave.</string>
+    <string name="scroll_wheel_description">Sends mouse wheel input.</string>
+    <string name="scroll_arrows_description">May move the cursor, change selections, or recall input history.</string>
+    <string name="scroll_temporary_wheel">Wheel</string>
+    <string name="scroll_temporary_arrows">Arrow keys</string>
+    <string name="scroll_reset_automatic">Reset to automatic</string>
+</resources>

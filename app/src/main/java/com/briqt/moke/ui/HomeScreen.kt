@@ -97,7 +97,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -212,6 +215,8 @@ fun HomeScreen(
     }
     // 删除主机会连同密码 / 私钥 / 指纹一起删掉且无法恢复：一律二次确认（危险操作不走"撤销"）。
     var pendingDeleteHost by remember { mutableStateOf<Host?>(null) }
+    val showAddHostFab = tab == HomeTab.Connections && hostsState is ListState.Ready
+    var addHostFabTop by remember { mutableStateOf<Float?>(null) }
 
     // 左右滑动切分区：页序即底栏顺序，pager 与外部 [tab] 双向同步。
     val tabs = remember { HomeTab.entries.toList() }
@@ -298,8 +303,11 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
-            if (tab == HomeTab.Connections && hostsState is ListState.Ready) {
-                FloatingActionButton(onClick = onAddHost) {
+            if (showAddHostFab) {
+                FloatingActionButton(
+                    onClick = onAddHost,
+                    modifier = Modifier.onGloballyPositioned { addHostFabTop = it.boundsInRoot().top },
+                ) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_host))
                 }
             }
@@ -308,7 +316,7 @@ fun HomeScreen(
         // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             when (tabs[page]) {
-                HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, onRetryReads)
+                HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, onRetryReads, addHostFabTop.takeIf { showAddHostFab })
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
@@ -421,6 +429,7 @@ private fun ConnectionsContent(
     hostsState: ListState<Host>,
     networkState: ListState<NetworkEntry>,
     onRetryReads: () -> Unit,
+    fabTop: Float?,
 ) {
     // 主机卡片上的路由徽标：选了网络显示网络名；本地就能知道的问题（引用已删除、tailnet 从没登录）用错误色。
     val availableNetworks = (networkState as? ListState.Ready)?.items ?: networks
@@ -482,6 +491,14 @@ private fun ConnectionsContent(
     val present = hosts.map { keyOf(it) }.distinct()
     val orderedKeys = groupOrder.filter { it in present } + present.filter { it !in groupOrder }
     val hasNamedGroup = present.any { it != UNGROUPED_KEY }
+    var listBottom by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    // Root coordinates already account for the bottom bar and consumed Scaffold insets.
+    val fabOverlap = fabTop?.let { top ->
+        with(density) { (listBottom - top).coerceAtLeast(0f).toDp() }
+    } ?: 0.dp
+    val listPadding = PaddingValues(top = 12.dp, bottom = 12.dp + fabOverlap)
+    val listModifier = Modifier.fillMaxSize().onGloballyPositioned { listBottom = it.boundsInRoot().bottom }
 
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
         if (!hasNamedGroup) {
@@ -490,8 +507,8 @@ private fun ConnectionsContent(
                 items = hosts,
                 key = { it.id },
                 onReorder = onReorderHosts,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 12.dp),
+                modifier = listModifier,
+                contentPadding = listPadding,
             ) { host, dragging, handle ->
                 HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
             }
@@ -508,8 +525,8 @@ private fun ConnectionsContent(
                     val order = mergeSessionOrder(hosts.map { it.id }, newItems.map { it.id }.filter { it in members })
                     onReorderHosts(order.map { byId.getValue(it) })
                 },
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 12.dp),
+                modifier = listModifier,
+                contentPadding = listPadding,
                 header = { group, dragging, handle ->
                     val key = group.key
                     GroupHeaderRow(

@@ -46,7 +46,9 @@ fun ExtraKeysLayoutDialog(
     onDismiss: () -> Unit,
 ) {
     var slots by remember(stored) { mutableStateOf(ExtraKeyLayout.slots(stored)) }
+    val defaultSlots = remember { ExtraKeyLayout.slots("") }
     var picking by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var confirmReset by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MokeShapes.card, color = MaterialTheme.colorScheme.surface) {
@@ -80,14 +82,28 @@ fun ExtraKeysLayoutDialog(
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = {
-                        onChange("")
-                        slots = ExtraKeyLayout.slots("")
-                    }) { Text(stringResource(R.string.extra_keys_reset)) }
+                    TextButton(onClick = { confirmReset = true }, enabled = slots != defaultSlots) {
+                        Text(stringResource(R.string.extra_keys_reset))
+                    }
                     TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
                 }
             }
         }
+    }
+
+    if (confirmReset) {
+        ConfirmDialog(
+            title = stringResource(R.string.extra_keys_reset_title),
+            message = stringResource(R.string.extra_keys_reset_message),
+            confirmLabel = stringResource(R.string.reset_default),
+            destructive = true,
+            onConfirm = {
+                confirmReset = false
+                slots = defaultSlots
+                onChange("")
+            },
+            onDismiss = { confirmReset = false },
+        )
     }
 
     val target = picking

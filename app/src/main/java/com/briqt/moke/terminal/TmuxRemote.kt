@@ -388,29 +388,111 @@ object TmuxRemote {
     fun detach(target: TmuxSessionRef): String = mutation(target, "detach-client -s ${q(target.id)}")
     fun kill(target: TmuxSessionRef): String = mutation(target, "kill-session -t ${q(target.id)}")
 
-    /** Preserve the opt-in generic wheel setup, but only on this witnessed server/session.
-     * Mouse is session-local. As before, root/copy-mode key tables belong to the whole server.
-     * A failed queue is reported, never automatically replayed or redirected to a default server.
+    /** Enable mouse only on the witnessed session; do not install new global wheel policy.
+     * Existing root wheel commands are corrected individually only when their complete list-keys
+     * bytes match the historical generators (N3, then N1). This proves content, not ownership or
+     * the user's original value. Correcting either root key affects all clients of that server;
+     * other root/prefix/copy bindings, including copy-mode N1, survive.
+     *
+     * Each candidate is re-read near its guarded write and checked afterwards. Shell comparison
+     * yields to the server: external clients can still bind between comparison and write. This is
+     * best effort, not atomic CAS. Any uncertain/partial result stops, without replay or rollback.
      */
     fun scrollSetup(target: TmuxSessionRef): String {
         val forward = "#{||:#{pane_in_mode},#{mouse_any_flag}}"
-        fun bind(key: String, arrow: String, fallback: String): String {
-            val alternate = "if -F ${q("#{alternate_on}")} ${q("send -N1 $arrow")} ${q(fallback)}"
-            return "bind -n $key if -F ${q(forward)} ${q("send -M")} ${q(alternate)}"
+        // list-keys -T root <one key> avoids table/key padding. Its nested command strings are
+        // intentionally NOT reparsed, whitespace-folded or evaluated. tmux 3.3a has no list-keys -F
+        // or global key_command query. These are the canonical bytes on supported 3.2a/3.3a/3.4.
+        fun historical(key: String, arrow: String, fallback: String) = listOf(1, 3).map { count ->
+            "bind-key -T root $key if-shell -F \"$forward\" \"send -M\" " +
+                "\"if -F '#{alternate_on}' 'send -N$count $arrow' '$fallback'\"\n"
         }
-        fun bindMode(table: String, key: String, command: String) =
-            "bind -T $table $key ${q("select-pane ; send -X -N 1 $command")}"
-        val commands = listOf(
-            "set -t ${q(target.id)} mouse on",
-            bind("WheelUpPane", "Up", "copy-mode -e; send -M"),
-            bind("WheelDownPane", "Down", "send -M"),
-        ) + listOf("copy-mode", "copy-mode-vi").flatMap { table ->
-            listOf(
-                bindMode(table, "WheelUpPane", "scroll-up"),
-                bindMode(table, "WheelDownPane", "scroll-down"),
-            )
-        }
-        return mutation(target, commands.joinToString(" ; "))
+        val up = "bind-key -T root WheelUpPane if-shell -F ${q(forward)} ${q("send -M")} ${q("copy-mode -e; send -M")}"
+        val down = "bind-key -T root WheelDownPane send-keys -M"
+        val safeUp = "bind-key -T root WheelUpPane if-shell -F \"$forward\" \"send -M\" \"copy-mode -e; send -M\"\n"
+        val safeDown = "$down\n"
+        val uncertain = "moke_result UNKNOWN 'scroll setup not confirmed'; exit 0"
+        fun correct(key: String, originals: List<String>, command: String, expected: String) = """
+            moke_scroll_call ${q("list-keys -T root $key")} $key
+            moke_scroll_before=${'$'}moke_scroll_out
+            case "${'$'}moke_scroll_before" in
+                ${originals.joinToString("|") { q(it) }})
+                    moke_scroll_call ${q("list-keys -T root $key")} $key
+                    [ "${'$'}moke_scroll_out" = "${'$'}moke_scroll_before" ] || { $uncertain; }
+                    moke_scroll_call ${q(command)}
+                    [ -z "${'$'}moke_scroll_out" ] || { $uncertain; }
+                    moke_scroll_call ${q("list-keys -T root $key")} $key
+                    [ "${'$'}moke_scroll_out" = ${q(expected)} ] || { $uncertain; }
+                    ;;
+            esac
+        """.trimIndent()
+        return shell(core + "\n" + frozen(target) + """
+            unset TMUX TMUX_PANE
+            command -v head >/dev/null 2>&1 || { $uncertain; }
+            moke_scroll_suffix=${q("${P}SCROLL_ACK\n\n${P}SCROLL_EXIT|0!")}
+            moke_scroll_call() {
+                moke_verify
+                case "${'$'}?" in 0) :;; 2) moke_result STALE; exit 0;; *) $uncertain;; esac
+                # Bound the capture, preserving trailing newlines with a final status sentinel.
+                # Only generated commands enter tmux's parser; read-back bytes are data throughout.
+                moke_scroll_out=${'$'}(
+                    {
+                        # 3.2a can crash when format context has a missing session. has-session
+                        # aborts this synchronous queue before that guard, not a separate preflight.
+                        tmux -N -u -S "${'$'}moke_socket" has-session -t ${q(target.id)} \; \
+                            if-shell -F -t ${q(target.id)} ${q(condition(target))} \
+                            "${'$'}1 ; display-message -p '${P}SCROLL_ACK'" ${q("display-message -p '${P}STALE'")} 2>&1
+                        printf '\n${P}SCROLL_EXIT|%s!' "${'$'}?"
+                    } | head -c 4097
+                )
+                [ "${'$'}{#moke_scroll_out}" -le 4096 ] || { $uncertain; }
+                case "${'$'}moke_scroll_out" in
+                    ${q("${P}STALE\n\n${P}SCROLL_EXIT|0!")}|${q("can't find session: ${target.id}\n\n${P}SCROLL_EXIT|1!")})
+                        moke_result STALE; exit 0;;
+                    *"${'$'}moke_scroll_suffix")
+                        moke_scroll_out=${'$'}{moke_scroll_out%"${'$'}moke_scroll_suffix"};;
+                    *)
+                        # Missing keys are preserved, never recreated. All other errors stop.
+                        if [ -n "${'$'}{2-}" ] && [ "${'$'}moke_scroll_out" = "unknown key: ${'$'}2"${q("\n\n${P}SCROLL_EXIT|1!")} ]; then
+                            moke_scroll_out=; return 0
+                        else $uncertain; fi;;
+                esac
+                if [ -n "${'$'}{2-}" ]; then
+                    # Check the one-key response envelope, without interpreting its command body.
+                    case "${'$'}moke_scroll_out" in *${q("\n")}) :;; *) $uncertain;; esac
+                    moke_scroll_line=${'$'}{moke_scroll_out%${q("\n")}}
+                    case "${'$'}moke_scroll_line" in *${q("\n")}*) $uncertain;; esac
+                    case "${'$'}moke_scroll_line" in
+                        "bind-key -T root ${'$'}2 "?*|"bind-key -r -T root ${'$'}2 "?*) :;;
+                        *) $uncertain;;
+                    esac
+                fi
+            }
+            moke_scroll_confirm_mouse() {
+                moke_scroll_call ${q("show-options -v -t ${q(target.id)} mouse")}
+                [ "${'$'}moke_scroll_out" = ${q("on\n")} ] || { $uncertain; }
+                moke_verify || { $uncertain; }
+            }
+            moke_scroll_call ${q("display-message -p '#{version}'")}
+            case "${'$'}moke_scroll_out" in
+                *${q("\n")}) moke_scroll_version=${'$'}{moke_scroll_out%${q("\n")}};;
+                *) $uncertain;;
+            esac
+            case "${'$'}moke_scroll_version" in ''|*[!A-Za-z0-9._+-]*) $uncertain;; esac
+            moke_scroll_call ${q("set-option -t ${q(target.id)} mouse on")}
+            [ -z "${'$'}moke_scroll_out" ] || { $uncertain; }
+            # Version knowledge limits only historical key correction, not ordinary mouse setup.
+            case "${'$'}moke_scroll_version" in
+                3.2a|3.3a|3.4) :;;
+                *) moke_scroll_confirm_mouse
+                    moke_result OK SCROLL_LEGACY_SKIPPED_UNSUPPORTED_VERSION; exit 0;;
+            esac
+        """.trimIndent() + "\n" +
+            correct("WheelUpPane", historical("WheelUpPane", "Up", "copy-mode -e; send -M"), up, safeUp) + "\n" +
+            correct("WheelDownPane", historical("WheelDownPane", "Down", "send -M"), down, safeDown) + "\n" + """
+            moke_scroll_confirm_mouse
+            moke_result OK
+        """.trimIndent())
     }
 
     /** Read the attached client's active pane, not the control channel's arbitrary default pane. */

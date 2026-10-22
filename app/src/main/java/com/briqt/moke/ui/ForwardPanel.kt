@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
@@ -88,30 +90,37 @@ fun ForwardPanel(
                 }
             }
             HorizontalDivider()
-            if (entries.isEmpty() && pending.isEmpty()) {
-                Text(
-                    stringResource(R.string.fwd_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 16.dp),
-                )
-            }
-            pending.filter { p -> entries.none { it.remotePort == p && it.state == PortForwards.State.ACTIVE } }.forEach { p ->
-                Text(
-                    stringResource(R.string.fwd_connecting, p),
-                    fontFamily = MokeMono,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
-            }
-            entries.forEach { e ->
-                ForwardRow(
-                    entry = e,
-                    onOpen = { onOpen(e.localUrl) },
-                    onCopy = { onCopy(e.localUrl) },
-                    onRetry = { start(e.remotePort, e.localPort.takeIf { it > 0 }) },
-                    onStop = { scope.launch(Dispatchers.IO) { forwards.stop(e.remotePort) } },
-                )
+            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                if (entries.isEmpty() && pending.isEmpty()) {
+                    item("empty") {
+                        Text(
+                            stringResource(R.string.fwd_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                    }
+                }
+                items(
+                    pending.filter { p -> entries.none { it.remotePort == p && it.state == PortForwards.State.ACTIVE } },
+                    key = { "pending:$it" },
+                ) { p ->
+                    Text(
+                        stringResource(R.string.fwd_connecting, p),
+                        fontFamily = MokeMono,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                }
+                items(entries, key = { "forward:${it.remotePort}" }) { e ->
+                    ForwardRow(
+                        entry = e,
+                        onOpen = { onOpen(e.localUrl) },
+                        onCopy = { onCopy(e.localUrl) },
+                        onRetry = { start(e.remotePort, e.localPort.takeIf { it > 0 }) },
+                        onStop = { scope.launch(Dispatchers.IO) { forwards.stop(e.remotePort) } },
+                    )
+                }
             }
         }
     }

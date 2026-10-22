@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
@@ -132,7 +131,6 @@ fun TerminalScreen(
     extraKeysVisible: Boolean,
     extraKeysLayout: String,
     keyboardMode: KeyboardMode,
-    scrollMode: ScrollMode,
     confirmClose: Boolean,
     keepScreenOn: Boolean,
     resolveTypeface: (String, String) -> android.graphics.Typeface,
@@ -191,6 +189,9 @@ fun TerminalScreen(
     val forwardEntries by (ts.forwards?.entries ?: NO_FORWARDS).collectAsState()
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
+    var showInputDialog by remember(ts.id) { mutableStateOf(false) }
+    var showSwipeDialog by remember(ts.id) { mutableStateOf(false) }
+    var swipeMode by remember(ts.id) { mutableStateOf(ScrollMode.SMART) }
     var closeTarget by remember(ts.id) { mutableStateOf<SessionCloseTarget?>(null) }
     var showNewTmux by remember(ts.id) { mutableStateOf(false) }
     fun requestClose() {
@@ -252,7 +253,7 @@ fun TerminalScreen(
     val imeInset = (WindowInsets.ime.getBottom(LocalDensity.current) -
         WindowInsets.navigationBars.getBottom(LocalDensity.current)).coerceAtLeast(0)
     val ownsInputWindow = !showTmux && !showForwards && !showTitleDialog && !showKeyboardModeDialog &&
-        closeTarget == null && !showNewTmux && view.isAttachedToWindow
+        !showInputDialog && !showSwipeDialog && closeTarget == null && !showNewTmux && view.isAttachedToWindow
     LaunchedEffect(ts.id, inputBudget, imeInset, imeVisible, ownsInputWindow, windowFocused, inputAttempt) {
         when (imeFallback.update(imeInset, ownsInputWindow, inputBudget, imeVisible, windowFocused)) {
             TerminalImeAction.HIDE -> {
@@ -285,9 +286,15 @@ fun TerminalScreen(
         controller.cursorStyle = cursorStyle
         controller.cursorBlink = cursorBlink
         controller.keyboardMode = keyboardMode
-        view.mokeScrollMode = scrollMode.ordinal
-        // mosh 会话里的备用屏是 mosh-client 自己的，不能当作「远端在跑全屏程序」的判据。
-        view.mokeMoshSession = ts.host.useMosh
+        view.setMokeScrollMode(swipeMode.ordinal)
+        view.mokeOnUserInput = Runnable {
+            swipeMode = ScrollMode.SMART
+            view.setMokeScrollMode(ScrollMode.SMART.ordinal)
+        }
+        view.mokeOnInputContextChanged = Runnable {
+            swipeMode = ScrollMode.SMART
+            view.setMokeScrollMode(ScrollMode.SMART.ordinal)
+        }
         view.mokeOnTopRowChanged = java.util.function.IntConsumer { row -> topRow = row }
         controller.fontSizeSp = fontSizeSp
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
@@ -317,7 +324,11 @@ fun TerminalScreen(
                 controller.onLinkTapped = null
                 controller.onKeyboardRequest = null
             }
+            view.mokeCancelScroll()
             view.mokeOnTopRowChanged = null
+            view.mokeOnUserInput = null
+            view.mokeOnInputContextChanged = null
+            view.setMokeScrollMode(ScrollMode.SMART.ordinal)
         }
     }
 
@@ -354,9 +365,25 @@ fun TerminalScreen(
     }
     // 常亮开关热生效（不必退出会话重进）。
     LaunchedEffect(ts.id, keepScreenOn) { view.keepScreenOn = keepScreenOn }
-    // 键盘模式热切换：restartInput 让输入法立刻按新 EditorInfo 重建（否则要退出会话再进才生效）。
-    LaunchedEffect(ts.id, scrollMode) { view.mokeScrollMode = scrollMode.ordinal }
-
+    LaunchedEffect(ts.id, swipeMode) { view.setMokeScrollMode(swipeMode.ordinal) }
+    DisposableEffect(ts.id, lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                swipeMode = ScrollMode.SMART
+                view.setMokeScrollMode(ScrollMode.SMART.ordinal)
+                view.mokeCancelScroll()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(ts.id, windowFocused, alive, showTmux, showForwards, showTitleDialog, closeTarget, showNewTmux) {
+        if (!windowFocused || !alive || showTmux || showForwards || showTitleDialog || closeTarget != null || showNewTmux) {
+            view.mokeCancelScroll()
+        }
+        if (!alive) swipeMode = ScrollMode.SMART
+    }
+    // 键盘模式热切换：restartInput 让输入法立刻按新 EditorInfo 重建。
     LaunchedEffect(ts.id, keyboardMode) {
         controller.keyboardMode = keyboardMode
         controller.restartInput()
@@ -400,7 +427,6 @@ fun TerminalScreen(
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
-                keyboardMode = keyboardMode,
                 tmuxCount = tmuxState.sessions.size,
                 onOpenTmux = {
                     keyboard?.hide()
@@ -410,11 +436,10 @@ fun TerminalScreen(
                 forwardCount = forwardEntries.size,
                 onOpenForwards = { keyboard?.hide(); showForwards = true },
                 onFontSize = onFontSize,
-                onPickKeyboardMode = { showKeyboardModeDialog = true },
+                onInput = { view.mokeCancelScroll(); showInputDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
                 onSetTitle = { showTitleDialog = true },
                 onOpenFiles = { keyboard?.hide(); onOpenFiles() },
-                onShowKeyboard = { controller.showKeyboard() },
                 // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
                 onClose = { requestClose() },
                 onBack = { keyboard?.hide(); onBack() },
@@ -452,6 +477,16 @@ fun TerminalScreen(
                     onClick = { controller.scrollToBottom() },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
                 )
+                if (swipeMode != ScrollMode.SMART && zoomHintSp == null && !panelOpen && !showComposer && tappedLink == null) {
+                    TemporarySwipeHint(
+                        mode = swipeMode,
+                        onAutomatic = {
+                            swipeMode = ScrollMode.SMART
+                            view.setMokeScrollMode(ScrollMode.SMART.ordinal)
+                        },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    )
+                }
                 // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
                 // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
                 // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
@@ -557,6 +592,7 @@ fun TerminalScreen(
                         composerText = ""      // 发送后清空草稿
                         showComposer = false
                         controller.showKeyboard()
+                        if (text.isNotEmpty() || appendEnter) view.mokePrepareForUserInput()
                         scope.launch {
                             if (text.isNotEmpty()) ts.session.write(text)
                             // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
@@ -602,6 +638,27 @@ fun TerminalScreen(
         )
     }
 
+    if (showInputDialog) {
+        TerminalInputDialog(
+            keyboardMode = keyboardMode,
+            swipeMode = swipeMode,
+            onKeyboard = { showInputDialog = false; controller.showKeyboard() },
+            onKeyboardMode = { showInputDialog = false; showKeyboardModeDialog = true },
+            onSwipeMode = { showInputDialog = false; showSwipeDialog = true },
+            onDismiss = { showInputDialog = false },
+        )
+    }
+    if (showSwipeDialog) {
+        ScrollModeDialog(
+            current = swipeMode,
+            onPick = {
+                swipeMode = it
+                view.setMokeScrollMode(it.ordinal)
+                showSwipeDialog = false
+            },
+            onDismiss = { showSwipeDialog = false },
+        )
+    }
     if (showKeyboardModeDialog) {
         KeyboardModeDialog(
             current = keyboardMode,
@@ -700,7 +757,10 @@ private fun KeyboardPanelOverlay(
  */
 private fun sendKey(ts: TermSession, controller: TerminalController, mods: Modifiers, key: KeyId): Modifiers {
     val bytes = mods.encode(key)
-    if (bytes.isNotEmpty()) ts.session.write(bytes)
+    if (bytes.isNotEmpty()) {
+        controller.view?.mokePrepareForUserInput()
+        ts.session.write(bytes)
+    }
     // 附加键消费掉一次性修饰后必须同步 controller，否则输入法打的下一个字母会被重复加上 Ctrl。
     return mods.consumeOnce().also { syncMods(controller, it) }
 }
@@ -750,17 +810,15 @@ private fun TerminalTopBar(
     showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
-    keyboardMode: KeyboardMode,
     tmuxCount: Int,
     onOpenTmux: () -> Unit,
     forwardCount: Int,
     onOpenForwards: () -> Unit,
     onFontSize: (Float) -> Unit,
-    onPickKeyboardMode: () -> Unit,
+    onInput: () -> Unit,
     onToggleExtraKeys: () -> Unit,
     onSetTitle: () -> Unit,
     onOpenFiles: () -> Unit,
-    onShowKeyboard: () -> Unit,
     onClose: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -906,26 +964,10 @@ private fun TerminalTopBar(
                         }
                     }
                     HorizontalDivider()
-                    // 弹出软键盘。
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.show_keyboard), style = MaterialTheme.typography.bodyMedium) },
-                        leadingIcon = { Icon(Icons.Filled.Keyboard, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                        onClick = { menuOpen = false; onShowKeyboard() },
-                    )
-                    // 键盘模式：厂商安全键盘挡住中文候选时，在这里就近换一档（副标题显示当前档）。
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(stringResource(R.string.keyboard_mode), style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    stringResource(keyboardModeLabel(keyboardMode)),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        },
+                        text = { Text(stringResource(R.string.terminal_input), style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = { Icon(Icons.Filled.KeyboardAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                        onClick = { menuOpen = false; onPickKeyboardMode() },
+                        onClick = { menuOpen = false; onInput() },
                     )
                     // 显示 / 隐藏底部快捷键条（双箭头表意“底部工具条上/下”）。
                     DropdownMenuItem(

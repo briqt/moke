@@ -2,6 +2,159 @@ package com.termux.terminal;
 
 public class ResizeTest extends TerminalTestCase {
 
+    private void assertResizeAnchor(int column, int row) {
+        int[] anchor = mTerminal.takeResizeAnchor();
+        assertNotNull("Anchor must survive resize", anchor);
+        assertEquals(column, anchor[0]);
+        assertEquals(row, anchor[1]);
+        assertNull("Taking consumes the anchor", mTerminal.takeResizeAnchor());
+    }
+
+    public void testResizeAnchorReflowsWrappedHistoryAndMapsBack() {
+        withTerminalSized(5, 3).enterString("abcdefghijklmnopqrst");
+        mTerminal.setResizeAnchor(-1, 3); // d in the first wrapped row in history.
+        resize(3, 3);
+        int[] anchor = mTerminal.takeResizeAnchor();
+        assertNotNull(anchor);
+        assertEquals(0, anchor[0]);
+        assertEquals("d", mTerminal.getScreen().getSelectedText(anchor[0], anchor[1], anchor[0], anchor[1]));
+        mTerminal.setResizeAnchor(anchor[1], anchor[0]);
+        resize(5, 3);
+        assertResizeAnchor(3, -1);
+        assertLinesAre("fghij", "klmno", "pqrst");
+    }
+
+    public void testResizeAnchorMapsHeightOnlyOriginShiftInBothDirections() {
+        withTerminalSized(3, 3).enterString("111222333444555666777888999");
+        mTerminal.setResizeAnchor(-2, 1);
+        resize(3, 5);
+        assertResizeAnchor(1, 0);
+        mTerminal.setResizeAnchor(0, 1);
+        resize(3, 3);
+        assertResizeAnchor(1, -2);
+        assertHistoryStartsWith("666", "555");
+    }
+
+    public void testResizeAnchorPreservesBlankRowsBelowCursor() {
+        withTerminalSized(5, 5).enterString("x");
+        mTerminal.setResizeAnchor(4, 0);
+        resize(5, 3);
+        assertResizeAnchor(0, 2);
+        assertEquals(2, mTerminal.getScreen().getActiveTranscriptRows());
+        assertLineIs(-2, "x    ");
+        assertLinesAre("     ", "     ", "     ");
+
+        withTerminalSized(5, 5).enterString("x");
+        mTerminal.setResizeAnchor(4, 0);
+        resize(3, 5);
+        assertResizeAnchor(0, 4);
+        assertLinesAre("x  ", "   ", "   ", "   ", "   ");
+    }
+
+    public void testResizeAnchorPreservesTrailingBlankCellWithoutAddingText() {
+        withTerminalSized(5, 2).enterString("a\r\nb");
+        mTerminal.setResizeAnchor(0, 4);
+        resize(3, 3);
+        assertResizeAnchor(1, 1);
+        assertLinesAre("a  ", "   ", "b  ");
+        assertEquals("a  \nb", mTerminal.getScreen().getTranscriptText());
+    }
+
+    public void testResizeAnchorPreservesCjkCombiningAndFollowingContent() {
+        withTerminalSized(6, 3).enterString("A界̂BĆD");
+        mTerminal.setResizeAnchor(0, 2); // Second cell of the wide glyph.
+        resize(4, 3);
+        assertResizeAnchor(2, 0);
+        assertLinesAre("A界̂B", "ĆD  ", "    ");
+        mTerminal.setResizeAnchor(1, 0);
+        resize(3, 3);
+        assertResizeAnchor(1, 1);
+        assertLinesAre("A界̂", "BĆD", "   ");
+    }
+
+    public void testResizeDoesNotLoseCombiningCharacterAtCursorCell() {
+        withTerminalSized(5, 3).enterString("AB́CD\033[1;2H");
+        resize(3, 3);
+        assertLinesAre("AB́C", "D  ", "   ");
+        assertCursorAt(0, 1);
+
+        withTerminalSized(5, 3).enterString("AB́CD\033[1;2H");
+        mTerminal.setResizeAnchor(0, 3);
+        resize(3, 3);
+        assertResizeAnchor(0, 1);
+        assertLinesAre("AB́C", "D  ", "   ");
+        assertCursorAt(0, 1);
+    }
+
+    public void testResizeAnchorReportsEvictionInsteadOfKeepingDiscardedContent() {
+        TerminalBuffer buffer = new TerminalBuffer(4, 4, 2);
+        for (int row = 0; row < 2; row++)
+            for (int col = 0; col < 4; col++) buffer.setChar(col, row, 'A' + row, TextStyle.NORMAL);
+        buffer.scrollDownOneLine(0, 2, TextStyle.NORMAL);
+        buffer.blockSet(0, 1, 4, 1, 'C', TextStyle.NORMAL);
+        buffer.scrollDownOneLine(0, 2, TextStyle.NORMAL);
+        buffer.blockSet(0, 1, 4, 1, 'D', TextStyle.NORMAL);
+        int[] cursor = {3, 1}, anchor = {0, -2};
+        buffer.resize(2, 2, 4, cursor, TextStyle.NORMAL, false, anchor);
+        assertEquals(-1, anchor[0]);
+        assertEquals(-1, anchor[1]);
+        assertEquals("CC\nCC\nDD\nDD", buffer.getTranscriptTextWithoutJoinedLines());
+        assertEquals("CCCC\nDDDD", buffer.getTranscriptText());
+    }
+
+    public void testInactiveMainAnchorMapsThroughLazyReflowAndIsConsumed() {
+        withTerminalSized(5, 3).enterString("abcdefghijklmnopqrst");
+        mTerminal.setResizeAnchor(-1, 3);
+        enterString("\033[?1049h");
+        resize(3, 3);
+        assertNull("Alternate buffer must not consume the main mark", mTerminal.takeResizeAnchor());
+        enterString("\033[?1049l");
+        int[] anchor = mTerminal.takeResizeAnchor();
+        assertNotNull(anchor);
+        assertEquals(0, anchor[0]);
+        assertEquals("d", mTerminal.getScreen().getSelectedText(anchor[0], anchor[1], anchor[0], anchor[1]));
+        assertNull(mTerminal.takeResizeAnchor());
+        enterString("\033[?1049h\033[?1049l");
+        assertNull("Consumed mark must not reappear on another buffer round trip", mTerminal.takeResizeAnchor());
+    }
+
+    public void testRegisteredAnchorTracksOutputAndRejectsClearAndEviction() {
+        withTerminalSized(5, 3).enterString("a\r\nb\r\nc\r\nd");
+        mTerminal.setResizeAnchor(-1, 0);
+        enterString("\r\ne");
+        assertResizeAnchor(0, -2);
+        mTerminal.setResizeAnchor(-2, 0);
+        enterString("\033[3J");
+        assertNull(mTerminal.takeResizeAnchor());
+
+        mTerminal = new TerminalEmulator(mOutput, 5, 3, INITIAL_CELL_WIDTH_PIXELS, INITIAL_CELL_HEIGHT_PIXELS, 100, null);
+        for (int i = 0; i < 110; i++) enterString("x\r\n");
+        mTerminal.setResizeAnchor(-mTerminal.getScreen().getActiveTranscriptRows(), 0);
+        enterString("x\r\n");
+        assertNull("Evicted source row has no mapped cell", mTerminal.takeResizeAnchor());
+        mTerminal.setResizeAnchor(-1, 0);
+        mTerminal.setResizeAnchor(0, -1);
+        assertNull("Invalid cell explicitly clears an old registered mark", mTerminal.takeResizeAnchor());
+    }
+
+    public void testResizeAnchorNoOpInvalidAndBufferSwitch() {
+        withTerminalSized(5, 3).enterString("a");
+        assertNull(mTerminal.takeResizeAnchor());
+        mTerminal.setResizeAnchor(0, 2);
+        resize(5, 3);
+        assertResizeAnchor(2, 0);
+        mTerminal.setResizeAnchor(-1, 0);
+        resize(4, 3);
+        assertNull(mTerminal.takeResizeAnchor());
+        mTerminal.setResizeAnchor(0, 0);
+        enterString("\033[?1049h\033[?1049l");
+        assertResizeAnchor(0, 0);
+        mTerminal.setResizeAnchor(0, 0);
+        mTerminal.reset();
+        assertNull(mTerminal.takeResizeAnchor());
+    }
+
+
 	public void testResizeWhenHasHistory() {
 		final int cols = 3;
 		withTerminalSized(cols, 3).enterString("111222333444555666777888999").assertCursorAt(2, 2).assertLinesAre("777", "888", "999");

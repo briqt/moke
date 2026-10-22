@@ -187,6 +187,8 @@
     <string name="show_extra_keys">Show shortcut keys</string>
     <string name="menu_extra_keys">Shortcut keys</string>
     <string name="extra_keys_reset">Restore default</string>
+    <string name="extra_keys_reset_title">Reset key layout?</string>
+    <string name="extra_keys_reset_message">Your custom key layout will be replaced.</string>
     <string name="extra_keys_pick">Choose a key</string>
     <string name="key_mod_once">%1$s, next key</string>
     <string name="key_mod_locked">%1$s, locked</string>
@@ -234,7 +236,7 @@
 
     <!-- 字体管理 -->
     <string name="fonts_title">Fonts</string>
-    <string name="font_upload">Upload local font (TTF / OTF)</string>
+    <string name="font_upload">Import font (TTF / OTF)</string>
     <string name="font_importing">Importing…</string>
     <string name="font_imported">Imported \"%1$s\"</string>
     <string name="role_primary">Primary</string>
@@ -281,6 +283,9 @@
     <string name="files_open">Files</string>
     <string name="files_connecting">Connecting…</string>
     <string name="files_empty">Empty folder</string>
+    <string name="files_only_hidden">Only hidden files</string>
+    <string name="files_folder_description">Folder: %1$s</string>
+    <string name="files_file_description">File: %1$s</string>
     <string name="files_parent">Parent folder</string>
     <string name="files_new_folder">New folder</string>
     <string name="files_folder_name">Folder name</string>
@@ -311,7 +316,7 @@
     <string name="files_transfer_done">Done</string>
     <string name="files_transfer_cancelled">Cancelled</string>
     <string name="files_transfer_queued">Queued</string>
-    <string name="transfer_interrupted">Interrupted — the app was stopped</string>
+    <string name="transfer_interrupted">Transfer interrupted</string>
     <string name="transfer_host_gone">That host no longer exists</string>
     <string name="transfer_remote_missing">The remote file is gone</string>
     <string name="transfer_local_unwritable">Cannot write to the local file</string>
@@ -337,7 +342,7 @@
     <string name="hostkey_rejected">Host key for %1$s was not trusted; connection aborted.</string>
     <string name="hostkey_confirm_title">Trust this host?</string>
     <string name="hostkey_confirm_trust">Trust</string>
-    <string name="menu_auto_trust_hostkey">Trust new hosts</string>
+    <string name="menu_auto_trust_hostkey">Automatically trust new hosts</string>
     <string name="hostkey_clear">Clear saved host fingerprint</string>
     <string name="hostkey_clear_hint">Saved: %1$s</string>
     <string name="hostkey_none">No fingerprint saved for this host yet</string>
@@ -391,10 +396,10 @@
     <string name="persistence_none">None</string>
     <string name="persistence_tmux">tmux</string>
     <string name="scroll_jump_bottom">Jump to latest</string>
-    <string name="scroll_mode">Swipe in full-screen programs</string>
-    <string name="scroll_mode_smart">Smart</string>
-    <string name="scroll_mode_wheel">Always send wheel</string>
-    <string name="scroll_mode_arrows">Always send arrow keys</string>
+    <string name="scroll_mode">Swipe behavior</string>
+    <string name="scroll_mode_smart">Automatic</string>
+    <string name="scroll_mode_wheel">Send wheel events</string>
+    <string name="scroll_mode_arrows">Send arrow keys</string>
     <string name="include_prerelease">Include pre-releases</string>
     <string name="github_repo">GitHub repository</string>
 
@@ -452,7 +457,7 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="fwd_empty">No forwards yet</string>
     <string name="fwd_connecting">Remote %1$d · connecting…</string>
     <string name="fwd_row_remote">Remote %1$d</string>
-    <string name="fwd_failed">Disconnected</string>
+    <string name="fwd_failed">Forward unavailable</string>
     <string name="fwd_copy_address">Copy address</string>
     <string name="fwd_stop">Stop</string>
     <string name="fwd_remote_port">Remote port</string>

@@ -1,4 +1,4 @@
-// Vendored from termux/termux-app · terminal-view (Apache-2.0) — 未修改。
+// Vendored from termux/termux-app · terminal-view (Apache-2.0), with local scrolling/input extensions.
 plugins {
     alias(libs.plugins.android.library)
 }

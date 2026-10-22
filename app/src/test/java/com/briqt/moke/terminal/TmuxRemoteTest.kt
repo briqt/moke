@@ -415,7 +415,7 @@ class TmuxRemoteTest {
         assertTrue(body(TmuxRemote.detach(target)).contains("detach-client -s"))
     }
 
-    @Test fun `opt in scroll setup is one frozen socket queue with explicit operation ACK`() {
+    @Test fun `opt in scroll setup retains frozen target and checks complete bounded ACKs`() {
         val command = body(TmuxRemote.scrollSetup(target))
         assertTrue(command.contains("moke_expected_boot='$boot'"))
         assertTrue(command.contains("moke_expected_ticks=45678"))
@@ -423,41 +423,34 @@ class TmuxRemoteTest {
         assertTrue(command.contains("moke_expected_dev=2049"))
         assertTrue(command.contains("moke_expected_ino=555"))
         assertTrue(command.contains("moke_verify"))
-        assertTrue(command.contains("tmux -N -u -S \"\$moke_socket\" if-shell -F -t"))
+        assertTrue(command.contains("tmux -N -u -S \"\$moke_socket\" has-session -t"))
+        assertTrue(command.contains("if-shell -F -t"))
         assertTrue(command.contains("#{session_created},1700000001"))
         assertTrue(command.contains("moke_result STALE"))
         assertTrue(command.contains("moke_result OK"))
-        assertTrue(command.contains("moke_result FAILED"))
+        assertTrue(command.contains("moke_result UNKNOWN 'scroll setup not confirmed'"))
         assertFalse(command.contains(target.name))
         assertFalse(command.contains("set-hook"))
         assertFalse(command.contains(" -g "))
         assertFalse(command.contains("|| true"))
-        assertEquals(1, command.lineSequence().count { it.contains("moke_out=\$(tmux") })
+        assertTrue(command.contains("head -c 4097"))
+        assertTrue(command.contains("SCROLL_ACK"))
+        assertTrue(command.contains("SCROLL_EXIT|0!"))
         invalid { TmuxRemote.scrollSetup(target.copy(server = server.copy(startedTicks = 0))) }
         val peer = body(TmuxRemote.guardPeer(scripts, nonce, true, boot, TmuxRemote.scrollSetup(target)))
         assertTrue(peer.indexOf("moke_witness=\$(sh -c") < peer.indexOf(TmuxRemote.scrollSetup(target)))
     }
 
-    @Test fun `scroll queue retains existing generic root alternate screen and both copy mode semantics`() {
+    @Test fun `scroll setup neither installs copy policy nor queries unsupported key formats`() {
         val command = body(TmuxRemote.scrollSetup(target))
-        val invocation = words(command.lineSequence().single { it.contains("moke_out=\$(tmux") })
-        val queue = invocation[invocation.indexOf("if-shell") + 5]
-        assertTrue(queue.startsWith("set -t '\$7' mouse on ; "))
-        val up = queue.substringAfter("bind -n WheelUpPane ").substringBefore(" ; bind -n WheelDownPane")
-        val down = queue.substringAfter("bind -n WheelDownPane ").substringBefore(" ; bind -T copy-mode ")
-        for ((branch, arrow, fallback) in listOf(
-            Triple(up, "Up", "copy-mode -e; send -M"), Triple(down, "Down", "send -M"),
-        )) {
-            val args = words(branch)
-            assertEquals(listOf("if", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}", "send -M"), args.take(4))
-            assertEquals(listOf("if", "-F", "#{alternate_on}", "send -N1 $arrow", fallback), words(args[4]))
+        for (forbidden in listOf("bind -n", "bind -T copy", "bind-key -T copy", "unbind", "kill-server",
+            "source-file", "key_command", "list-keys -F", "eval ", "sed ", "tr ")) {
+            assertFalse(forbidden, command.contains(forbidden))
         }
-        for (table in listOf("copy-mode", "copy-mode-vi")) {
-            assertTrue(queue.contains("bind -T $table WheelUpPane 'select-pane ; send -X -N 1 scroll-up'"))
-            assertTrue(queue.contains("bind -T $table WheelDownPane 'select-pane ; send -X -N 1 scroll-down'"))
-        }
-        assertEquals(2, Regex("bind -n Wheel").findAll(queue).count())
-        assertEquals(4, Regex("bind -T copy-mode").findAll(queue).count())
+        assertTrue(command.contains("list-keys -T root WheelUpPane"))
+        assertTrue(command.contains("list-keys -T root WheelDownPane"))
+        assertTrue(command.contains("moke_scroll_before=\$moke_scroll_out"))
+        assertTrue(command.contains("[ \"\$moke_scroll_out\" = \"\$moke_scroll_before\" ]"))
     }
 
     @Test fun `pane cwd is guarded by server session and exact actual client context`() {

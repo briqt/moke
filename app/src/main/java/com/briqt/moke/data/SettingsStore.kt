@@ -51,9 +51,9 @@ class SettingsStore(private val context: Context) {
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     // 终端软键盘模式（厂商安全键盘/中文输入的逃生口，见 KeyboardMode）。
     private val keyboardModeKey = stringPreferencesKey("keyboard_mode")
-    // 全屏程序内的滑动语义（见 ScrollMode）。
+    // 旧全局滑动值仍可解码，但终端不再应用；每个连接从自动开始。
     private val scrollModeKey = stringPreferencesKey("scroll_mode")
-    // 附加 tmux 后下发滚动绑定（让 tmux 判定翻页器/命令行，见 Tmux.scrollSetupCmd）。
+    // 为已确认的 tmux 会话设置鼠标支持，并有限修正已知旧滚轮规则。
     private val tmuxScrollSetupKey = booleanPreferencesKey("tmux_scroll_setup")
     // 关闭会话前二次确认（误触保护）。
     private val confirmCloseKey = booleanPreferencesKey("confirm_close_session")
@@ -161,7 +161,7 @@ class SettingsStore(private val context: Context) {
         KeyboardMode.fromName(prefs[keyboardModeKey], KeyboardMode.SECURE)
     }
 
-    /** 全屏程序内滑动语义（默认智能）。 */
+    /** 旧记录的读取兼容，不作为当前连接的滑动设置。 */
     val scrollMode: Flow<ScrollMode> = context.settingsDataStore.data.map { prefs ->
         ScrollMode.fromName(prefs[scrollModeKey], ScrollMode.SMART)
     }
@@ -345,10 +345,6 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setKeyboardMode(m: KeyboardMode) {
         context.settingsDataStore.edit { it[keyboardModeKey] = m.name }
-    }
-
-    suspend fun setScrollMode(m: ScrollMode) {
-        context.settingsDataStore.edit { it[scrollModeKey] = m.name }
     }
 
     suspend fun setTmuxScrollSetup(on: Boolean) {
