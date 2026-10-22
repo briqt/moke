@@ -81,6 +81,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -209,6 +216,21 @@ fun HomeScreen(
     // 左右滑动切分区：页序即底栏顺序，pager 与外部 [tab] 双向同步。
     val tabs = remember { HomeTab.entries.toList() }
     val pagerState = rememberPagerState(initialPage = tab.ordinal) { tabs.size }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val visibleSessions by rememberUpdatedState(sessions)
+    val refreshSession by rememberUpdatedState(onTmuxRefresh)
+    LaunchedEffect(tab, lifecycleOwner) {
+        if (tab != HomeTab.Sessions) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                visibleSessions.filter {
+                    it.alive.value && observesCurrentTmux(it.host.useMosh,
+                        it.host.persistence == SessionPersistence.TMUX, it.tmuxIntent)
+                }.forEach { refreshSession(it.id) }
+                delay(5_000)
+            }
+        }
+    }
     // 外部改分区（底栏点击 / 返回键 / 从二级页带着分区回来）→ 翻页跟上。
     LaunchedEffect(tab) {
         val target = tab.ordinal
@@ -246,7 +268,7 @@ fun HomeScreen(
                         HomeTab.Connections -> {}
                         HomeTab.Sessions -> if (sessions.size > 1) GroupSortActions(
                             groupBy = sessionGroupBy,
-                            groupOptions = listOf(GroupBy.NONE, GroupBy.HOST, GroupBy.PROJECT),
+                            groupOptions = listOf(GroupBy.PROJECT, GroupBy.HOST, GroupBy.CONNECTION, GroupBy.NONE),
                             onGroupBy = onSessionGroupBy,
                             sortBy = sessionSortBy,
                             sortOptions = listOf(SortBy.CREATED, SortBy.UPDATED, SortBy.MANUAL),
@@ -481,16 +503,18 @@ private fun ConnectionsContent(
                 collapsed = collapsed,
                 onReorderGroups = onReorderGroups,
                 onReorderItems = { groupKey, newItems ->
-                    // 组内新序映射回扁平主机列表：其余主机位置不动，本组位置按新序回填。
-                    val iter = newItems.iterator()
-                    onReorderHosts(hosts.map { if (keyOf(it) == groupKey) iter.next() else it })
+                    val members = hosts.filter { keyOf(it) == groupKey }.map { it.id }.toSet()
+                    val byId = hosts.associateBy { it.id }
+                    val order = mergeSessionOrder(hosts.map { it.id }, newItems.map { it.id }.filter { it in members })
+                    onReorderHosts(order.map { byId.getValue(it) })
                 },
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
-                header = { key, dragging, handle ->
+                header = { group, dragging, handle ->
+                    val key = group.key
                     GroupHeaderRow(
-                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else key,
-                        count = groups.firstOrNull { it.key == key }?.items?.size ?: 0,
+                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else group.label,
+                        count = group.items.size,
                         collapsed = key in collapsed,
                         onToggle = { onToggleCollapse(key) },
                         dragHandle = handle,
@@ -834,12 +858,13 @@ private fun SessionsContent(
         )
         return
     }
-    // 会话所属分组的键（按当前分组维度）。
-    fun keyOf(ts: TermSession): String = when (groupBy) {
-        GroupBy.PROJECT -> ts.host.group.ifBlank { UNGROUPED_KEY }
-        GroupBy.HOST -> ts.host.displayName
-        GroupBy.NONE -> ""
+    val groupLabels = sessions.associate { ts ->
+        val directory = key(ts.id) { ts.directory.collectAsState().value }
+        ts.id to sessionGroupLabel(groupBy, ts.host, ts.scopeKey.targetStamp,
+            directory?.path, directory?.targetKey, directory?.targetLabel)
     }
+    fun keyOf(ts: TermSession): String = groupLabels.getValue(ts.id).key
+    var editingTitleId by remember { mutableStateOf<String?>(null) }
     val manual = sortBy == SortBy.MANUAL
     val cmp = sessionComparator(sortBy)
 
@@ -878,7 +903,7 @@ private fun SessionsContent(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 12.dp),
                 ) { ts, dragging, handle ->
-                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, dragHandle = handle, dragging = dragging)
+                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id }, dragHandle = handle, dragging = dragging)
                 }
             } else {
                 LazyColumn(
@@ -887,7 +912,8 @@ private fun SessionsContent(
                     contentPadding = PaddingValues(vertical = 12.dp),
                 ) {
                     items(sessions.sortedWith(cmp), key = { it.id }) { ts ->
-                        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) })
+                        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
+                            onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id })
                     }
                 }
             }
@@ -897,7 +923,8 @@ private fun SessionsContent(
             val orderedKeys = groupOrder.filter { it in present } + present.filter { it !in groupOrder }
             val groups = orderedKeys.map { k ->
                 val items = sessions.filter { keyOf(it) == k }
-                ReorderGroup(k, if (manual) items else items.sortedWith(cmp))
+                ReorderGroup(k, if (manual) items else items.sortedWith(cmp),
+                    groupLabels.values.first { it.key == k }.label)
             }
             GroupedReorderableList(
                 groups = groups,
@@ -905,16 +932,16 @@ private fun SessionsContent(
                 collapsed = collapsed,
                 onReorderGroups = onReorderGroups,
                 onReorderItems = { groupKey, newItems ->
-                    // 组内新序映射回完整会话顺序（其他组位置不动），仅内存。
-                    val iter = newItems.iterator()
-                    onReorder(sessions.map { if (keyOf(it) == groupKey) iter.next() else it }.map { it.id })
+                    val members = sessions.filter { keyOf(it) == groupKey }.map { it.id }.toSet()
+                    onReorder(mergeSessionOrder(sessions.map { it.id }, newItems.map { it.id }.filter { it in members }))
                 },
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
-                header = { key, dragging, handle ->
+                header = { group, dragging, handle ->
+                    val key = group.key
                     GroupHeaderRow(
-                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else key,
-                        count = groups.firstOrNull { it.key == key }?.items?.size ?: 0,
+                        name = group.label.ifBlank { stringResource(R.string.ungrouped) },
+                        count = group.items.size,
                         collapsed = key in collapsed,
                         onToggle = { onToggleCollapse(key) },
                         dragHandle = handle,
@@ -924,10 +951,27 @@ private fun SessionsContent(
             ) { ts, dragging, handle ->
                 // 手动排序时组内卡片可拖（接 handle）；创建/更新时间排序时按比较器排、卡片不可拖。
                 SessionCard(
-                    ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) },
+                    ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
                     dragHandle = if (manual) handle else null, dragging = dragging,
                 )
             }
+        }
+    }
+    sessions.firstOrNull { it.id == editingTitleId }?.let { session ->
+        key(session.id) {
+            val prefix by session.customPrefix.collectAsState()
+            val customTitle by session.customTitle.collectAsState()
+            val automaticPrefix by session.automaticPrefix.collectAsState()
+            val automaticTitle by session.automaticTitle.collectAsState()
+            SessionTitleDialog(
+                initialPrefix = prefix.orEmpty(), initialTitle = customTitle.orEmpty(),
+                automaticPrefix = automaticPrefix, automaticTitle = automaticTitle,
+                onConfirm = { newPrefix, newTitle ->
+                    session.setTitleOverrides(newPrefix, newTitle)
+                    editingTitleId = null
+                },
+                onDismiss = { editingTitleId = null },
+            )
         }
     }
 }
@@ -945,13 +989,13 @@ private fun SessionCard(
     onOpen: () -> Unit,
     onClose: () -> Unit,
     onDuplicate: () -> Unit,
+    onTitle: () -> Unit,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
 ) {
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
     val latencyMs by ts.latency.collectAsState()
-    var showTitleDialog by remember { mutableStateOf(false) }
     Box {
         Card(
             // 单击卡片任意处进入会话。「修改标题」的长按只挂在下面的文字列上，
@@ -982,7 +1026,7 @@ private fun SessionCard(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .combinedClickable(onClick = onOpen, onLongClick = { showTitleDialog = true })
+                        .combinedClickable(onClick = onOpen, onLongClick = onTitle)
                         .padding(start = if (dragHandle != null) 4.dp else 0.dp),
                 ) {
                     Text(
@@ -1022,15 +1066,6 @@ private fun SessionCard(
                 }
             }
         }
-    }
-    if (showTitleDialog) {
-        SessionTitleDialog(
-            dialogTitle = stringResource(R.string.session_set_title),
-            hint = stringResource(R.string.session_title_hint),
-            initial = ts.customTitle.value ?: "",
-            onConfirm = { ts.setCustomTitle(it); showTitleDialog = false },
-            onDismiss = { showTitleDialog = false },
-        )
     }
 }
 

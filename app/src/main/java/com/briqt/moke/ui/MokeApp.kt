@@ -468,7 +468,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         },
                         onOpenFiles = { openFiles(ts.host, ts.id) },
                     )
-                    // 连接即选会话：主机「会话持久化=tmux」且还没记住选择时，连上后弹一次。
+                    // 主机入口每次明确选择；原连接返回与重连仍遵循各自的恢复边界。
                     if (ts.id in tmuxPickerFor) {
                         val tmuxState by ts.tmuxState.collectAsState()
                         val viaJump = ts.jumpHost?.let { stringResource(R.string.tmux_via_jump, it.displayName) }.orEmpty()

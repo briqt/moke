@@ -274,6 +274,11 @@ public class TerminalSession extends TerminalOutput {
     }
 
     @Override
+    public void onDirectoryChanged(String uri) {
+        if (mClient != null) mClient.onDirectoryChanged(this, uri);
+    }
+
+    @Override
     public void onColorsChanged() {
         if (mClient != null) mClient.onColorsChanged(this);
     }

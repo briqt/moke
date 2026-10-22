@@ -38,6 +38,20 @@ data class TmuxUiState(
     val canStartNewConnection: Boolean = false,
 ) {
     val currentBinding: TmuxBinding? get() = (presence as? TmuxPresence.Attached)?.binding
+    /** No cached/unverified pane is current, even if a last binding is retained for reconnect. */
+    val currentPane: TmuxPaneSnapshot? get() {
+        if (targetChanged) return null
+        val binding = currentBinding ?: return null
+        val snapshot = snapshot?.takeIf { it.verified && it.scope == binding.scope && it.observation.server == binding.server }
+            ?: return null
+        if (snapshot.observation.owner != binding.owner ||
+            !TmuxCoordinatorRules.verified(snapshot.observation, binding.owner.nonce, true, binding.server.socketPath) ||
+            TmuxCoordinatorRules.binding(binding.scope, snapshot.observation) != binding) return null
+        val client = snapshot.observation.clients.singleOrNull {
+            it.identity == binding.client && it.sessionId == binding.session.id && it.sessionCreated == binding.session.created
+        } ?: return null
+        return client.pane?.let { TmuxPaneSnapshot(binding, snapshot.generation, it) }
+    }
     /** Losing the original target does not discard a witnessed list on a still-live source. */
     val canManage: Boolean get() = !busy && phase == TmuxPhase.READY &&
         snapshot?.verified == true && snapshot.observation.server?.witnessed == true &&

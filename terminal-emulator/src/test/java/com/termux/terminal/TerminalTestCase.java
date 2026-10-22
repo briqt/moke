@@ -65,6 +65,13 @@ public abstract class TerminalTestCase extends TestCase {
 		public void onNotification(String title, String body) {
 			notifications.add(new String[]{title, body});
 		}
+
+		public final List<String> directories = new ArrayList<>();
+
+		@Override
+		public void onDirectoryChanged(String uri) {
+			directories.add(uri);
+		}
 	}
 
 	public TerminalEmulator mTerminal;

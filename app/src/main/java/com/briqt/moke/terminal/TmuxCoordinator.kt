@@ -166,7 +166,10 @@ class TmuxCoordinator(
                     val sessions = cached.observation.sessions.map { session ->
                         if (session.id == target.id && session.created == target.created) session.copy(name = newName) else session
                     }
-                    cached.copy(generation = nextGeneration, observation = cached.observation.copy(sessions = sessions))
+                    // A merged rename generation did not re-observe any pane. Never rebadge an
+                    // in-flight/previous pane sample with this newer generation.
+                    cached.copy(generation = nextGeneration, observation = cached.observation.copy(sessions = sessions,
+                        clients = cached.observation.clients.map { it.copy(pane = null) }))
                 }
             }
             current.copy(snapshot = updated,
@@ -461,8 +464,8 @@ class TmuxCoordinator(
                             Mutation.DETACH -> session.copy(clients = 0)
                         }
                     }
-                    val clients = if (kind == Mutation.RENAME) observation.clients else
-                        observation.clients.filterNot { it.sessionId == target.id }
+                    val clients = (if (kind == Mutation.RENAME) observation.clients else
+                        observation.clients.filterNot { it.sessionId == target.id }).map { it.copy(pane = null) }
                     s.copy(generation = nextGeneration, observation = observation.copy(sessions = sessions, clients = clients),
                         verified = s.verified && !dataTerminated && !endsCurrent)
                 }
@@ -491,6 +494,7 @@ internal object TmuxCoordinatorRules {
     private val boot = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
     private val tty = Regex("/dev/pts/[0-9]+")
     private val id = Regex("\\$[0-9]+")
+    private val paneId = Regex("%[0-9]{1,10}")
     fun validNonce(value: String) = nonce.matches(value)
     fun strongServer(server: TmuxServerId) = server.witnessed && server.pid > 1 && server.started > 0 &&
         server.socketDevice >= 0 && boot.matches(server.bootId) && validSocket(server.socketPath)
@@ -498,6 +502,9 @@ internal object TmuxCoordinatorRules {
     private fun validName(value: String) = value.isNotEmpty() && value.none(Char::isISOControl) && ':' !in value && '.' !in value
     fun validRef(ref: TmuxSessionRef) = strongServer(ref.server) && id.matches(ref.id) && ref.created > 0 && validName(ref.name)
     fun sameObject(a: TmuxSessionRef, b: TmuxSessionRef) = a.server == b.server && a.id == b.id && a.created == b.created
+    private fun validPane(pane: TmuxPane) = paneId.matches(pane.id) &&
+        safeSessionText(pane.title, SESSION_TITLE_LIMIT) &&
+        (pane.path == null || (pane.path.startsWith('/') && safeSessionText(pane.path, SESSION_PATH_LIMIT)))
 
     fun verified(o: TmuxObservation, expectedNonce: String?, requireOwner: Boolean, socket: String?): Boolean {
         if (o.peerBootId?.let(boot::matches) != true) return false
@@ -516,7 +523,8 @@ internal object TmuxCoordinatorRules {
                     o.sessions.map { it.id }.distinct().size == o.sessions.size &&
                     o.sessions.map { it.name }.distinct().size == o.sessions.size &&
                     o.clients.all { c -> c.identity.pid > 1 && c.identity.created > 0 && tty.matches(c.identity.tty) &&
-                        o.sessions.count { it.id == c.sessionId } == 1 } &&
+                        o.sessions.count { it.id == c.sessionId && (c.sessionCreated == null || it.created == c.sessionCreated) } == 1 &&
+                        (c.pane == null || (c.sessionCreated != null && validPane(c.pane))) } &&
                     o.clients.map { it.identity.pid }.distinct().size == o.clients.size &&
                     o.clients.map { it.identity.tty }.distinct().size == o.clients.size
             }

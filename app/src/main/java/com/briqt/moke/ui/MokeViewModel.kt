@@ -871,7 +871,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 jumpHost = ok?.jump, network = ok?.network,
                 refusal = route.refusalText(getApplication()),
                 tmuxIntent = intent, rememberEpoch = epoch, observeTmux = picker || intent != TmuxIntent.None,
-            ).also { it.recovery.value = route.recovery; it.setCustomTitle(source.customTitle.value) }
+            ).also {
+                it.recovery.value = route.recovery
+                it.setTitleOverrides(source.customPrefix.value, source.customTitle.value)
+            }
             trackTmux(session)
             ensureSessionService()
             if (picker) { pickerSources += session.id; requestTmuxPickerWhenReady(session) }
@@ -894,8 +897,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         val ok = route as? Route.Ok
         val current = ok?.host ?: host
         touchHost(current)
-        val intent = TmuxLaunchPolicy.remembered(route)
-        val picker = ok != null && current.persistence == SessionPersistence.TMUX && intent == TmuxIntent.None
+        // A host-card action starts a new choice, not an implicit attachment to saved memory.
+        val intent = TmuxIntent.None
+        val picker = TmuxLaunchPolicy.requestsPicker(route)
         val ts = sessions.open(
             host = if (picker) current.copy(loginCommand = "") else current,
             jumpHost = ok?.jump, network = ok?.network, refusal = route.refusalText(getApplication()),
@@ -904,14 +908,14 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         ).also { it.recovery.value = route.recovery }
         trackTmux(ts)
         ensureSessionService()
-        if (picker) { pickerSources += ts.id; requestTmuxPickerWhenReady(ts) }
+        if (picker) { pickerSources += ts.id; requestTmuxPickerWhenReady(ts, explicitHostChoice = true) }
         return ts.id
     }
 
     /** TOFU and bootstrap finish before the bounded observation window begins. */
-    private fun requestTmuxPickerWhenReady(ts: TermSession) = viewModelScope.launch {
-        if (awaitTmuxReady(ts) && sessions.get(ts.id) === ts && ts.tmuxState.value.currentBinding == null &&
-            ts.tmuxState.value.presence !is TmuxPresence.Ended && !ts.tmuxState.value.targetChanged) {
+    private fun requestTmuxPickerWhenReady(ts: TermSession, explicitHostChoice: Boolean = false) = viewModelScope.launch {
+        if (awaitTmuxReady(ts) && sessions.get(ts.id) === ts &&
+            TmuxLaunchPolicy.presentsPicker(ts.tmuxState.value, explicitHostChoice)) {
             _tmuxPicker.update { it + ts.id }
         }
     }
@@ -921,7 +925,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private fun finishTmuxPicker(source: TermSession, newId: String) {
         _tmuxPicker.update { it - source.id }
         val transient = pickerSources.remove(source.id)
-        if (transient && newId != source.id && source.tmuxState.value.currentBinding == null) closeSession(source.id)
+        // Only this picker's newly created source is disposable; an attached tmux stays remote.
+        if (transient && newId != source.id) closeSession(source.id)
     }
 
     suspend fun pickTmuxSession(sourceId: String, target: TmuxSelection): String? {

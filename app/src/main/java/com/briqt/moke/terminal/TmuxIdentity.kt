@@ -29,7 +29,16 @@ data class TmuxSessionRef(
 fun TmuxSession.ref(server: TmuxServerId) = TmuxSessionRef(server, id, created, name)
 
 data class TmuxClientId(val pid: Long, val created: Long, val tty: String)
-data class TmuxClient(val identity: TmuxClientId, val sessionId: String)
+/** All three fields come from one list-clients format evaluation for this actual client. */
+data class TmuxPane(val id: String, val title: String, val path: String?)
+data class TmuxClient(
+    val identity: TmuxClientId,
+    val sessionId: String,
+    val sessionCreated: Long? = null,
+    val pane: TmuxPane? = null,
+)
+
+data class TmuxPaneSnapshot(val binding: TmuxBinding, val generation: Long, val pane: TmuxPane)
 
 /** A nonce is checked against a live owner, its birth identity and control TTY. */
 data class TmuxOwnerProof(

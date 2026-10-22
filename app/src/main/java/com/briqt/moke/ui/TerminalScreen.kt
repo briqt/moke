@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.Link
@@ -27,6 +28,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -78,6 +83,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -234,9 +240,43 @@ fun TerminalScreen(
     val scope = rememberCoroutineScope()
     // View 按会话 id 记忆：切换会话得到全新 View，attach 到既有 session 后滚屏/连接保留。
     val view = remember(ts.id) { TerminalView(context, null) }
+    val imeFallback = remember(ts.id) { TerminalImeFallback() }
+    val composeView = LocalView.current
+    var windowFocused by remember(ts.id, composeView) { mutableStateOf(composeView.hasWindowFocus()) }
+    var inputBudget by remember(ts.id) { mutableStateOf(TerminalInputBudget(0, 0, 0)) }
+    var inputAttempt by remember(ts.id) { mutableIntStateOf(0) }
+    val requestKeyboard = {
+        imeFallback.requestKeyboard().also { if (it) inputAttempt++ }
+    }
+    val imeVisible = WindowInsets.isImeVisible
+    val imeInset = (WindowInsets.ime.getBottom(LocalDensity.current) -
+        WindowInsets.navigationBars.getBottom(LocalDensity.current)).coerceAtLeast(0)
+    val ownsInputWindow = !showTmux && !showForwards && !showTitleDialog && !showKeyboardModeDialog &&
+        closeTarget == null && !showNewTmux && view.isAttachedToWindow
+    LaunchedEffect(ts.id, inputBudget, imeInset, imeVisible, ownsInputWindow, windowFocused, inputAttempt) {
+        when (imeFallback.update(imeInset, ownsInputWindow, inputBudget, imeVisible, windowFocused)) {
+            TerminalImeAction.HIDE -> {
+                val attempt = imeFallback.attempt
+                // Native terminal focus can vanish at zero height; use the owning window controller.
+                composeView.windowInsetsController?.hide(android.view.WindowInsets.Type.ime()) ?: keyboard?.hide()
+                scope.launch {
+                    delay(2_000)
+                    imeFallback.abandonPendingHide(attempt)
+                }
+            }
+            TerminalImeAction.NOTICE -> {
+                if (!showComposer && !view.hasFocus()) view.requestFocus()
+                Toast.makeText(context, R.string.terminal_keyboard_space_hidden, Toast.LENGTH_SHORT).show()
+            }
+            TerminalImeAction.NONE -> Unit
+        }
+    }
 
-    DisposableEffect(ts.id) {
+    DisposableEffect(ts.id, composeView) {
+        val focusObserver = ViewTreeObserver.OnWindowFocusChangeListener { windowFocused = it }
+        composeView.viewTreeObserver.addOnWindowFocusChangeListener(focusObserver)
         controller.view = view
+        controller.onKeyboardRequest = requestKeyboard
         view.setTerminalViewClient(controller)
         // 必须可在触摸模式获焦，否则按键/IME 输入会落到其它可聚焦控件。
         view.isFocusable = true
@@ -268,12 +308,14 @@ fun TerminalScreen(
         view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
         view.attachSession(ts.session)
         onDispose {
+            if (composeView.viewTreeObserver.isAlive) composeView.viewTreeObserver.removeOnWindowFocusChangeListener(focusObserver)
             // 仅解绑 View——会话保持存活以支持多会话跨页；真正结束由会话列表关闭或传输结束触发。
             if (controller.view === view) {
                 controller.view = null
                 controller.onFontSizeSp = null
                 controller.onModifiersConsumed = null
                 controller.onLinkTapped = null
+                controller.onKeyboardRequest = null
             }
             view.mokeOnTopRowChanged = null
         }
@@ -379,19 +421,17 @@ fun TerminalScreen(
             )
         },
     ) { padding ->
-        Column(
+        TerminalContentLayout(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                // 消费 Scaffold 已给的系统栏 insets，再叠加 imePadding：
-                // 键盘弹起时 ExtraKeysRow 精确浮在键盘上方，收起时贴导航栏，无重复留白。
                 .consumeWindowInsets(padding)
                 .imePadding(),
+            minimumTerminalHeight = { view.getHeightForTerminalRows(4) },
+            onBudget = { inputBudget = it },
         ) {
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 AndroidView(
                     factory = { view },
@@ -509,6 +549,7 @@ fun TerminalScreen(
             // 底部：文本段展开时就地替换附加键行（同窗口，软键盘不收起再弹起）；否则显示附加键。
             when {
                 showComposer -> TextBlockComposer(
+                    onKeyboardRequest = requestKeyboard,
                     value = composerText,
                     onValueChange = { composerText = it },
                     onDismiss = { showComposer = false; controller.showKeyboard() },
@@ -546,11 +587,17 @@ fun TerminalScreen(
     }
 
     if (showTitleDialog) {
+        val prefix by ts.customPrefix.collectAsState()
+        val customTitle by ts.customTitle.collectAsState()
+        val automaticPrefix by ts.automaticPrefix.collectAsState()
+        val automaticTitle by ts.automaticTitle.collectAsState()
         SessionTitleDialog(
-            dialogTitle = stringResource(R.string.session_set_title),
-            hint = stringResource(R.string.session_title_hint),
-            initial = ts.customTitle.value ?: "",
-            onConfirm = { ts.setCustomTitle(it); showTitleDialog = false },
+            initialPrefix = prefix.orEmpty(), initialTitle = customTitle.orEmpty(),
+            automaticPrefix = automaticPrefix, automaticTitle = automaticTitle,
+            onConfirm = { newPrefix, newTitle ->
+                ts.setTitleOverrides(newPrefix, newTitle)
+                showTitleDialog = false
+            },
             onDismiss = { showTitleDialog = false },
         )
     }

@@ -10,13 +10,15 @@ object TmuxLaunchPolicy {
         route is Route.Ok && scope.networkEpoch == networkEpoch &&
             scope.targetStamp == TmuxTargetStamp.of(route.host, route.jump, route.network)
 
-    fun remembered(route: Route): TmuxIntent {
-        val current = route as? Route.Ok ?: return TmuxIntent.None
-        val host = current.host
-        if (host.persistence != SessionPersistence.TMUX || host.tmuxSessionName.isBlank() || host.tmuxTargetStamp.isBlank() ||
-            host.tmuxTargetStamp != TmuxTargetStamp.of(host, current.jump, current.network)) return TmuxIntent.None
-        return TmuxIntent.Restore(host.tmuxSessionName)
-    }
+    fun requestsPicker(route: Route): Boolean =
+        route is Route.Ok && route.host.persistence == SessionPersistence.TMUX
+
+    fun presentsPicker(state: TmuxUiState, explicitHostChoice: Boolean): Boolean =
+        !state.targetChanged && state.presence !is TmuxPresence.Ended &&
+            (explicitHostChoice || state.currentBinding == null)
+
+    fun offersPlainShell(state: TmuxUiState): Boolean =
+        !state.targetChanged && state.presence is TmuxPresence.Shell
 
     fun canReuse(
         hostId: String,

@@ -1061,6 +1061,12 @@ public final class TerminalView extends View {
         updateSize();
     }
 
+    /** Pixel height needed for fully visible rows, independent of the emulator's minimum row count. */
+    public int getHeightForTerminalRows(int rows) {
+        if (mRenderer == null || rows <= 0) return 0;
+        return mRenderer.mFontLineSpacingAndAscent + rows * mRenderer.mFontLineSpacing;
+    }
+
     /** Check if the terminal size in rows and columns should be updated. */
     public void updateSize() {
         int viewWidth = getWidth();

@@ -21,6 +21,7 @@ class TerminalController(
     context: Context,
     private val onFinished: () -> Unit = {},
     private val onTitle: (String?) -> Unit = {},
+    private val onDirectory: (String) -> Unit = {},
 ) : TerminalViewClient, TerminalSessionClient {
 
     /** 有终端输出/屏幕更新时回调（供上层刷新会话"最后活动时间"）。 */
@@ -54,6 +55,7 @@ class TerminalController(
     // ---------- TerminalSessionClient ----------
     override fun onTextChanged(changedSession: TerminalSession) { onActivity?.invoke(); view?.onScreenUpdated() }
     override fun onTitleChanged(changedSession: TerminalSession) { onTitle(changedSession.title) }
+    override fun onDirectoryChanged(session: TerminalSession, uri: String) { onDirectory(uri) }
     override fun onSessionFinished(finishedSession: TerminalSession) { onFinished() }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
@@ -118,8 +120,12 @@ class TerminalController(
         return runCatching { TerminalLinks.urlAt(emulator, column, row) }.getOrNull()
     }
 
+    /** 请求显示软键盘前的门控；返回 false 时本次请求不再继续。 */
+    var onKeyboardRequest: (() -> Boolean)? = null
+
     /** 聚焦终端并弹出软键盘（点击终端 / 工具栏键盘键调用）。用自身 [view]，故会话跨页重建 View 也不失效。 */
     fun showKeyboard() {
+        if (onKeyboardRequest?.invoke() == false) return
         val v = view ?: return
         v.requestFocus()
         val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager

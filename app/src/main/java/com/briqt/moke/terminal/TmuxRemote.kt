@@ -21,6 +21,23 @@ object TmuxRemote {
     private val bootPattern = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
     private val idPattern = Regex("\\$[0-9]+")
     private val ttyPattern = Regex("/dev/pts/[0-9]+")
+    private val panePattern = Regex("%[0-9]{1,10}")
+
+    // Escape only framing metacharacters. Returned values are never evaluated as shell or formats.
+    // Nested substitution escapes percent first; a literal %7C must not become a pipe on decoding.
+    private fun paneField(variable: String) = "#{s/[|]/%7C/:#{s/%/%25/:$variable}}"
+    private fun validPaneField(variable: String, limit: Int) =
+        "#{&&:#{e|<=:#{n:$variable},$limit},#{==:#{m/r:[[:cntrl:]],#{$variable}},0}}"
+    private val clientFormat: String get() {
+        val identity = "#{client_pid}|#{client_created}|#{session_id}"
+        val ordinary = "${P}CLIENT|$identity|#{client_tty}"
+        val pane = "${P}CLIENT_PANE|$identity|#{session_created}|#{client_tty}|#{pane_id}|" +
+            paneField("pane_title") + "|" + paneField("pane_current_path")
+        val safe = "#{&&:${validPaneField("pane_title", SESSION_TITLE_LIMIT)}," +
+            "${validPaneField("pane_current_path", SESSION_PATH_LIMIT)}}"
+        // Unavailable metadata does not invalidate an otherwise useful, witnessed management list.
+        return "#{?$safe,$pane,$ordinary}"
+    }
     private val termPattern = Regex("[A-Za-z0-9._-]{1,32}")
     private val terms = listOf("xterm-256color", "screen-256color", "xterm", "vt100")
 
@@ -283,7 +300,7 @@ object TmuxRemote {
             $serverOutcome
             moke_before=${'$'}moke_server_row
             moke_sessions=${'$'}(tmux -N -u -S "${'$'}moke_socket" list-sessions -F '#{?#{m/r:[[:cntrl:]],#{session_name}},${P}INVALID,${P}SESSION|#{session_id}|#{session_created}|#{session_windows}|#{session_attached}|#{session_name}}' 2>/dev/null) || moke_finish ERROR
-            moke_clients=${'$'}(tmux -N -u -S "${'$'}moke_socket" list-clients -F '${P}CLIENT|#{client_pid}|#{client_created}|#{session_id}|#{client_tty}' 2>/dev/null) || moke_finish ERROR
+            moke_clients=${'$'}(tmux -N -u -S "${'$'}moke_socket" list-clients -F ${q(clientFormat)} 2>/dev/null) || moke_finish ERROR
             moke_server && [ "${'$'}moke_before" = "${'$'}moke_server_row" ] || moke_finish ERROR
             printf '${P}SERVER|%s\n' "${'$'}moke_before"
             [ -z "${'$'}moke_sessions" ] || printf '%s\n' "${'$'}moke_sessions"
@@ -538,6 +555,24 @@ object TmuxRemote {
         return lines.subList(first + 1, last).map { it.removePrefix(P) }
     }
 
+    /** Wire syntax only; frame() bounds the input. Optional text validity is checked separately. */
+    private fun decodePaneField(value: String): String? {
+        val decoded = StringBuilder()
+        var i = 0
+        while (i < value.length) {
+            if (value[i] != '%') decoded.append(value[i++]) else {
+                if (i + 2 >= value.length) return null
+                decoded.append(when (value.substring(i, i + 3)) {
+                    "%25" -> '%'
+                    "%7C" -> '|'
+                    else -> return null
+                })
+                i += 3
+            }
+        }
+        return decoded.toString()
+    }
+
     private fun uint(value: String): Long? = value.takeIf { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }?.toLongOrNull()
     private fun positive(value: String): Long? = uint(value)?.takeIf { it > 0 }
     private fun server(row: String): TmuxServerId? {
@@ -591,6 +626,23 @@ object TmuxRemote {
                     if (p.size != 4 || !idPattern.matches(p[2]) || !ttyPattern.matches(p[3])) return null
                     clients += TmuxClient(TmuxClientId(positive(p[0])?.takeIf { it > 1 } ?: return null, positive(p[1]) ?: return null, p[3]), p[2])
                 }
+                "CLIENT_PANE" -> {
+                    val p = value.split('|')
+                    if (p.size != 8 || !idPattern.matches(p[2]) || !ttyPattern.matches(p[4]) || !panePattern.matches(p[5])) return null
+                    val identity = TmuxClientId(positive(p[0])?.takeIf { it > 1 } ?: return null,
+                        positive(p[1]) ?: return null, p[4])
+                    val sessionCreated = positive(p[3]) ?: return null
+                    val title = decodePaneField(p[6]) ?: return null
+                    val path = decodePaneField(p[7]) ?: return null
+                    // A C-locale remote guard cannot recognize every unsafe Unicode character.
+                    // Invalid optional content withdraws this entire pane sample, not the client's
+                    // independently witnessed identity or another client's management capability.
+                    // Row shape, escaping and all required identities remain strict protocol errors.
+                    val pane = if (safeSessionText(title, SESSION_TITLE_LIMIT) &&
+                        safeSessionText(path, SESSION_PATH_LIMIT) && (path.isEmpty() || path.startsWith('/')))
+                        TmuxPane(p[5], title, path.ifEmpty { null }) else null
+                    clients += TmuxClient(identity, p[2], sessionCreated, pane)
+                }
                 "TERM" -> { if (term != null || !termPattern.matches(value)) return null; term = value }
                 "ERROR" -> { if (error != null || !text(value)) return null; error = value }
                 "KIND" -> kind = TmuxProbeKind.entries.firstOrNull { it.name == value } ?: return null
@@ -606,7 +658,7 @@ object TmuxRemote {
         if ((owner != null && peer == null) || (actualKind == TmuxProbeKind.PENDING && owner != null)) return null
         if (sessions.map { it.id }.distinct().size != sessions.size || sessions.map { it.name }.distinct().size != sessions.size) return null
         if (clients.map { it.identity.pid }.distinct().size != clients.size || clients.map { it.identity.tty }.distinct().size != clients.size) return null
-        if (clients.any { c -> sessions.none { it.id == c.sessionId } }) return null
+        if (clients.any { c -> sessions.none { it.id == c.sessionId && (c.sessionCreated == null || it.created == c.sessionCreated) } }) return null
         return TmuxObservation(actualKind, owner, server, sessions, clients, term, error, peer, defaultSocket)
     }
 

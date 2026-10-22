@@ -11,6 +11,7 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_save">Save</string>
     <string name="action_retry">Retry</string>
+    <string name="action_refresh">Refresh</string>
     <string name="action_ok">OK</string>
     <string name="action_close">Close</string>
 
@@ -81,9 +82,9 @@
     <string name="tmux_name_exists">Session name already exists.</string>
     <string name="tmux_disconnected">Disconnected.</string>
     <string name="session_disconnect">Disconnect</string>
-    <string name="tmux_disconnect_hint">Remote session keeps running.</string>
-    <string name="tmux_end_hint">Terminates programs in this session.</string>
-    <string name="tmux_close_unknown">Unable to confirm the current session. Refresh, then reopen close options.</string>
+    <string name="session_close_plain_message">Disconnecting may stop programs in this terminal.</string>
+    <string name="tmux_close_message">Disconnecting keeps the remote session. Ending the session stops its programs.</string>
+    <string name="tmux_close_unknown">The remote session cannot be verified. You can disconnect locally, but remote programs may stop.</string>
     <plurals name="tmux_close_other_clients">
         <item quantity="one">Ending also disconnects %1$d other client.</item>
         <item quantity="other">Ending also disconnects %1$d other clients.</item>
@@ -112,6 +113,13 @@
     <string name="duplicate_session">Duplicate session</string>
     <string name="session_set_title">Set title</string>
     <string name="session_title_hint">Title</string>
+    <string name="session_title_prefix">Title prefix</string>
+    <string name="session_title_automatic">Automatic: %1$s</string>
+    <string name="session_title_custom_automatic">Custom · Automatic value: %1$s</string>
+    <string name="session_title_no_prefix">No prefix</string>
+    <string name="session_title_use_automatic">Use automatic</string>
+    <string name="session_title_preview">Preview: %1$s</string>
+    <string name="session_title_fields_hint">Leave empty to use automatic values. Each field is independent.</string>
 
     <!-- 排序方式 -->
     <string name="sort_group">Group</string>
@@ -126,6 +134,8 @@
     <!-- 分组维度选项 -->
     <string name="group_none">None</string>
     <string name="group_project">Project</string>
+    <string name="group_current_directory">Project (current directory)</string>
+    <string name="group_connection">Connection group</string>
     <string name="group_host">Host</string>
     <string name="group_date">Date</string>
     <!-- 按日期分组的时间桶 -->
@@ -635,7 +645,7 @@ Its saved password / private key and host fingerprint are removed too. This can\
         <item quantity="one">•••••••• %1$s · %2$d character</item>
         <item quantity="other">•••••••• %1$s · %2$d characters</item>
     </plurals>
-    <string name="session_title_default_hint">Leave empty to use the default title.</string>
+    <string name="terminal_keyboard_space_hidden">Not enough space. Keyboard hidden.</string>
     <string name="tmux_name_invalid">Enter a session name without dots, colons or control characters.</string>
     <string name="tmux_rename_title">Rename tmux session</string>
     <string name="form_action_failed">Couldn\'t complete the action. Your input is kept. Try again.</string>

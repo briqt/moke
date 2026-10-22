@@ -3,6 +3,12 @@ package com.briqt.moke.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -385,9 +391,11 @@ fun TextBlockComposer(
     onValueChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onSend: (text: String, appendEnter: Boolean) -> Unit,
+    onKeyboardRequest: () -> Boolean = { true },
 ) {
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val requestKeyboard by rememberUpdatedState(onKeyboardRequest)
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -418,6 +426,12 @@ fun TextBlockComposer(
                     .fillMaxWidth()
                     .heightIn(min = 40.dp, max = 120.dp)
                     .focusRequester(focusRequester)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            if (!requestKeyboard()) down.consume()
+                        }
+                    }
                     .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .verticalScroll(scroll),
@@ -444,8 +458,10 @@ fun TextBlockComposer(
     }
     // 内联展开：直接聚焦输入框（同窗口焦点转移，IME 顺滑续上），无需等窗口入场动画。
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-        keyboard?.show()
+        if (requestKeyboard()) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
     }
 }
 

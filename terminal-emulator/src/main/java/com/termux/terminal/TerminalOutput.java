@@ -36,4 +36,8 @@ public abstract class TerminalOutput {
     public void onNotification(String title, String body) {
     }
 
+    /** [moke] A complete OSC 7 frame reported a raw directory URI; the client validates it. */
+    public void onDirectoryChanged(String uri) {
+    }
+
 }

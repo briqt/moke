@@ -58,45 +58,55 @@ class TmuxLaunchPolicyTest {
         assertFalse(TmuxLaunchPolicy.matches(jumpedScope, jumped.copy(jump = jump.copy(host = "other-jump.example")), 3))
     }
 
-    @Test fun `a signed remembered name restores without trimming the actual name`() {
-        assertEquals(TmuxIntent.Restore("chosen session"), TmuxLaunchPolicy.remembered(remembered))
+    @Test fun `host open always selects even with a matching saved session`() {
+        assertTrue(TmuxLaunchPolicy.requestsPicker(remembered))
     }
 
-    @Test fun `legacy name without a stamp is never automatically endorsed`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(route))
+    @Test fun `legacy missing mismatched and blank memories still select`() {
+        listOf(route,
+            remembered.copy(host = remembered.host.copy(tmuxTargetStamp = "other-stamp")),
+            remembered.copy(host = remembered.host.copy(tmuxSessionName = "   ")),
+            remembered.copy(host = remembered.host.copy(tmuxSessionName = "", tmuxTargetStamp = "")),
+        ).forEach { assertTrue(TmuxLaunchPolicy.requestsPicker(it)) }
     }
 
-    @Test fun `a mismatched memory stamp never restores`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(remembered.copy(host = remembered.host.copy(tmuxTargetStamp = "other-stamp"))))
+    @Test fun `plain persistence does not select even with an old saved pair`() {
+        assertFalse(TmuxLaunchPolicy.requestsPicker(remembered.copy(host = remembered.host.copy(persistence = SessionPersistence.NONE))))
     }
 
-    @Test fun `blank remembered name does not request a restore`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(remembered.copy(host = remembered.host.copy(tmuxSessionName = "   "))))
+    @Test fun `target and network changes require a fresh host choice`() {
+        assertTrue(TmuxLaunchPolicy.requestsPicker(remembered.copy(host = remembered.host.copy(username = "other-user"))))
+        assertTrue(TmuxLaunchPolicy.requestsPicker(remembered.copy(network = network.copy(revision = 8))))
     }
 
-    @Test fun `plain SSH persistence never restores even with an old signed pair`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(remembered.copy(host = remembered.host.copy(persistence = SessionPersistence.NONE))))
+    @Test fun `host picker policy does not erase the saved preference`() {
+        assertTrue(TmuxLaunchPolicy.requestsPicker(remembered))
+        assertEquals("chosen session", remembered.host.tmuxSessionName)
+        assertEquals(stamp, remembered.host.tmuxTargetStamp)
     }
 
-    @Test fun `a changed target account invalidates remembered preference`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(remembered.copy(host = remembered.host.copy(username = "other-user"))))
+    @Test fun `explicit host choice is not suppressed by a login shell attachment`() {
+        val server = TmuxServerId(90, 100, "/tmp/test/socket")
+        val owner = TmuxOwnerProof("a".repeat(32), 70, 1000, 150, "/dev/pts/2")
+        val row = TmuxSession("\$0", "chosen", 1, 1, 1000)
+        val binding = TmuxBinding(scope, owner, TmuxClientId(80, 900, owner.tty), row.ref(server))
+        val attached = TmuxUiState(presence = TmuxPresence.Attached(binding))
+        assertTrue(TmuxLaunchPolicy.presentsPicker(attached, explicitHostChoice = true))
+        assertFalse(TmuxLaunchPolicy.presentsPicker(attached, explicitHostChoice = false))
+        assertTrue(TmuxLaunchPolicy.presentsPicker(TmuxUiState(), explicitHostChoice = false))
+        assertFalse(TmuxLaunchPolicy.presentsPicker(attached.copy(targetChanged = true), true))
+        assertFalse(TmuxLaunchPolicy.presentsPicker(attached.copy(presence = TmuxPresence.Ended(binding)), true))
+        assertFalse(TmuxLaunchPolicy.offersPlainShell(attached))
+        assertFalse(TmuxLaunchPolicy.offersPlainShell(attached.copy(presence = TmuxPresence.Unknown())))
+        assertTrue(TmuxLaunchPolicy.offersPlainShell(attached.copy(presence = TmuxPresence.Shell(owner))))
     }
 
-    @Test fun `a new tailnet identity invalidates remembered preference at the same control URL`() {
-        assertEquals(TmuxIntent.None, TmuxLaunchPolicy.remembered(remembered.copy(network = network.copy(revision = 8))))
-    }
-
-    @Test fun `cosmetic and host credential edits keep a matching remembered preference`() {
-        val edited = remembered.copy(host = remembered.host.copy(label = "Renamed", group = "Other", password = "synthetic-password", lastConnectedAt = 900L))
-        assertEquals(TmuxIntent.Restore("chosen session"), TmuxLaunchPolicy.remembered(edited))
-    }
-
-    @Test fun `unresolved unreadable and loading routes cannot match or restore`() {
+    @Test fun `unresolved unreadable and loading routes cannot match or start a picker`() {
         val routes: List<Route> = MissingKind.entries.map { Route.Missing(it) } +
             UnreadableKind.entries.map { Route.Unreadable(it) } + Route.Loading
         routes.forEach {
             assertFalse(it.toString(), TmuxLaunchPolicy.matches(scope, it, 3))
-            assertEquals(it.toString(), TmuxIntent.None, TmuxLaunchPolicy.remembered(it))
+            assertFalse(it.toString(), TmuxLaunchPolicy.requestsPicker(it))
         }
     }
 }

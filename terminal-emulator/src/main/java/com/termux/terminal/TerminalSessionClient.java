@@ -52,4 +52,8 @@ public interface TerminalSessionClient {
     /** [moke] Remote program requested a desktop notification (OSC 9 / OSC 777). [title] may be null. */
     default void onNotification(@NonNull TerminalSession session, String title, String body) {
     }
+
+    /** [moke] A complete OSC 7 frame reported a raw directory URI; the client validates it. */
+    default void onDirectoryChanged(@NonNull TerminalSession session, @NonNull String uri) {
+    }
 }

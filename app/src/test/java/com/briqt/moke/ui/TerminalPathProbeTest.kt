@@ -67,4 +67,33 @@ class TerminalPathProbeTest {
         assertFalse(TerminalPathProbe.stillCurrent(binding, binding.copy(client = client.copy(created = 999))))
         assertFalse(TerminalPathProbe.stillCurrent(binding, null))
     }
+
+    private fun paneState(id: String = "%1", path: String = "/first", title: String = "task", generation: Long = 3): TmuxUiState =
+        state.copy(snapshot = state.snapshot!!.copy(generation = generation, observation = observation.copy(
+            clients = listOf(TmuxClient(client, session.id, session.created, TmuxPane(id, title, path))))))
+
+    @Test fun jointPaneObservationIsTheOnlyFileDirectoryHint() {
+        val sample = TerminalPathProbe.capturePane(source, source.targetStamp, paneState())!!
+        assertEquals("/first", sample.pane.path)
+        assertNull(TerminalPathProbe.capturePane(source, "other-account", paneState()))
+        assertNull(TerminalPathProbe.capturePane(source, source.targetStamp, state))
+        assertNull(TerminalPathProbe.capturePane(source, source.targetStamp, TmuxUiState()))
+    }
+
+    @Test fun paneSwitchOrDirectoryChangeWhileCanonicalizingRejectsOldHint() {
+        val sample = TerminalPathProbe.capturePane(source, source.targetStamp, paneState())!!
+        for (changed in listOf(paneState(id = "%2", generation = 4), paneState(path = "/second", generation = 4))) {
+            assertFalse(TerminalPathProbe.stillCurrentPane(sample,
+                TerminalPathProbe.capturePane(source, source.targetStamp, changed)))
+        }
+        assertFalse(TerminalPathProbe.stillCurrentPane(sample, null))
+    }
+
+    @Test fun newerSamePanePathMayRefreshItsTitleWithoutLosingTheFileHint() {
+        val sample = TerminalPathProbe.capturePane(source, source.targetStamp, paneState())!!
+        assertTrue(TerminalPathProbe.stillCurrentPane(sample,
+            TerminalPathProbe.capturePane(source, source.targetStamp, paneState(title = "new task", generation = 4))))
+        assertFalse(TerminalPathProbe.stillCurrentPane(sample,
+            TerminalPathProbe.capturePane(source, source.targetStamp, paneState(generation = 2))))
+    }
 }

@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -100,7 +99,6 @@ internal data class TmuxManagement(
     val kill: suspend (TmuxSelection) -> Boolean,
 )
 
-private data class TmuxRowTarget(val selection: TmuxSelection, val clients: Int, val targetLabel: String)
 private enum class TmuxConfirmAction { TAKE_OVER, DETACH, END }
 private data class TmuxConfirmation(val action: TmuxConfirmAction, val target: TmuxRowTarget)
 
@@ -321,6 +319,7 @@ private fun TmuxSessionRow(
     onRename: (TmuxRowTarget) -> Unit,
     onConfirm: (TmuxConfirmAction, TmuxRowTarget) -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     var menuTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
     val openLabel = stringResource(if (current) R.string.tmux_return else R.string.tmux_attach)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -347,38 +346,51 @@ private fun TmuxSessionRow(
             }
         }
         if (showManagement) Box {
-            IconButton(onClick = { menuTarget = target }, enabled = managementEnabled,
+            IconButton(onClick = {
+                if (target != null) {
+                    menuTarget = target
+                    menuExpanded = true
+                }
+            }, enabled = managementEnabled,
                 modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                 Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.tmux_more_for, session.name))
             }
-            DropdownMenu(expanded = menuTarget != null, onDismissRequest = { menuTarget = null }) {
+            // Keep the captured content through the row menu's fade-only exit transition.
+            TmuxRowDropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 menuTarget?.let { frozen ->
+                    val menu = tmuxRowMenuState(frozen, target, managementEnabled, current)
+                    fun choose(action: (TmuxRowTarget) -> Unit) {
+                        menu.target?.let {
+                            menuExpanded = false
+                            action(it)
+                        }
+                    }
                     Text(frozen.selection.session.name, style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.tmux_rename)) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                        enabled = managementEnabled,
-                        onClick = { menuTarget = null; onRename(frozen) },
+                        enabled = menu.canManage,
+                        onClick = { choose(onRename) },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.tmux_take_over)) },
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null) },
-                        enabled = managementEnabled && frozen.clients > 0 && !current,
-                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.TAKE_OVER, frozen) },
+                        enabled = menu.canTakeOver,
+                        onClick = { choose { onConfirm(TmuxConfirmAction.TAKE_OVER, it) } },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.tmux_detach)) },
                         leadingIcon = { Icon(Icons.Filled.LinkOff, contentDescription = null) },
-                        enabled = managementEnabled && frozen.clients > 0,
-                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.DETACH, frozen) },
+                        enabled = menu.canDetach,
+                        onClick = { choose { onConfirm(TmuxConfirmAction.DETACH, it) } },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.tmux_kill), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                        enabled = managementEnabled,
-                        onClick = { menuTarget = null; onConfirm(TmuxConfirmAction.END, frozen) },
+                        enabled = menu.canManage,
+                        onClick = { choose { onConfirm(TmuxConfirmAction.END, it) } },
                     )
                 }
             }

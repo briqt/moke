@@ -23,7 +23,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -53,7 +54,14 @@ class TermSession(
     problemText: (TmuxProblem) -> String,
     val copyMark: String? = null,
     @Volatile var rememberEpoch: Long = 0L,
+    val customPrefix: MutableStateFlow<String?> = MutableStateFlow(null),
 ) {
+    private val metadata = SessionMetadata(scopeKey, SessionDirectoryTarget(scopeKey, host.host, host.displayName))
+    val directory: StateFlow<SessionDirectory?> = metadata.directory
+    private val automaticPrefixState = MutableStateFlow("")
+    private val automaticTitleState = MutableStateFlow(host.displayName)
+    val automaticPrefix: StateFlow<String> = automaticPrefixState.asStateFlow()
+    val automaticTitle: StateFlow<String> = automaticTitleState.asStateFlow()
     val displayTitle: StateFlow<String> = displayTitleState.asStateFlow()
     val baseTitle: String get() = baseTitleState.value
     @Volatile var lastActivityAt: Long = startedAt
@@ -84,21 +92,35 @@ class TermSession(
         message = problemText,
     )
 
-    fun setCustomTitle(title: String?) { customTitle.value = title?.trim()?.ifBlank { null } }
+    fun setCustomTitle(title: String?) { customTitle.value = SessionTitlePolicy.userValue(title) }
+    fun setCustomPrefix(prefix: String?) { customPrefix.value = SessionTitlePolicy.userValue(prefix) }
+    fun setTitleOverrides(prefix: String?, title: String?) {
+        setCustomPrefix(prefix)
+        setCustomTitle(title)
+    }
+
+    internal fun onDirectory(rawUri: String) {
+        metadata.update(tmuxState.value, alive.value)
+        metadata.onDirectory(rawUri)
+    }
+    internal fun endMetadata() { metadata.end() }
+    internal fun refreshAutomaticTitle() {
+        val tmux = tmuxState.value
+        metadata.update(tmux, alive.value)
+        automaticPrefixState.value = SessionTitlePolicy.automaticPrefix(scopeKey, tmux, alive.value)
+        val pane = tmux.currentPane?.takeIf { alive.value && it.binding.scope == scopeKey }
+        val fallback = SessionTitlePolicy.fallback(host.displayName, directory.value)
+        baseTitleState.value = fallback
+        automaticTitleState.value = SessionTitlePolicy.automaticTitle(host.useMosh, pane?.pane?.title, title.value, fallback)
+    }
     internal fun updateDisplayTitle(title: String) { displayTitleState.value = title }
-    internal fun updateBaseTitle(title: String) { baseTitleState.value = title }
 
     companion object {
-        private val MOSH_PREFIX = Regex("^(?:\\[mosh][\\s.·]*)+", RegexOption.IGNORE_CASE)
-
-        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, base: String): String {
-            custom?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-            val stripped = if (useMosh) raw.replaceFirst(MOSH_PREFIX, "") else raw
-            return stripped.trim().ifEmpty { base }
-        }
+        fun composeTitle(useMosh: Boolean, raw: String, custom: String?, base: String): String =
+            SessionTitlePolicy.userValue(custom) ?: SessionTitlePolicy.oscTitle(useMosh, raw).ifEmpty { base }
 
         fun disambiguateTitle(base: String, custom: String?, mark: String?, hasCollision: Boolean): String =
-            if (custom.isNullOrBlank() && hasCollision && !mark.isNullOrBlank()) "$base $mark" else base
+            SessionTitlePolicy.mainTitle(base, custom, mark, hasCollision)
     }
 }
 
@@ -133,11 +155,18 @@ class SessionManager(context: Context) {
             is TmuxIntent.Restore -> TmuxRemote.restore(actualIntent.name, socketPath = actualIntent.socketPath)
             TmuxIntent.None -> null
         }
-        val base = baseTitleOf(host)
-        // A new connection has received no OSC yet; another terminal's program title is not its state.
+        val scopeKey = TmuxScope(TmuxTargetStamp.of(host, jumpHost, network), id, networkEpoch(network?.id))
+        val sameTarget = SessionTitlePolicy.sameTarget(carryFrom?.scopeKey, scopeKey,
+            sourceTargetChanged = carryFrom?.tmuxState?.value?.targetChanged == true)
+        val overrides = SessionTitlePolicy.inherit(carryFrom?.let {
+            SessionTitleOverrides(it.customPrefix.value, it.customTitle.value)
+        }, sameTarget)
+        val base = host.displayName
+        // New connections inherit user values only, never another terminal's OSC, directory or pane.
         val title = MutableStateFlow("")
-        val custom = MutableStateFlow(carryFrom?.customTitle?.value)
-        val display = MutableStateFlow(TermSession.composeTitle(host.useMosh, title.value, custom.value, base))
+        val custom = MutableStateFlow(overrides.title)
+        val prefix = MutableStateFlow(overrides.prefix)
+        val display = MutableStateFlow(SessionTitlePolicy.display(prefix.value, custom.value, "", base))
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
         var created: TermSession? = null
@@ -146,10 +175,12 @@ class SessionManager(context: Context) {
             onFinished = {
                 alive.value = false
                 latency.value = null
+                created?.endMetadata()
                 created?.tmuxCoordinator?.dataEnded()
             },
             // An empty OSC clears the dynamic title; it must not freeze an obsolete fallback name.
-            onTitle = { title.value = it.orEmpty() },
+            onTitle = { if (alive.value) title.value = it.orEmpty() },
+            onDirectory = { created?.onDirectory(it) },
         )
         val onNetworkError: (NetworkException) -> Unit = { error ->
             created?.let {
@@ -174,12 +205,13 @@ class SessionManager(context: Context) {
         val ts = TermSession(
             id = id, host = host, controller = controller, session = session, transport = transport,
             jumpHost = jumpHost, network = network,
-            scopeKey = TmuxScope(TmuxTargetStamp.of(host, jumpHost, network), id, networkEpoch(network?.id)),
+            scopeKey = scopeKey,
             tmuxIntent = actualIntent, title = title.asStateFlow(), baseTitleState = MutableStateFlow(base),
             customTitle = custom, displayTitleState = display, alive = alive.asStateFlow(),
             latency = latency.asStateFlow(), startedAt = System.currentTimeMillis(), scripts = scripts,
             problemText = { appContext.tmuxProblemText(it) },
-            copyMark = carryFrom?.let { nextCopyMark(host.id) }, rememberEpoch = rememberEpoch,
+            copyMark = carryFrom?.takeIf { sameTarget }?.let { nextCopyMark(host.id) }, rememberEpoch = rememberEpoch,
+            customPrefix = prefix,
         )
         created = ts
         session.sessionStatusText = object : TerminalSession.StatusText {
@@ -208,12 +240,9 @@ class SessionManager(context: Context) {
         controller.onAlert = { text, body -> TerminalAlerts.post(appContext, ts.id, ts.displayTitle.value, text, body) }
         controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }
-        titleJobs[id] = combine(title, custom, ts.tmuxState) { _, _, tmux ->
-            val fallback = tmux.currentBinding?.session?.name
-                ?: (tmux.presence as? TmuxPresence.Ended)?.lastBinding?.session?.name
-                ?: base
-            ts.updateBaseTitle(fallback)
-        }.onEach { refreshDisplayTitles() }.launchIn(scope)
+        titleJobs[id] = merge(title.map { Unit }, custom.map { Unit }, prefix.map { Unit },
+            ts.tmuxState.map { Unit }, alive.map { Unit }, ts.directory.map { Unit })
+            .onEach { ts.refreshAutomaticTitle(); refreshDisplayTitles() }.launchIn(scope)
         refreshDisplayTitles()
         return ts
     }
@@ -269,19 +298,14 @@ class SessionManager(context: Context) {
 
     private fun refreshDisplayTitles() {
         val list = _sessions.value
-        val titles = list.associate { it.id to TermSession.composeTitle(it.host.useMosh, it.title.value, it.customTitle.value, it.baseTitle) }
-        val counts = list.groupingBy { it.host.id to titles.getValue(it.id) }.eachCount()
+        val counts = list.groupingBy {
+            it.scopeKey.targetStamp to (SessionTitlePolicy.userValue(it.customTitle.value) ?: it.automaticTitle.value)
+        }.eachCount()
         list.forEach { item ->
-            val base = titles.getValue(item.id)
-            item.updateDisplayTitle(TermSession.disambiguateTitle(base, item.customTitle.value, item.copyMark,
-                counts.getValue(item.host.id to base) > 1))
+            item.updateDisplayTitle(SessionTitlePolicy.display(item.customPrefix.value, item.customTitle.value,
+                item.automaticPrefix.value, item.automaticTitle.value, item.copyMark,
+                (counts[item.scopeKey.targetStamp to item.automaticTitle.value] ?: 0) > 1))
         }
-    }
-
-    private fun baseTitleOf(host: Host): String = when {
-        host.host.isBlank() -> host.displayName
-        host.username.isBlank() -> host.host
-        else -> "${host.username}@${host.host}"
     }
 
     private fun nextCopyMark(hostId: String): String {
@@ -304,6 +328,7 @@ class SessionManager(context: Context) {
 
     fun close(id: String) {
         val session = get(id) ?: return
+        session.endMetadata()
         session.tmuxCoordinator.close()
         titleJobs.remove(id)?.cancel()
         session.forwards?.let { scope.launch(Dispatchers.IO) { it.stopAll() } }

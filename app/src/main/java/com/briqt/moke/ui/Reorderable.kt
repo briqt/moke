@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -98,7 +99,7 @@ fun <T> ReorderableColumn(
 }
 
 /** 一个分组：稳定的组键 + 组内有序条目。 */
-data class ReorderGroup<T>(val key: String, val items: List<T>)
+data class ReorderGroup<T>(val key: String, val items: List<T>, val label: String = key)
 
 /**
  * 可折叠 + 两级长按拖动的分组列表（无第三方库，适配少量卡片场景）。
@@ -120,11 +121,13 @@ fun <T> GroupedReorderableList(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     spacing: Dp = 10.dp,
-    header: @Composable (group: String, dragging: Boolean, handle: Modifier) -> Unit,
+    header: @Composable (group: ReorderGroup<T>, dragging: Boolean, handle: Modifier) -> Unit,
     itemContent: @Composable (item: T, dragging: Boolean, handle: Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
     var working by remember { mutableStateOf(groups) }
+    val reorderGroups by rememberUpdatedState(onReorderGroups)
+    val reorderItems by rememberUpdatedState(onReorderItems)
     var dragKey by remember { mutableStateOf<Any?>(null) }
     var dragIsGroup by remember { mutableStateOf(false) }
     var dragGroup by remember { mutableStateOf<String?>(null) }
@@ -132,7 +135,7 @@ fun <T> GroupedReorderableList(
 
     fun reset() { dragKey = null; dragIsGroup = false; dragGroup = null; accumulated = 0f }
 
-    LaunchedEffect(groups) { if (dragKey == null) working = groups }
+    LaunchedEffect(groups, dragKey) { if (dragKey == null) working = groups }
 
     LazyColumn(
         state = listState,
@@ -151,7 +154,7 @@ fun <T> GroupedReorderableList(
                     val handle = Modifier.pointerInput(headerKey) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { dragKey = headerKey; dragIsGroup = true; dragGroup = group.key; accumulated = 0f },
-                            onDragEnd = { onReorderGroups(working.map { it.key }); reset() },
+                            onDragEnd = { reorderGroups(working.map { it.key }); reset() },
                             onDragCancel = { reset() },
                             onDrag = { change, amount ->
                                 change.consume()
@@ -174,7 +177,7 @@ fun <T> GroupedReorderableList(
                             },
                         )
                     }
-                    header(group.key, isDragging, handle)
+                    header(group, isDragging, handle)
                 }
             }
             if (group.key !in collapsed) {
@@ -183,12 +186,12 @@ fun <T> GroupedReorderableList(
                     val isDragging = itemK == dragKey
                     val dragMod = if (isDragging) Modifier.zIndex(1f).graphicsLayer { translationY = accumulated } else Modifier
                     Box(modifier = dragMod) {
-                        val handle = Modifier.pointerInput(itemK) {
+                        val handle = Modifier.pointerInput(group.key, itemK) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { dragKey = itemK; dragIsGroup = false; dragGroup = group.key; accumulated = 0f },
                                 onDragEnd = {
                                     val g = working.firstOrNull { it.key == dragGroup }
-                                    if (g != null) onReorderItems(g.key, g.items)
+                                    if (g != null) reorderItems(g.key, g.items)
                                     reset()
                                 },
                                 onDragCancel = { reset() },

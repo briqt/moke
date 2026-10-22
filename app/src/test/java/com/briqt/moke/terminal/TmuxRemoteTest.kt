@@ -658,5 +658,101 @@ class TmuxRemoteTest {
         invalid { TmuxRemote.create("ok", "/tmp/bad\npath") }
     }
 
+    @Test fun `joint pane protocol preserves pipes percent Unicode shell and format literals`() {
+        fun encode(value: String) = value.replace("%", "%25").replace("|", "%7C")
+        val title = "default-host | 中文 %7C #{session_name} #(touch bad) ' ; $(bad)"
+        val path = "/home/中文 | percent%7C/' folder"
+        val row = "CLIENT_PANE|456|1700000002|\$7|1700000001|/dev/pts/8|%9|${encode(title)}|${encode(path)}"
+        val good = ready().replace("CLIENT|456|1700000002|\$7|/dev/pts/8", row)
+        val actual = TmuxRemote.parseObservation(good, "request_1")!!.clients.single()
+        assertEquals(TmuxPane("%9", title, path), actual.pane)
+        assertEquals(1700000001L, actual.sessionCreated)
+        assertEquals(TmuxClientId(456, 1700000002, "/dev/pts/8"), actual.identity)
+        val empty = good.replace(row, "CLIENT_PANE|456|1700000002|\$7|1700000001|/dev/pts/8|%9||")
+        assertEquals(TmuxPane("%9", "", null), TmuxRemote.parseObservation(empty, "request_1")!!.clients.single().pane)
+    }
+
+    @Test fun `joint pane rows still reject malformed escaping wire controls identity mismatch and frame splicing`() {
+        val prefix = "CLIENT_PANE|456|1700000002|\$7|1700000001|/dev/pts/8|%9|"
+        fun withRow(row: String) = ready().replace("CLIENT|456|1700000002|\$7|/dev/pts/8", row)
+        val good = withRow(prefix + "title|/cwd")
+        val badRows = listOf(
+            prefix + "title|/cwd|extra", prefix + "raw|pipe|/cwd",
+            prefix + "bad%|/cwd", prefix + "bad%0A|/cwd", prefix + "bad%7c|/cwd", prefix + "bad%20|/cwd",
+            prefix + "bad\u001btitle|/cwd", prefix + "bad\u0085title|/cwd",
+            prefix + "bad\ntitle|/cwd", prefix + "title|/bad\tpath", prefix + "title|/bad\u007fpath",
+            (prefix + "title|/cwd").replace("|1700000001|", "|1700000003|"),
+            (prefix + "title|/cwd").replace("|%9|", "|9|"),
+            (prefix + "title|/cwd").replace("|%9|", "|%12345678901|"),
+        )
+        badRows.forEach { assertNull(it, TmuxRemote.parseObservation(withRow(it), "request_1")) }
+        assertNull(TmuxRemote.parseObservation(good + good, "request_1"))
+        assertNull(TmuxRemote.parseObservation(good.trimEnd('\n'), "request_1"))
+        assertNull(TmuxRemote.parseObservation(good.substringBefore(p + "END"), "request_1"))
+        assertNull(TmuxRemote.parseObservation(good, "request_2"))
+        assertNull(TmuxRemote.parseObservation(good.replace("KIND|READY", "CLIENT|456|1700000002|\$7|/dev/pts/8\n${p}KIND|READY"), "request_1"))
+    }
+
+    @Test fun `unsafe optional pane text degrades only that client and preserves exact identities`() {
+        val ours = "CLIENT_PANE|456|1700000002|\$7|1700000001|/dev/pts/8|%9|current title|/current"
+        val unrelated = "CLIENT_PANE|457|1700000003|\$7|1700000001|/dev/pts/9|%10|"
+        val invalidFields = listOf(
+            "bad title|/other", "bad title|/other", "other title|/bad path", "other title|/bad path",
+            "other title|relative", "x".repeat(SESSION_TITLE_LIMIT + 1) + "|/other",
+            "%25".repeat(SESSION_TITLE_LIMIT + 1) + "|/other", "other title|/" + "x".repeat(SESSION_PATH_LIMIT),
+        )
+        for (fields in invalidFields) {
+            val output = ready().replace("CLIENT|456|1700000002|\$7|/dev/pts/8", "$ours\n$p$unrelated$fields")
+            val actual = TmuxRemote.parseObservation(output, "request_1")
+            assertNotNull("Optional pane must not invalidate observation", actual)
+            assertEquals(server, actual!!.server)
+            assertEquals(target, actual.sessions.single().ref(server))
+            assertEquals(TmuxPane("%9", "current title", "/current"), actual.clients[0].pane)
+            assertEquals(TmuxClientId(457, 1700000003, "/dev/pts/9"), actual.clients[1].identity)
+            assertEquals("\$7", actual.clients[1].sessionId)
+            assertEquals(1700000001L, actual.clients[1].sessionCreated)
+            assertNull("No half-valid pane title or cwd may escape", actual.clients[1].pane)
+        }
+    }
+
+    @Test fun `unsafe optional metadata cannot hide strong identity errors duplicate clients or broken framing`() {
+        val client = "CLIENT_PANE|456|1700000002|\$7|1700000001|/dev/pts/8|%9|bad title|/other"
+        fun output(row: String) = ready().replace("CLIENT|456|1700000002|\$7|/dev/pts/8", row)
+        val malformed = listOf(
+            client.replace("CLIENT_PANE|456|", "CLIENT_PANE|1|"),
+            client.replace("|1700000002|", "|0|"), client.replace("|1700000001|", "|0|"),
+            client.replace("|1700000001|", "|1700000009|"), client.replace("|\$7|", "|\$99|"),
+            client.replace("|/dev/pts/8|", "|not-a-tty|"), client.replace("|%9|", "|invalid-pane-id|"),
+            "$client\n$p$client", "$client\n${p}CLIENT|456|1700000002|\$7|/dev/pts/8",
+            "$client|extra", client.substringBeforeLast('|'), client.replace("title", "title%0A"),
+        )
+        malformed.forEach { assertNull(it, TmuxRemote.parseObservation(output(it), "request_1")) }
+        val good = output(client)
+        assertNull(TmuxRemote.parseObservation(good + good, "request_1"))
+        assertNull(TmuxRemote.parseObservation(good.trimEnd('\n'), "request_1"))
+        assertNull(TmuxRemote.parseObservation(good.substringBefore(p + "END"), "request_1"))
+        assertNull(TmuxRemote.parseObservation(good, "another-request"))
+    }
+
+    @Test fun `observation obtains pane fields once in actual client context without reevaluating returned text`() {
+        val command = body(TmuxRemote.observe(scripts, "r1", nonce, true))
+        val listing = command.lineSequence().single { it.contains("moke_clients=\$(tmux") }
+        val args = words(listing)
+        val format = args[args.indexOf("-F") + 1]
+        assertTrue(format.contains("${p}CLIENT_PANE|#{client_pid}|#{client_created}|#{session_id}|#{session_created}|#{client_tty}|#{pane_id}|"))
+        assertTrue(format.contains("#{s/[|]/%7C/:#{s/%/%25/:pane_title}}"))
+        assertTrue(format.contains("#{s/[|]/%7C/:#{s/%/%25/:pane_current_path}}"))
+        for (field in listOf("pane_title", "pane_current_path")) {
+            assertTrue(format.contains("#{m/r:[[:cntrl:]],#{$field}}"))
+            assertTrue(format.contains("#{n:$field},4096"))
+        }
+        assertEquals(1, command.lineSequence().count { it.contains("list-clients -F") })
+        assertFalse(listing.contains("#{E:"))
+        assertFalse(listing.contains("#{T:"))
+        assertFalse(listing.contains("display-message -c"))
+        assertFalse(command.contains("eval "))
+        assertFalse(command.contains("set-hook"))
+    }
+
     private fun qForTest(value: String) = "'" + value.replace("'", "'\\''") + "'"
 }

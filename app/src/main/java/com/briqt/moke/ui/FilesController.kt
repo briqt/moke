@@ -13,10 +13,9 @@ import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.networkRecovery
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.TmuxBinding
-import com.briqt.moke.terminal.TmuxConnection
+import com.briqt.moke.terminal.TmuxPaneSnapshot
 import com.briqt.moke.terminal.TmuxCoordinatorRules
 import com.briqt.moke.terminal.TmuxProbeKind
-import com.briqt.moke.terminal.TmuxRemote
 import com.briqt.moke.terminal.TmuxScope
 import com.briqt.moke.terminal.TmuxUiState
 import com.briqt.moke.terminal.sameInstance
@@ -134,8 +133,9 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         val ticket = work.attach(s)
         work.commit(ticket) { _state.update { it.copy(browsingActive = true) } }
         job = scope.launch {
+            val pane = from?.let { refreshTerminalPane(it, config.targetStamp) }
             operation(ticket, { connection ->
-                val terminalPath = from?.let { probeTerminalPath(it, connection, config.targetStamp) } ?: previous.terminalPath
+                val terminalPath = from?.let { probeTerminalPath(it, connection, config.targetStamp, pane) } ?: previous.terminalPath
                 val start = previous.path.ifBlank { terminalPath.ifBlank { connection.homePath() } }
                 Triple(start, connection.list(start), terminalPath)
             }) { state, (start, entries, terminalPath) ->
@@ -302,18 +302,22 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
         return visible.sortedWith(compareByDescending<RemoteEntry> { it.isDir }.then(cmp))
     }
 
-    private fun probeTerminalPath(from: TermSession, s: SftpSession, actualTargetStamp: String): String {
-        if (!from.dataReady.value || !from.alive.value) return ""
-        val binding = TerminalPathProbe.capture(from.scopeKey, actualTargetStamp, from.tmuxState.value) ?: return ""
-        val connection = from.transport as? TmuxConnection ?: return ""
-        val nonce = connection.tmuxNonce?.takeIf { it == binding.owner.nonce } ?: return ""
-        val path = runCatching {
-            val command = TmuxRemote.guardPeer(from.scripts, nonce, connection.tmuxOwnerRequired, binding.server.bootId,
-                TmuxRemote.paneCwd(binding.session, binding.client))
-            from.transport.exec(command)?.let(TmuxRemote::parsePaneCwd)
-        }.getOrNull() ?: return ""
-        fun stillCurrent(): Boolean = from.dataReady.value && from.alive.value && connection.tmuxNonce == nonce &&
-            TerminalPathProbe.stillCurrent(binding, TerminalPathProbe.capture(from.scopeKey, actualTargetStamp, from.tmuxState.value))
+    private suspend fun refreshTerminalPane(from: TermSession, actualTargetStamp: String): TmuxPaneSnapshot? {
+        if (!from.dataReady.value || !from.alive.value ||
+            TerminalPathProbe.capture(from.scopeKey, actualTargetStamp, from.tmuxState.value) == null) return null
+        try {
+            from.tmuxCoordinator.refresh()
+        } catch (t: CancellationException) { throw t }
+        catch (_: Exception) { return null }
+        return TerminalPathProbe.capturePane(from.scopeKey, actualTargetStamp, from.tmuxState.value)
+    }
+
+    private fun probeTerminalPath(from: TermSession, s: SftpSession, actualTargetStamp: String, pane: TmuxPaneSnapshot?): String {
+        val captured = pane ?: return ""
+        val path = captured.pane.path ?: return ""
+        fun stillCurrent(): Boolean = from.dataReady.value && from.alive.value &&
+            TerminalPathProbe.stillCurrentPane(captured,
+                TerminalPathProbe.capturePane(from.scopeKey, actualTargetStamp, from.tmuxState.value))
         if (!stillCurrent()) return ""
         val canonical = runCatching { s.canonicalize(path) }.getOrDefault(path)
         return canonical.takeIf { stillCurrent() }.orEmpty()
@@ -336,4 +340,13 @@ internal object TerminalPathProbe {
     fun stillCurrent(captured: TmuxBinding, current: TmuxBinding?): Boolean = current != null &&
         captured.scope == current.scope && captured.owner == current.owner && captured.client == current.client &&
         captured.session.sameInstance(current.session)
+
+    fun capturePane(source: TmuxScope, actualTargetStamp: String, state: TmuxUiState): TmuxPaneSnapshot? {
+        val binding = capture(source, actualTargetStamp, state) ?: return null
+        return state.currentPane?.takeIf { stillCurrent(binding, it.binding) }
+    }
+
+    fun stillCurrentPane(captured: TmuxPaneSnapshot, current: TmuxPaneSnapshot?): Boolean = current != null &&
+        captured.generation <= current.generation && stillCurrent(captured.binding, current.binding) &&
+        captured.pane.id == current.pane.id && captured.pane.path == current.pane.path
 }

@@ -5,12 +5,13 @@ import com.briqt.moke.R
 
 /**
  * 会话页分组维度（连接页已固定按项目、不再用本枚举）。与 [SortBy] 是两个正交维度。
- * 会话页：NONE（无）/ HOST（按连接=会话所属主机）/ PROJECT（按项目=主机 group 字段）。
+ * 会话页：NONE（无）/ HOST（主机）/ PROJECT（当前目录）/ CONNECTION（人工连接分组）。
  */
 enum class GroupBy(@StringRes val labelRes: Int) {
     NONE(R.string.group_none),
     HOST(R.string.group_host),         // 按主机（会话所属主机）
-    PROJECT(R.string.group_project),   // 按项目（主机 group 字段）
+    PROJECT(R.string.group_current_directory),
+    CONNECTION(R.string.group_connection),
     ;
 
     companion object {

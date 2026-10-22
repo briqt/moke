@@ -47,7 +47,14 @@ class TmuxCoordinatorTest {
         o.defaultSocketPath?.let { append("${p}DEFAULT_SOCKET|$it\n") }
         o.server?.let { append("${p}SERVER|${serverRow(it)}\n") }
         o.sessions.forEach { append("${p}SESSION|${it.id}|${it.created}|${it.windows}|${it.clients}|${it.name}\n") }
-        o.clients.forEach { append("${p}CLIENT|${it.identity.pid}|${it.identity.created}|${it.sessionId}|${it.identity.tty}\n") }
+        o.clients.forEach {
+            val pane = it.pane
+            if (pane == null) append("${p}CLIENT|${it.identity.pid}|${it.identity.created}|${it.sessionId}|${it.identity.tty}\n")
+            else {
+                fun encode(value: String) = value.replace("%", "%25").replace("|", "%7C")
+                append("${p}CLIENT_PANE|${it.identity.pid}|${it.identity.created}|${it.sessionId}|${it.sessionCreated}|${it.identity.tty}|${pane.id}|${encode(pane.title)}|${encode(pane.path.orEmpty())}\n")
+            }
+        }
         append("${p}KIND|${o.kind}\n${p}END|$request|0\n")
     }
 
@@ -1409,6 +1416,169 @@ class TmuxCoordinatorTest {
         assertTrue(state.value.restoreMissing)
         assertFalse(state.value.canCreate)
         assertTrue(bridge.operations.isEmpty())
+    }
+
+    @Test fun jointMetadataFollowsOnlyOwnedClientAndPublishesPaneTitleAndPathTogether() = runBlocking {
+        val f = Fixture()
+        val ours = client.copy(sessionCreated = first.created, pane = TmuxPane("%1", "default-host", "/one|first"))
+        val theirs = otherClient.copy(sessionCreated = second.created, pane = TmuxPane("%2", "other task", "/two"))
+        f.bridge.observation = observed(clients = listOf(theirs, ours))
+        f.coordinator.refresh()
+        val firstPane = f.state.value.currentPane!!
+        assertEquals(ours.pane, firstPane.pane)
+        assertEquals(client.identity, firstPane.binding.client)
+        assertEquals(first.ref(server), firstPane.binding.session)
+        assertEquals(f.state.value.snapshot!!.generation, firstPane.generation)
+        f.bridge.observation = observed(clients = listOf(theirs,
+            ours.copy(pane = TmuxPane("%3", "pane three", "/three"))))
+        f.coordinator.refresh()
+        assertEquals(TmuxPane("%3", "pane three", "/three"), f.state.value.currentPane!!.pane)
+        assertTrue(f.state.value.currentPane!!.generation > firstPane.generation)
+        // A session switch is a new client context, even if the new title/path happen to match.
+        f.bridge.observation = observed(clients = listOf(ours.copy(sessionId = second.id,
+            sessionCreated = second.created, pane = TmuxPane("%4", "new session", "/four"))))
+        f.coordinator.refresh()
+        assertEquals(second.ref(server), f.state.value.currentPane!!.binding.session)
+        assertEquals(TmuxPane("%4", "new session", "/four"), f.state.value.currentPane!!.pane)
+    }
+
+    @Test fun paneBytesNeedMatchingOwnerServerClientSessionBirthAndScopeEvenWithParserSeam() = runBlocking {
+        val ours = client.copy(sessionCreated = first.created, pane = TmuxPane("%1", "title", "/cwd"))
+        val good = observed(clients = listOf(ours))
+        for (invalid in listOf(
+            good.copy(owner = owner.copy(nonce = "b".repeat(32))),
+            good.copy(server = server.copy(startedTicks = 0)),
+            good.copy(clients = listOf(ours.copy(sessionCreated = first.created + 1))),
+            good.copy(clients = listOf(ours.copy(identity = client.identity.copy(tty = "not-a-tty")))),
+            good.copy(clients = listOf(ours.copy(sessionCreated = null))),
+            good.copy(clients = listOf(ours.copy(pane = TmuxPane("%1", "bad\u001b", "/cwd")))),
+            good.copy(clients = listOf(ours.copy(pane = TmuxPane("%1", "title", "relative")))),
+        )) {
+            val f = Fixture(injectObservation = true)
+            f.bridge.observation = invalid
+            f.coordinator.refresh()
+            assertNull(f.state.value.currentPane)
+            assertFalse(f.state.value.snapshot?.verified == true)
+        }
+        val optional = Fixture(required = false)
+        optional.currentNonce = null
+        optional.bridge.observation = good.copy(owner = null)
+        optional.coordinator.refresh()
+        assertTrue(optional.state.value.snapshot!!.verified)
+        assertNull(optional.state.value.currentPane)
+        val f = Fixture()
+        f.bridge.observation = good
+        f.coordinator.refresh()
+        val current = f.state.value.currentBinding!!
+        assertNull(f.state.value.copy(presence = TmuxPresence.Attached(current.copy(client = current.client.copy(created = 1000)))).currentPane)
+        assertNull(f.state.value.copy(presence = TmuxPresence.Attached(current.copy(scope = scope.copy(networkEpoch = 99)))).currentPane)
+        assertNull(f.state.value.copy(targetChanged = true).currentPane)
+    }
+
+    @Test fun unrelatedClientsUnsafePaneTextCannotDisableVerifiedCurrentBindingOrExplicitManagement() = runBlocking {
+        for (pane in listOf(TmuxPane("%2", "bad title", "/other"), TmuxPane("%2", "bad title", "/other"),
+            TmuxPane("%2", "other", "/bad path"), TmuxPane("%2", "other", "/bad path"))) {
+            val f = Fixture()
+            val ours = client.copy(sessionCreated = first.created, pane = TmuxPane("%1", "current", "/current"))
+            f.bridge.observation = observed(clients = listOf(ours, otherClient.copy(sessionCreated = second.created, pane = pane)))
+            f.coordinator.refresh()
+            assertEquals(TmuxPhase.READY, f.state.value.phase)
+            assertTrue(f.state.value.snapshot!!.verified)
+            assertTrue(f.state.value.canManage)
+            assertEquals(first.ref(server), f.state.value.currentBinding!!.session)
+            assertEquals(ours.pane, f.state.value.currentPane!!.pane)
+            val unrelated = f.state.value.snapshot!!.observation.clients.single { it.identity == otherClient.identity }
+            assertEquals(second.created, unrelated.sessionCreated)
+            assertNull(unrelated.pane)
+            val selection = f.state.value.selectionFor(second)!!
+            assertTrue(f.coordinator.rename(selection, "renamed-other"))
+            assertEquals(1, f.bridge.operations.size)
+            assertEquals(first.ref(server), f.state.value.currentBinding!!.session)
+            assertEquals("renamed-other", f.state.value.sessions.single { it.id == second.id }.name)
+            assertTrue(f.state.value.canManage)
+        }
+    }
+
+    @Test fun ownedClientsUnsafeOptionalPaneWithdrawsMetadataButKeepsStrongBindingManageable() = runBlocking {
+        val f = Fixture()
+        val ours = client.copy(sessionCreated = first.created, pane = TmuxPane("%1", "good", "/current"))
+        f.bridge.observation = observed(clients = listOf(ours, otherClient))
+        f.coordinator.refresh()
+        assertNotNull(f.state.value.currentPane)
+        f.bridge.observation = observed(clients = listOf(ours.copy(pane = TmuxPane("%1", "bad title", "/current")), otherClient))
+        f.coordinator.refresh()
+        assertTrue(f.state.value.snapshot!!.verified)
+        assertTrue(f.state.value.canManage)
+        assertEquals(first.ref(server), f.state.value.currentBinding!!.session)
+        assertEquals(client.identity, f.state.value.currentBinding!!.client)
+        assertNull(f.state.value.currentPane)
+        assertTrue(f.coordinator.rename(f.state.value.selectionFor(first)!!, "renamed-current"))
+        assertEquals("renamed-current", f.state.value.currentBinding!!.session.name)
+        assertEquals(1, f.bridge.operations.size)
+    }
+
+    @Test fun failedOrOwnerChangedRefreshWithdrawsCurrentPaneInsteadOfReusingCachedBytes() = runBlocking {
+        val f = Fixture()
+        f.bridge.observation = observed(clients = listOf(client.copy(sessionCreated = first.created,
+            pane = TmuxPane("%1", "title", "/cwd"))))
+        f.coordinator.refresh()
+        assertNotNull(f.state.value.currentPane)
+        f.bridge.output = { null }
+        f.coordinator.refresh()
+        assertNull(f.state.value.currentPane)
+        f.bridge.output = null
+        f.coordinator.refresh()
+        assertNotNull(f.state.value.currentPane)
+        f.bridge.beforeObserve = { f.currentNonce = "b".repeat(32) }
+        f.coordinator.refresh()
+        assertNull(f.state.value.currentPane)
+    }
+
+    @Test fun EOFAndCloseRejectLateJointPaneMetadataAndNeverResurrectOldLocation() = runBlocking {
+        for (close in listOf(false, true)) {
+            val f = Fixture()
+            f.bridge.observation = observed(clients = listOf(client.copy(sessionCreated = first.created,
+                pane = TmuxPane("%1", "title", "/cwd"))))
+            f.coordinator.refresh()
+            assertNotNull(f.state.value.currentPane)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            f.bridge.beforeObserve = { entered.complete(Unit); release.await() }
+            val read = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.refresh() }
+            withTimeout(2000) { entered.await() }
+            if (close) f.coordinator.close() else f.coordinator.dataEnded()
+            assertNull(f.state.value.currentPane)
+            val ended = f.state.value
+            release.complete(Unit)
+            read.await()
+            assertEquals(ended, f.state.value)
+            assertNull(f.state.value.currentPane)
+        }
+    }
+
+    @Test fun mergedRenameGenerationDiscardsPaneSampleAndRejectsSuspendedOlderPaneFrame() = runBlocking {
+        val f = Fixture()
+        f.bridge.observation = observed(clients = listOf(client.copy(sessionCreated = first.created,
+            pane = TmuxPane("%1", "old pane title", "/old"))))
+        f.coordinator.refresh()
+        val oldGeneration = f.state.value.currentPane!!.generation
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        f.bridge.beforeObserve = { entered.complete(Unit); release.await() }
+        val read = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.refresh() }
+        withTimeout(2000) { entered.await() }
+        f.coordinator.renamed(first.ref(server), "renamed")
+        assertTrue(f.state.value.snapshot!!.generation > oldGeneration)
+        assertNull(f.state.value.currentPane)
+        release.complete(Unit)
+        read.await()
+        assertNull(f.state.value.currentPane)
+        assertEquals("renamed", f.state.value.currentBinding!!.session.name)
+        f.bridge.beforeObserve = {}
+        f.bridge.observation = observed(sessions = listOf(first.copy(name = "renamed"), second),
+            clients = listOf(client.copy(sessionCreated = first.created, pane = TmuxPane("%2", "new", "/new"))))
+        f.coordinator.refresh()
+        assertEquals(TmuxPane("%2", "new", "/new"), f.state.value.currentPane!!.pane)
     }
 
     @Test fun eofOnDifferentThreadCannotPublishAnAlreadyParsedAttachedFrame() {
