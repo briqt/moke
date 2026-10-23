@@ -107,13 +107,17 @@ class TerminalController(
     var onLinkTapped: ((String) -> Unit)? = null
 
     /**
-     * 单击：点中链接就交给 [onLinkTapped]，否则照旧弹键盘。远端开了鼠标跟踪时，
-     * TerminalView 在 onUp 里就把点击转给了远端程序，根本走不到这里——不会抢程序的点击。
+     * 单击：点中链接就交给 [onLinkTapped]，否则弹键盘。远端鼠标点击走 [onMouseTap]，
+     * 只激活本地输入，不把程序界面中的 URL 再当成本地链接。
      */
     override fun onSingleTapUp(e: MotionEvent?) {
         val url = e?.let { linkAt(it) }
         val handler = onLinkTapped
         if (url != null && handler != null) handler(url) else showKeyboard()
+    }
+
+    override fun onMouseTap(e: MotionEvent?) {
+        showKeyboard()
     }
 
     private fun linkAt(e: MotionEvent): String? {

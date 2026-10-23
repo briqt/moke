@@ -88,18 +88,36 @@ object TmuxRemote {
             case "${'$'}moke_base_mode" in ''|*[!0-7]*) return 1;; esac
             [ "${'$'}((0${'$'}moke_base_mode & 0022))" -eq 0 ] || [ "${'$'}((0${'$'}moke_base_mode & 01000))" -ne 0 ]
         }
-        moke_default() {
+        moke_default_at() {
             moke_uid=${'$'}(id -u) || return 1
             moke_uint "${'$'}moke_uid" || return 1
+            moke_base=${'$'}1
+            [ "${'$'}(readlink -f -- "${'$'}moke_base" 2>/dev/null)" = "${'$'}moke_base" ] && moke_safe_base "${'$'}moke_base" || return 1
+            moke_dir="${'$'}moke_base/tmux-${'$'}moke_uid"
+            moke_socket="${'$'}moke_dir/default"
+            if [ -e "${'$'}moke_dir" ] || [ -L "${'$'}moke_dir" ]; then moke_private_dir "${'$'}moke_dir" || return 1; fi
+        }
+        moke_default() {
             # Upstream make_label: first realpath-able TMUX_TMPDIR, then /tmp;
             # TMPDIR is not tmux's socket base. Do not invoke make_label: it mkdirs.
             moke_base=
             if [ -n "${'$'}{TMUX_TMPDIR-}" ]; then moke_base=${'$'}(readlink -f -- "${'$'}TMUX_TMPDIR" 2>/dev/null); fi
             if [ -z "${'$'}moke_base" ] || [ ! -e "${'$'}moke_base" ]; then moke_base=${'$'}(readlink -f -- /tmp 2>/dev/null); fi
-            moke_safe_base "${'$'}moke_base" || return 1
-            moke_dir="${'$'}moke_base/tmux-${'$'}moke_uid"
-            moke_socket="${'$'}moke_dir/default"
-            if [ -e "${'$'}moke_dir" ] || [ -L "${'$'}moke_dir" ]; then moke_private_dir "${'$'}moke_dir" || return 1; fi
+            moke_default_at "${'$'}moke_base"
+        }
+        moke_select_socket() {
+            moke_uid=${'$'}(id -u) || return 1
+            moke_uint "${'$'}moke_uid" || return 1
+            moke_known_parent=${'$'}{moke_socket%/*}
+            moke_base=${'$'}{moke_known_parent%/*}
+            # A pin may come from default discovery or an explicit custom socket. Only the
+            # canonical default layout can authorize an absent parent, without creating it.
+            case "${'$'}moke_socket" in
+                "${'$'}moke_base/tmux-${'$'}moke_uid/default") moke_default_at "${'$'}moke_base";;
+                *) moke_dir=
+                    [ "${'$'}(readlink -f -- "${'$'}moke_known_parent" 2>/dev/null)" = "${'$'}moke_known_parent" ] &&
+                        moke_safe_base "${'$'}moke_known_parent";;
+            esac
         }
         moke_create_parent() {
             moke_parent=${'$'}{moke_socket%/*}
@@ -217,8 +235,7 @@ object TmuxRemote {
     private fun selectSocket(socketPath: String?): String {
         if (socketPath == null) return "moke_default"
         require(socketPath.startsWith('/') && text(socketPath)) { "Invalid socket path" }
-        return "moke_socket=${q(socketPath)}; moke_known_parent=\${moke_socket%/*}; " +
-            "[ \"\$(readlink -f -- \"\$moke_known_parent\")\" = \"\$moke_known_parent\" ] && moke_safe_base \"\$moke_known_parent\""
+        return "moke_socket=${q(socketPath)}; moke_select_socket"
     }
 
     private fun previousServerGuard(server: TmuxServerId): String = """
@@ -321,9 +338,7 @@ object TmuxRemote {
     fun create(name: String, socketPath: String? = null): String {
         require(name(name)) { "Invalid session name" }
         require(socketPath == null || (socketPath.startsWith('/') && text(socketPath))) { "Invalid socket path" }
-        val socketSetup = if (socketPath == null) "moke_default" else
-            "moke_socket=${q(socketPath)}; moke_uid=\$(id -u); moke_dir=\${moke_socket%/*}; moke_base=\${moke_dir%/*}; " +
-                "moke_safe_base \"\$moke_base\" && { case \"\$moke_socket\" in \"\$moke_base/tmux-\$moke_uid/default\") :;; *) [ -d \"\$moke_dir\" ];; esac; }"
+        val socketSetup = selectSocket(socketPath) + " && moke_safe_base \"\$moke_base\""
         val createCommand = "new-session -d -P -F ${q("${P}CREATED|#{session_id}|#{session_created}|#{session_windows}|#{session_attached}|#{session_name}")} -s ${q(tmuxLiteral(name))}"
         return shell(core + "\n" + """
             command -v tmux >/dev/null 2>&1 || { moke_result FAILED 'tmux not found'; exit 0; }

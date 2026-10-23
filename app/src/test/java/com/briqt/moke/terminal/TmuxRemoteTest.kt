@@ -262,8 +262,12 @@ class TmuxRemoteTest {
             assertFalse(path.contains("TMUX_TMPDIR"))
             assertTrue(path.contains("moke_server"))
         }
-        assertTrue(observe.contains("readlink -f -- \"\$moke_known_parent\""))
-        assertTrue(observe.contains("moke_safe_base \"\$moke_known_parent\""))
+        for (path in listOf(observe, restore, create)) assertTrue(path.contains("moke_select_socket"))
+        val selection = body(TmuxRemote.observe(scripts, "r1", null, false, known))
+            .substringAfter("moke_select_socket() {").substringBefore("moke_create_parent() {")
+        assertTrue(selection.contains("moke_default_at \"\$moke_base\""))
+        assertTrue(selection.contains("readlink -f -- \"\$moke_known_parent\""))
+        assertTrue(selection.contains("moke_safe_base \"\$moke_known_parent\""))
         assertTrue(create.contains("moke_create_parent"))
         invalid { TmuxRemote.observe(scripts, "r1", null, false, "relative") }
         invalid { TmuxRemote.restore("ok", socketPath = "/bad\npath") }

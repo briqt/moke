@@ -61,7 +61,7 @@ class TerminalScrollGestureTest {
     }
 
     @Test
-    fun mouseTrackingTapSendsExactlyOneClickAndNeverRequestsKeyboard() {
+    fun mouseTrackingTapSendsExactlyOneClickAndRequestsKeyboard() {
         output("\u001b[?1000h\u001b[?1006h")
 
         touches(*tap().toTypedArray())
@@ -72,7 +72,7 @@ class TerminalScrollGestureTest {
     }
 
     @Test
-    fun mouseTrackingDoubleTapSendsTwoClicksAndNeverRequestsKeyboard() {
+    fun mouseTrackingDoubleTapSendsTwoClicksAndRequestsKeyboardForEachTap() {
         output("\u001b[?1000h\u001b[?1006h")
         val steps = tap() + tap(startMs = 110)
 
@@ -81,6 +81,56 @@ class TerminalScrollGestureTest {
         awaitTapConfirmation()
 
         onMain { assertClickCount(2) }
+    }
+
+    @Test
+    fun normalShellTapRequestsKeyboardWithoutSendingInput() {
+        touches(*tap().toTypedArray())
+        awaitTapConfirmation()
+        onMain {
+            assertEquals(1, fixture.keyboardRequests)
+            assertEquals("Showing the keyboard must not type into the shell", "", fixture.transport.text())
+        }
+    }
+
+    @Test
+    fun mouseTrackingTapDoesNotAlsoOpenALink() {
+        val row = "\r\n".repeat(4) + "https://example.test/path"
+        output(row + "\u001b[?1000h\u001b[?1006h")
+        var links = 0
+        onMain { fixture.controller.onLinkTapped = { links++ } }
+        touches(*tap().toTypedArray())
+        awaitTapConfirmation()
+        onMain {
+            assertClickCount(1)
+            assertEquals("The program owns its mouse click even over URL-shaped text", 0, links)
+        }
+    }
+
+    @Test
+    fun physicalMouseClickDoesNotRequestTheSoftKeyboard() {
+        output("\u001b[?1000h\u001b[?1006h")
+        onMain {
+            val now = SystemClock.uptimeMillis()
+            val pointer = arrayOf(MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_MOUSE
+            })
+            val point = arrayOf(MotionEvent.PointerCoords().apply {
+                x = fixture.view.mRenderer.fontWidth * 3.5f
+                y = fixture.view.getPointY(4) + fixture.view.mRenderer.fontLineSpacing / 2f
+            })
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(now, now, action, 1, pointer, point,
+                    0, if (action == MotionEvent.ACTION_DOWN) MotionEvent.BUTTON_PRIMARY else 0,
+                    1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0)
+                try { assertTrue(fixture.view.onTouchEvent(event)) } finally { event.recycle() }
+            }
+            assertEquals("\u001b[<0;4;5M\u001b[<0;4;5m", fixture.transport.text())
+            assertEquals(0, fixture.keyboardRequests)
+        }
+        awaitTapConfirmation()
+        onMain { assertEquals(0, fixture.keyboardRequests) }
     }
 
     @Test
@@ -127,6 +177,22 @@ class TerminalScrollGestureTest {
         awaitTapConfirmation()
 
         onMain { assertClickCount(1) }
+    }
+
+    @Test
+    fun longPressDoesNotBecomeAMouseClickOrKeyboardRequest() {
+        output("\r\n".repeat(4) + "selectable content\u001b[?1000h\u001b[?1006h")
+        val point = onMain {
+            fixture.view.mRenderer.fontWidth * 3.5f to
+                (fixture.view.getPointY(4) + fixture.view.mRenderer.fontLineSpacing / 2f)
+        }
+        touches(step(0, MotionEvent.ACTION_DOWN, point),
+            step(ViewConfiguration.getLongPressTimeout().toLong() + 150, MotionEvent.ACTION_UP, point))
+        awaitTapConfirmation()
+        onMain {
+            assertEquals("", fixture.transport.text())
+            assertEquals(0, fixture.keyboardRequests)
+        }
     }
 
     @Test
@@ -222,7 +288,7 @@ class TerminalScrollGestureTest {
         onMain {
             assertEquals(0, fixture.view.topRow)
             assertTrue(fixture.transport.text().contains("\u001b[<0;"))
-            assertEquals(0, fixture.keyboardRequests)
+            assertEquals(1, fixture.keyboardRequests)
             fixture.transport.clear()
             fixture.view.setTopRow(-8)
         }
@@ -230,7 +296,7 @@ class TerminalScrollGestureTest {
         onMain {
             assertEquals(0, fixture.view.topRow)
             assertTrue(fixture.transport.text().contains("\u001b[<64;"))
-            assertEquals(0, fixture.keyboardRequests)
+            assertEquals("Dragging after a tap must not request the keyboard again", 1, fixture.keyboardRequests)
         }
     }
 
@@ -262,7 +328,7 @@ class TerminalScrollGestureTest {
         // tap() targets zero-based column 3, row 4, hence SGR coordinates 4;5.
         val click = "\u001b[<0;4;5M\u001b[<0;4;5m"
         assertEquals(click.repeat(count), fixture.transport.text())
-        assertEquals("Mouse tracking must consume the tap before the controller requests IME", 0, fixture.keyboardRequests)
+        assertEquals("Each touch tap must request IME without duplicating its remote click", count, fixture.keyboardRequests)
     }
 
     private fun visibleText(): String {

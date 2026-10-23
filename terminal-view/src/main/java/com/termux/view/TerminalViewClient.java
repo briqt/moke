@@ -28,6 +28,9 @@ public interface TerminalViewClient {
      */
     void onSingleTapUp(MotionEvent e);
 
+    /** A touch tap already sent to the remote program; local input activation must not follow links. */
+    default void onMouseTap(MotionEvent e) {}
+
     boolean shouldBackButtonBeMappedToEscape();
 
     boolean shouldEnforceCharBasedInput();

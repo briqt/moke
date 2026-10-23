@@ -184,6 +184,8 @@ public final class TerminalView extends View {
                     followCurrentScreen();
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
+                    requestFocus();
+                    mClient.onMouseTap(event);
                     return true;
                 }
                 return false;
@@ -195,10 +197,12 @@ public final class TerminalView extends View {
                 if (isSelectingText()) {
                     stopTextSelectionMode();
                 } else if (mEmulator.isMouseTrackingActive()) {
-                    // The remote click consumes the tap; never also open a link or keyboard.
+                    // Remote input and local keyboard activation share the tap, without link handling.
                     followCurrentScreen();
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
+                    requestFocus();
+                    mClient.onMouseTap(event);
                 } else {
                     requestFocus();
                     mClient.onSingleTapUp(event);
