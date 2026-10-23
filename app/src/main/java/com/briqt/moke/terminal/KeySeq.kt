@@ -46,7 +46,13 @@ object KeySeq {
     private const val DEL = "\u007f"
     private const val BS = "\u0008"
 
-    fun encode(key: KeyId, ctrl: Boolean = false, alt: Boolean = false, shift: Boolean = false): String {
+    fun encode(
+        key: KeyId,
+        ctrl: Boolean = false,
+        alt: Boolean = false,
+        shift: Boolean = false,
+        cursorKeysApplication: Boolean = false,
+    ): String {
         // 宏自带完整序列（Ctrl+C 等），叠加修饰只会把它拆坏。
         if (key is KeyId.Macro) return key.bytes
 
@@ -68,12 +74,12 @@ object KeySeq {
                 alt -> "$ESC$DEL"
                 else -> DEL
             }
-            KeyId.Up -> cursor('A', mod)
-            KeyId.Down -> cursor('B', mod)
-            KeyId.Right -> cursor('C', mod)
-            KeyId.Left -> cursor('D', mod)
-            KeyId.Home -> cursor('H', mod)
-            KeyId.End -> cursor('F', mod)
+            KeyId.Up -> cursor('A', mod, cursorKeysApplication)
+            KeyId.Down -> cursor('B', mod, cursorKeysApplication)
+            KeyId.Right -> cursor('C', mod, cursorKeysApplication)
+            KeyId.Left -> cursor('D', mod, cursorKeysApplication)
+            KeyId.Home -> cursor('H', mod, cursorKeysApplication)
+            KeyId.End -> cursor('F', mod, cursorKeysApplication)
             KeyId.Insert -> tilde(2, mod)
             KeyId.Delete -> tilde(3, mod)
             KeyId.PageUp -> tilde(5, mod)
@@ -88,9 +94,12 @@ object KeySeq {
     fun modifier(ctrl: Boolean, alt: Boolean, shift: Boolean): Int =
         1 + (if (shift) 1 else 0) + (if (alt) 2 else 0) + (if (ctrl) 4 else 0)
 
-    /** 光标类：无修饰发 `ESC[A`，带修饰发 `ESC[1;mA`。 */
-    private fun cursor(final: Char, mod: Int): String =
-        if (mod == 1) "$ESC[$final" else "$ESC[1;$mod$final"
+    /** 与内核 KeyHandler 一致：无修饰按 DECCKM 发 CSI / SS3，带修饰始终发 `ESC[1;mA`。 */
+    private fun cursor(final: Char, mod: Int, cursorKeysApplication: Boolean): String = when {
+        mod != 1 -> "$ESC[1;$mod$final"
+        cursorKeysApplication -> "${ESC}O$final"
+        else -> "$ESC[$final"
+    }
 
     /** `~` 类（Ins/Del/PgUp/PgDn/F5+）：`ESC[n~` / `ESC[n;m~`。 */
     private fun tilde(n: Int, mod: Int): String =

@@ -65,12 +65,13 @@ class TerminalController(
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
+        val emulator = session?.emulator ?: return
         val clip = clipboard.primaryClip ?: return
         if (clip.itemCount > 0) {
             val text = clip.getItemAt(0).coerceToText(appContext)?.toString()
-            if (!text.isNullOrEmpty() && session != null) {
+            if (!text.isNullOrEmpty()) {
                 view?.mokePrepareForUserInput()
-                session.write(text)
+                emulator.paste(text)
             }
         }
     }

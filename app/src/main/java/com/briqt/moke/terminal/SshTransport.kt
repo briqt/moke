@@ -69,6 +69,7 @@ class SshTransport(
     private val resources = TransportResources()
     private val closed get() = resources.closed
     private val inputQueue = TerminalInputQueue("moke-ssh-input") { if (closed) null else out }
+    private val windowSize = TerminalSizeState(inputQueue::execute)
     /** shell / exec 通道已经打开：此后的异常是"中断"，此前的是"连接失败"。 */
     private val established get() = resources.established
     @Volatile private var latencyThread: Thread? = null
@@ -88,6 +89,7 @@ class SshTransport(
             if (closed && !resources.started) resources.finish { session.onTransportFinished(0) }
             return
         }
+        windowSize.initialize(TerminalWindowSize(columns, rows, cellWidthPixels, cellHeightPixels))
         Thread({
             try {
                 // TOFU 告警等提示直接写进终端画面（这条连接天然有屏幕可写）。
@@ -131,7 +133,11 @@ class SshTransport(
                         conn.client.startSession()
                     },
                     closeSession = { it.close() },
-                    allocatePty = { it.allocatePTY("xterm-256color", columns, rows, cellWidthPixels, cellHeightPixels, emptyMap()) },
+                    allocatePty = { channel ->
+                        val size = windowSize.current()
+                        channel.allocatePTY("xterm-256color", size.columns, size.rows,
+                            size.cellWidthPixels, size.cellHeightPixels, emptyMap())
+                    },
                     // Only an explicitly requested, supported tmux carrier is wrapped; preserve startShell otherwise.
                     openChannel = { s ->
                         val command = selectedStartup.command
@@ -145,6 +151,11 @@ class SshTransport(
                     ssh = client
                     sshSession = s as? SessionChannel
                     out = channel.outputStream
+                    val resizeSession = sshSession
+                    windowSize.attach { size ->
+                        if (!closed) resizeSession?.changeWindowDimensions(size.columns, size.rows,
+                            size.cellWidthPixels, size.cellHeightPixels)
+                    }
                     if (!resources.establish { onEstablished?.invoke() }) return@withSshChannel
                     startLatencyProbe(client)
 
@@ -257,10 +268,7 @@ class SshTransport(
         // 上报窗口尺寸变化（SSH window-change）——字号调整/旋转/键盘弹收都会触发，
         // 否则远端 PTY 尺寸不变，全屏 TUI（vim/htop/tmux）的底栏/状态行会错位。
         if (closed) return
-        val s = sshSession ?: return
-        inputQueue.execute {
-            if (!closed) s.changeWindowDimensions(columns, rows, cellWidthPixels, cellHeightPixels)
-        }
+        windowSize.update(TerminalWindowSize(columns, rows, cellWidthPixels, cellHeightPixels))
     }
 
     /**

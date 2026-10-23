@@ -756,7 +756,7 @@ private fun KeyboardPanelOverlay(
  * 字节一律经 `KeySeq` 生成——这样 Ctrl+← / Shift+Tab 这类组合才成立。
  */
 private fun sendKey(ts: TermSession, controller: TerminalController, mods: Modifiers, key: KeyId): Modifiers {
-    val bytes = mods.encode(key)
+    val bytes = mods.encode(key, cursorKeysApplication = ts.session.emulator?.isCursorKeysApplicationMode == true)
     if (bytes.isNotEmpty()) {
         controller.view?.mokePrepareForUserInput()
         ts.session.write(bytes)

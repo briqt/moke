@@ -1,5 +1,7 @@
 package com.briqt.moke.terminal
 
+import android.view.KeyEvent
+import com.termux.terminal.KeyHandler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -8,6 +10,14 @@ import org.junit.Test
 class KeySeqTest {
 
     private val e = "\u001b"
+    private val cursorKeys: List<Triple<KeyId, Char, Int>> = listOf(
+        Triple(KeyId.Up, 'A', KeyEvent.KEYCODE_DPAD_UP),
+        Triple(KeyId.Down, 'B', KeyEvent.KEYCODE_DPAD_DOWN),
+        Triple(KeyId.Right, 'C', KeyEvent.KEYCODE_DPAD_RIGHT),
+        Triple(KeyId.Left, 'D', KeyEvent.KEYCODE_DPAD_LEFT),
+        Triple(KeyId.Home, 'H', KeyEvent.KEYCODE_MOVE_HOME),
+        Triple(KeyId.End, 'F', KeyEvent.KEYCODE_MOVE_END),
+    )
 
     @Test
     fun `无修饰发传统短序列`() {
@@ -39,6 +49,56 @@ class KeySeqTest {
         assertEquals("$e[1;3C", KeySeq.encode(KeyId.Right, alt = true))
         assertEquals("$e[1;2A", KeySeq.encode(KeyId.Up, shift = true))
         assertEquals("$e[1;5H", KeySeq.encode(KeyId.Home, ctrl = true))
+    }
+
+    @Test
+    fun `四方向与HomeEnd无修饰时跟随光标应用模式`() {
+        for ((key, final, _) in cursorKeys) {
+            assertEquals("$e[$final", KeySeq.encode(key, cursorKeysApplication = false))
+            assertEquals("${e}O$final", KeySeq.encode(key, cursorKeysApplication = true))
+        }
+    }
+
+    @Test
+    fun `四方向与HomeEnd带任何修饰时两种模式均走CSI`() {
+        for ((key, final, _) in cursorKeys) {
+            for (bits in 1..7) {
+                for (application in listOf(false, true)) {
+                    assertEquals(
+                        "$key modifiers=$bits application=$application",
+                        "$e[1;${bits + 1}$final",
+                        KeySeq.encode(
+                            key,
+                            ctrl = bits and 4 != 0,
+                            alt = bits and 2 != 0,
+                            shift = bits and 1 != 0,
+                            cursorKeysApplication = application,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `光标编码在全部模式和修饰组合下与内核一致`() {
+        for ((key, _, keyCode) in cursorKeys) {
+            for (bits in 0..7) {
+                val ctrl = bits and 4 != 0
+                val alt = bits and 2 != 0
+                val shift = bits and 1 != 0
+                val keyMod = (if (ctrl) KeyHandler.KEYMOD_CTRL else 0) or
+                    (if (alt) KeyHandler.KEYMOD_ALT else 0) or
+                    (if (shift) KeyHandler.KEYMOD_SHIFT else 0)
+                for (application in listOf(false, true)) {
+                    assertEquals(
+                        "$key modifiers=$bits application=$application",
+                        KeyHandler.getCode(keyCode, keyMod, application, false),
+                        KeySeq.encode(key, ctrl, alt, shift, cursorKeysApplication = application),
+                    )
+                }
+            }
+        }
     }
 
     @Test
@@ -100,10 +160,30 @@ class KeySeqTest {
     }
 
     @Test
-    fun `宏自带完整序列不再叠加修饰`() {
-        val ctrlC = KeyId.Macro("\u0003")
-        assertEquals("\u0003", KeySeq.encode(ctrlC))
-        assertEquals("\u0003", KeySeq.encode(ctrlC, ctrl = true, alt = true, shift = true))
+    fun `光标应用模式不影响字面文本的修饰语义`() {
+        assertEquals(
+            "$e\u0003",
+            KeySeq.encode(KeyId.Chars("c"), ctrl = true, alt = true, shift = true, cursorKeysApplication = true),
+        )
+        assertEquals(
+            "ls -la",
+            KeySeq.encode(KeyId.Chars("ls -la"), ctrl = true, alt = true, shift = true, cursorKeysApplication = true),
+        )
+        assertEquals("c", KeySeq.encode(KeyId.Chars("c"), shift = true, cursorKeysApplication = true))
+    }
+
+    @Test
+    fun `宏自带完整序列不再叠加修饰或转换光标模式`() {
+        for (bytes in listOf("\u0003", "$e[A", "${e}OA")) {
+            val macro = KeyId.Macro(bytes)
+            for (application in listOf(false, true)) {
+                assertEquals(bytes, KeySeq.encode(macro, cursorKeysApplication = application))
+                assertEquals(
+                    bytes,
+                    KeySeq.encode(macro, ctrl = true, alt = true, shift = true, cursorKeysApplication = application),
+                )
+            }
+        }
     }
 
     @Test

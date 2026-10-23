@@ -81,6 +81,7 @@ class MoshTransport(
     private val resources = TransportResources()
     private val closed get() = resources.closed
     private val inputQueue = TerminalInputQueue("moke-mosh-input") { if (closed) null else out }
+    private val windowSize = TerminalSizeState(inputQueue::execute)
     private val childExited get() = child?.exited == true
     private val auxiliaryStopped = AtomicBoolean()
     private val server = MoshServerProcess(::killOrphanServer)
@@ -100,6 +101,7 @@ class MoshTransport(
             if (closed && !resources.started) finish(session, 0)
             return
         }
+        windowSize.initialize(TerminalWindowSize(columns, rows, cellWidthPixels, cellHeightPixels))
         Thread({
             try {
                 // 0) 先确认随包 native 组件在位——缺失时给出可读提示并结束，
@@ -168,10 +170,11 @@ class MoshTransport(
                 // 引导期间会话已被关掉：不再起客户端（否则本地子进程与中继都没人收），由下方收掉远端。
                 check(!closed) { "session closed during bootstrap" }
                 val pidArr = IntArray(1)
+                val size = windowSize.current()
                 val fd = JNI.createSubprocess(
                     bin, appContext.filesDir.absolutePath,
                     arrayOf("mosh-client", clientHost, clientPort.toString()),
-                    env, pidArr, rows, columns, cellWidthPixels, cellHeightPixels,
+                    env, pidArr, size.rows, size.columns, size.cellWidthPixels, size.cellHeightPixels,
                 )
                 // Positive pid ownership starts here, BEFORE adoptFd, streams, callbacks or closed checks.
                 // Even if close won while native create was running, own() kills/closes the late child;
@@ -188,6 +191,11 @@ class MoshTransport(
                 resources.own(process) { it.forceClose() }
                 val descriptor = process.adopt { ParcelFileDescriptor.adoptFd(it) }
                 out = FileOutputStream(descriptor.fileDescriptor)
+                windowSize.attach { size ->
+                    if (!closed) process.withFd { fd ->
+                        JNI.setPtyWindowSize(fd, size.rows, size.columns, size.cellWidthPixels, size.cellHeightPixels)
+                    }
+                }
                 if (!resources.establish { onEstablished?.invoke() }) {
                     process.forceClose()
                     return@Thread
@@ -429,12 +437,7 @@ class MoshTransport(
 
     override fun updateSize(columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         if (closed) return
-        val process = child ?: return
-        inputQueue.execute {
-            if (!closed) process.withFd { fd ->
-                JNI.setPtyWindowSize(fd, rows, columns, cellWidthPixels, cellHeightPixels)
-            }
-        }
+        windowSize.update(TerminalWindowSize(columns, rows, cellWidthPixels, cellHeightPixels))
     }
 
     private val closeRequested = AtomicBoolean()

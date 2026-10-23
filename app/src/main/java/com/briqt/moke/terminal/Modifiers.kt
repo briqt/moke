@@ -52,6 +52,8 @@ data class Modifiers(
         shift = if (shift == ModState.Once) ModState.Off else shift,
     )
 
-    /** 按当前修饰把一个按键编码成字节序列。 */
-    fun encode(key: KeyId): String = KeySeq.encode(key, ctrl = ctrlOn, alt = altOn, shift = shiftOn)
+    /** 按当前修饰与会话光标模式把一个按键编码成字节序列。 */
+    fun encode(key: KeyId, cursorKeysApplication: Boolean = false): String = KeySeq.encode(
+        key, ctrl = ctrlOn, alt = altOn, shift = shiftOn, cursorKeysApplication = cursorKeysApplication,
+    )
 }
