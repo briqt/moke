@@ -2,7 +2,7 @@
 
 # Moke · 墨客
 
-**Android 原生 SSH / mosh 终端，支持多会话、代理与内置 Tailscale、tmux 和 SFTP。**
+**Android 原生 SSH / mosh 终端，内置 Tailscale，支持代理、多会话、tmux 和 SFTP。**
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
@@ -15,10 +15,20 @@
 ## 功能
 
 - **SSH / mosh**：密码与 PEM 私钥认证、主机密钥指纹确认、SSH 跳板机、按主机配置启动命令。
-- **网络**：HTTP / HTTPS / SOCKS4 / SOCKS5 代理与内置用户态 Tailscale，支持自建控制服务器，不占用系统 VPN。凭据与 tailnet 登录状态经 Android Keystore 加密保存。
+- **内置 Tailscale**：连接 tailnet 中的主机，支持官方与自建控制服务器、Tailscale IP 和 MagicDNS 主机名。用户态客户端不占用系统 VPN。
+- **代理**：支持 HTTP / HTTPS / SOCKS4 / SOCKS5，可按主机选择使用的网络。
 - **会话与 tmux**：多会话、后台连接、远端 tmux 会话管理，以及仅监听设备本机回环接口的端口转发。
 - **文件**：SFTP 目录浏览、支持断点续传的上传下载、发送文件路径到终端。
 - **终端**：可自定义附加键、输入法输入、文本段输入、链接、剪贴板与通知、字体和配色、中英双语界面。
+
+网络凭据与 tailnet 登录状态经 Android Keystore 加密保存。
+
+## 使用内置 Tailscale
+
+1. 在「设置 → 网络」添加 Tailscale，选择官方或自建控制服务器并完成登录。
+2. 编辑主机，在「网络」中选择该 Tailscale 网络，地址填写目标主机的 Tailscale IP 或 MagicDNS 名称。
+
+内置网络仅供 Moke 的连接使用，不为其他应用提供网络接入；SSH 认证仍使用主机配置的密码或私钥。
 
 ## 截图
 

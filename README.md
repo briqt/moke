@@ -2,7 +2,7 @@
 
 # Moke · 墨客
 
-**Native Android SSH / mosh terminal with multiple sessions, proxies, built-in Tailscale, tmux, and SFTP.**
+**Native Android SSH / mosh terminal with built-in Tailscale, proxies, multiple sessions, tmux, and SFTP.**
 
 [![CI](https://github.com/briqt/moke/actions/workflows/ci.yml/badge.svg)](https://github.com/briqt/moke/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/briqt/moke?sort=semver)](https://github.com/briqt/moke/releases)
@@ -15,10 +15,20 @@
 ## Features
 
 - **SSH / mosh**: password and PEM private-key authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
-- **Networks**: HTTP / HTTPS / SOCKS4 / SOCKS5 proxies and built-in userspace Tailscale, including self-hosted control servers, without taking the system VPN slot. Credentials and tailnet login state are encrypted with the Android Keystore.
+- **Built-in Tailscale**: connect to hosts in your tailnet, with support for official and self-hosted control servers, Tailscale IP addresses, and MagicDNS hostnames. The userspace client does not use the system VPN slot.
+- **Proxies**: HTTP / HTTPS / SOCKS4 / SOCKS5 proxies, selectable per host.
 - **Sessions & tmux**: multiple sessions, background connections, remote tmux session management, and port forwarding that listens only on the device's loopback interface.
 - **Files**: SFTP browsing, uploads and downloads with resume, and sending file paths to the terminal.
 - **Terminal**: customizable extra keys, IME input, text-block input, links, clipboard and notification support, fonts and color schemes, and English / Chinese interfaces.
+
+Network credentials and tailnet login state are encrypted with the Android Keystore.
+
+## Use built-in Tailscale
+
+1. Open **Settings → Network**, add Tailscale, choose the official or a self-hosted control server, and sign in.
+2. Edit a host, select the Tailscale network under **Network**, and enter the target host's Tailscale IP address or MagicDNS hostname.
+
+The built-in network is used only for Moke connections; it does not provide network access for other apps. SSH authentication still uses the password or private key configured for the host.
 
 ## Screenshots
 
