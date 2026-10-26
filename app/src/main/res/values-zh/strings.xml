@@ -73,6 +73,8 @@
     <string name="tmux_create_open">新建并打开</string>
     <string name="tmux_more_for">“%1$s”的操作</string>
     <string name="tmux_current_unknown">无法确认当前会话。</string>
+    <string name="tmux_detection_unsupported">当前主机不支持 tmux 状态识别。</string>
+    <string name="tmux_owner_unavailable">无法初始化 tmux 状态识别，请重新连接。</string>
     <string name="tmux_result_unknown">操作结果未确认。</string>
     <string name="tmux_session_changed">会话已更改，请重试。</string>
     <string name="tmux_name_exists">同名会话已存在。</string>

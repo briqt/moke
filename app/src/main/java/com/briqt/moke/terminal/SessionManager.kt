@@ -90,6 +90,7 @@ class TermSession(
         dataAlive = { alive.value },
         state = tmuxState,
         message = problemText,
+        observerCapability = { (transport as? TmuxConnection)?.tmuxObserverCapability },
     )
 
     fun setCustomTitle(title: String?) { customTitle.value = SessionTitlePolicy.userValue(title) }
@@ -343,6 +344,8 @@ class SessionManager(context: Context) {
 private fun Context.tmuxProblemText(problem: TmuxProblem): String = localized(when (problem) {
     TmuxProblem.CONNECTION_ENDED -> R.string.tmux_disconnected
     TmuxProblem.PROBE_UNAVAILABLE -> R.string.tmux_control_unavailable
+    TmuxProblem.PLATFORM_UNSUPPORTED -> R.string.tmux_detection_unsupported
+    TmuxProblem.OWNER_UNAVAILABLE -> R.string.tmux_owner_unavailable
     TmuxProblem.INVALID_RESPONSE -> R.string.tmux_invalid_response
     TmuxProblem.IDENTITY_UNKNOWN -> R.string.tmux_current_unknown
     TmuxProblem.TARGET_CHANGED -> R.string.tmux_target_changed

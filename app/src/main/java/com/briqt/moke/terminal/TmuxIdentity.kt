@@ -16,7 +16,9 @@ data class TmuxServerId(
     val socketDevice: Long = 0L,
     val socketInode: Long = 0L,
 ) {
-    val witnessed: Boolean get() = bootId.isNotEmpty() && startedTicks > 0 && socketInode > 0
+    // Positive: Linux start ticks. Negative: Darwin epoch microseconds. Never interchangeable.
+    val witnessed: Boolean get() = bootId.isNotEmpty() &&
+        (startedTicks > 0 || startedTicks in -9_007_199_254_740_991L..-1L) && socketInode > 0
 }
 
 data class TmuxSessionRef(
@@ -49,7 +51,22 @@ data class TmuxOwnerProof(
     val tty: String,
 )
 
-enum class TmuxProbeKind { READY, NO_SERVER, NOT_INSTALLED, PENDING, UNKNOWN, ERROR }
+internal val tmuxTtyPattern = Regex("(?:/dev/pts/[0-9]+|/dev/ttys[0-9]+)")
+internal fun tmuxBirthMatchesTty(birth: Long, tty: String): Boolean =
+    tmuxTtyPattern.matches(tty) && when {
+        birth > 0 -> tty.startsWith("/dev/pts/")
+        birth in -9_007_199_254_740_991L..-1L -> tty.startsWith("/dev/ttys")
+        else -> false
+    }
+
+/** Unsupported is a known platform limitation; Failure is not evidence of absence. */
+sealed interface TmuxObserverCapability {
+    data object Supported : TmuxObserverCapability
+    data object Unsupported : TmuxObserverCapability
+    data object Failure : TmuxObserverCapability
+}
+
+enum class TmuxProbeKind { READY, NO_SERVER, NOT_INSTALLED, PENDING, UNKNOWN, ERROR, UNSUPPORTED }
 
 data class TmuxObservation(
     val kind: TmuxProbeKind,
@@ -109,7 +126,7 @@ sealed interface TmuxPresence {
     data class Ended(val lastBinding: TmuxBinding? = null, val remoteEnded: Boolean = false) : TmuxPresence
 }
 
-enum class TmuxUnknownReason { UNAVAILABLE, UNSUPPORTED, STALE, AMBIGUOUS, TARGET_CHANGED }
+enum class TmuxUnknownReason { UNAVAILABLE, UNSUPPORTED, STALE, AMBIGUOUS, TARGET_CHANGED, RECONNECT_REQUIRED }
 
 /** Open and restore never create a replacement for a missing remote session. */
 sealed interface TmuxIntent {
@@ -138,5 +155,7 @@ data class TmuxOperationResult(
 interface TmuxConnection {
     val tmuxNonce: String?
     val tmuxOwnerRequired: Boolean
+    /** Null means preflight has not completed (or no owner carrier was requested). */
+    val tmuxObserverCapability: TmuxObserverCapability? get() = null
     fun execTmuxOperation(command: String): String?
 }

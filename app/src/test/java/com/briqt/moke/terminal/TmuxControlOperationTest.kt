@@ -39,19 +39,20 @@ class TmuxControlOperationTest {
         )) assertNull(readTmuxResult(ByteArrayInputStream(bytes)))
     }
 
-    @Test fun `capability requires exactly one complete unambiguous supported record`() {
-        assertTrue(isTmuxObserverSupported(supported))
-        assertTrue(isTmuxObserverSupported("login notice\r\n" + supported.replace("\n", "\r\n")))
+    @Test fun `capability distinguishes unsupported from malformed truncated conflicting and failed probes`() {
+        assertEquals(TmuxObserverCapability.Supported, parseTmuxObserverCapability(supported))
+        assertEquals(TmuxObserverCapability.Supported, parseTmuxObserverCapability("login notice\r\n" + supported.replace("\n", "\r\n")))
+        assertEquals(TmuxObserverCapability.Unsupported, parseTmuxObserverCapability(supported.replace("SUPPORTED", "UNSUPPORTED")))
         for (output in listOf(
-            "", supported.trimEnd(), " $supported", supported.replace("SUPPORTED", "UNSUPPORTED"),
+            "", supported.trimEnd(), " $supported", supported.replace("SUPPORTED", "FAILURE"),
             supported + supported, supported + "__MOKE_TMUX_V1__|CAPABILITY|UNSUPPORTED\n",
             supported + "__MOKE_TMUX_V1__|CAPABILITY|SUPP", supported.replace("SUPPORTED", "SUPPORTED "),
-        )) assertFalse(output, isTmuxObserverSupported(output))
+        )) assertEquals(output, TmuxObserverCapability.Failure, parseTmuxObserverCapability(output))
     }
 
     @Test fun `ordinary SSH startShell and Windows or host configured commands do not even probe`() {
         var probes = 0
-        val capability = { probes++; true }
+        val capability = { probes++; TmuxObserverCapability.Supported }
         assertEquals(TmuxStartup(null), sshTmuxStartup(null, null, null, scripts, capability = capability))
         assertEquals(TmuxStartup(null), sshTmuxStartup(null, null, nonce, scripts, capability = capability))
         assertEquals(TmuxStartup("powershell.exe"), sshTmuxStartup(null, "powershell.exe", nonce, scripts, capability = capability))
@@ -60,51 +61,59 @@ class TmuxControlOperationTest {
         assertEquals(0, probes)
     }
 
-    @Test fun `explicit default SSH observation keeps startShell when unsupported or missing nonce`() {
+    @Test fun `explicit default SSH observation keeps startShell and preserves capability outcome`() {
         var probes = 0
-        val unsupported = { probes++; false }
-        assertEquals(TmuxStartup(null), sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true, capability = unsupported))
+        val unsupported = { probes++; TmuxObserverCapability.Unsupported }
+        assertEquals(TmuxStartup(null, capability = TmuxObserverCapability.Unsupported),
+            sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true, capability = unsupported))
         assertEquals(1, probes)
         assertEquals(TmuxStartup(null), sshTmuxStartup(null, null, null, scripts, observeDefaultShell = true) { error("must not probe") })
-        assertEquals(TmuxStartup(null), sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true) { error("probe failed") })
+        assertEquals(TmuxStartup(null, capability = TmuxObserverCapability.Failure),
+            sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true) { error("probe failed") })
     }
 
     @Test fun `explicit default SSH observation uses Remote shell carrier not a fabricated login command`() {
         var probes = 0
-        val result = sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true) { probes++; true }
-        assertEquals(TmuxStartup(TmuxRemote.launch(scripts, nonce, null), nonce), result)
+        val result = sshTmuxStartup(null, null, nonce, scripts, observeDefaultShell = true) { probes++; TmuxObserverCapability.Supported }
+        assertEquals(TmuxStartup(TmuxRemote.launch(scripts, nonce, null), nonce, TmuxObserverCapability.Supported), result)
         assertEquals(1, probes)
     }
 
     @Test fun `unsupported or failed SSH capability leaves protocol exec command unchanged`() {
         val original = "tmux attach-session -t '\$1'"
-        assertEquals(TmuxStartup(original), sshTmuxStartup(original, original, nonce, scripts) { false })
-        assertEquals(TmuxStartup(original), sshTmuxStartup(original, original, nonce, scripts) { error("unsupported shell") })
+        assertEquals(TmuxStartup(original, capability = TmuxObserverCapability.Unsupported),
+            sshTmuxStartup(original, original, nonce, scripts) { TmuxObserverCapability.Unsupported })
+        assertEquals(TmuxStartup(original, capability = TmuxObserverCapability.Failure),
+            sshTmuxStartup(original, original, nonce, scripts) { error("unsupported shell") })
         assertEquals(TmuxStartup(original), sshTmuxStartup(original, original, nonce, null) { error("must not probe") })
     }
 
     @Test fun `supported explicit SSH startup is exactly the Remote launcher and publishes nonce`() {
         val original = "tmux attach-session -t '\$1'"
-        val expected = TmuxStartup(TmuxRemote.launch(scripts, nonce, original), nonce)
-        assertEquals(expected, sshTmuxStartup(original, original, nonce, scripts) { true })
+        val expected = TmuxStartup(TmuxRemote.launch(scripts, nonce, original), nonce, TmuxObserverCapability.Supported)
+        assertEquals(expected, sshTmuxStartup(original, original, nonce, scripts) { TmuxObserverCapability.Supported })
     }
 
     @Test fun `unsupported mosh preserves default null carrier and custom command exactly`() {
         for (original in listOf(null, "printf 'hello'; exec bash -l")) {
-            assertEquals(TmuxStartup(original), tmuxStartup(original, nonce, scripts) { false })
-            assertEquals(TmuxStartup(original), tmuxStartup(original, nonce, scripts) { error("capability failed") })
+            assertEquals(TmuxStartup(original, capability = TmuxObserverCapability.Unsupported),
+                tmuxStartup(original, nonce, scripts) { TmuxObserverCapability.Unsupported })
+            assertEquals(TmuxStartup(original, capability = TmuxObserverCapability.Failure),
+                tmuxStartup(original, nonce, scripts) { error("capability failed") })
             assertEquals(TmuxStartup(original), tmuxStartup(original, null, scripts) { error("no nonce") })
         }
     }
 
     @Test fun `supported mosh wraps default and command carriers without inventing a shell`() {
         for (original in listOf(null, "exec tmux attach-session -t '\$1'")) {
-            assertEquals(TmuxStartup(TmuxRemote.launch(scripts, nonce, original), nonce), tmuxStartup(original, nonce, scripts) { true })
+            assertEquals(TmuxStartup(TmuxRemote.launch(scripts, nonce, original), nonce, TmuxObserverCapability.Supported),
+                tmuxStartup(original, nonce, scripts) { TmuxObserverCapability.Supported })
         }
     }
 
     @Test fun `invalid nonce cannot break fallback terminal`() {
-        assertEquals(TmuxStartup(null), tmuxStartup(null, "invalid", scripts) { true })
+        assertEquals(TmuxStartup(null, capability = TmuxObserverCapability.Failure),
+            tmuxStartup(null, "invalid", scripts) { TmuxObserverCapability.Supported })
     }
 
     private class ChannelFixture(val failure: String = "", val output: ByteArray = "ACK\n".toByteArray()) {
@@ -164,7 +173,7 @@ class TmuxControlOperationTest {
     @Test fun `capability command error or missing exit status is not supported`() {
         for (failure in listOf("exec", "join", "timeout", "status", "missing-status")) {
             val fixture = ChannelFixture(failure, supported.toByteArray())
-            assertFalse(failure, supportsTmuxObserver(fixture.client))
+            assertEquals(failure, TmuxObserverCapability.Failure, supportsTmuxObserver(fixture.client))
             assertEquals(1, fixture.sessionsClosed)
         }
     }

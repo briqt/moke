@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,6 +86,9 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -143,13 +147,10 @@ fun TerminalScreen(
     onFontSize: (Float) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onToggleExtraKeys: () -> Unit,
+    tmuxSheetVisible: Boolean,
+    onOpenTmux: () -> Unit,
     onTmuxRefresh: () -> Unit,
     onTmuxNew: suspend (String) -> Boolean,
-    onTmuxRename: suspend (TmuxSelection, String) -> Boolean,
-    onTmuxDetach: suspend (TmuxSelection) -> Boolean,
-    onTmuxKill: suspend (TmuxSelection) -> Boolean,
-    onTmuxAttach: suspend (TmuxSelection) -> Boolean,
-    onTmuxTakeOver: suspend (TmuxSelection) -> Boolean,
     onOpenFiles: () -> Unit,
     onEndTmux: suspend (TmuxSelection) -> Boolean = { false },
     onRecover: (NetworkRecovery) -> Unit = { recovery ->
@@ -166,6 +167,7 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
+    val dataReady by ts.dataReady.collectAsState()
     val connectFailed by ts.connectFailed.collectAsState()
     val loginNetwork by ts.loginNetwork.collectAsState()
     val recovery by ts.recovery.collectAsState()
@@ -179,12 +181,7 @@ fun TerminalScreen(
         ""
     }
     val tmuxTargetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, tmuxRoute)
-    var showTmux by remember(ts.id) { mutableStateOf(false) }
-    fun revealTerminalAfterTmuxAction(success: Boolean): Boolean {
-        val current = ts.tmuxState.value
-        if (shouldRevealTerminalAfterTmuxAction(success, current)) showTmux = false
-        return success
-    }
+    val showTmux = tmuxSheetVisible
     var showForwards by remember(ts.id) { mutableStateOf(false) }
     val forwardEntries by (ts.forwards?.entries ?: NO_FORWARDS).collectAsState()
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
@@ -204,7 +201,7 @@ fun TerminalScreen(
     // observe only while visible; stopping the UI loop never closes a terminal or its network.
     val lifecycleOwner = LocalLifecycleOwner.current
     val refreshTmux by rememberUpdatedState(onTmuxRefresh)
-    val pollTmux = shouldPollTmux(observeCurrent, showTmux, closeTarget)
+    val pollTmux = dataReady && shouldPollTmux(observeCurrent, showTmux, closeTarget)
     LaunchedEffect(ts.id, lifecycleOwner, pollTmux) {
         if (!pollTmux) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -428,11 +425,8 @@ fun TerminalScreen(
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 tmuxCount = tmuxState.sessions.size,
-                onOpenTmux = {
-                    keyboard?.hide()
-                    onTmuxRefresh()
-                    showTmux = true
-                },
+                tmuxQuerying = tmuxState.refreshing,
+                onOpenTmux = { keyboard?.hide(); onOpenTmux() },
                 forwardCount = forwardEntries.size,
                 onOpenForwards = { keyboard?.hide(); showForwards = true },
                 onFontSize = onFontSize,
@@ -555,7 +549,7 @@ fun TerminalScreen(
                                 ?: if (connectFailed) NetworkRecovery(RecoveryKind.EDIT_HOST) else null
                             if (endNotice == TerminalEndNotice.TARGET_CHANGED) {
                                 TextButton(onClick = onEditHost) { Text(stringResource(R.string.action_edit_host)) }
-                                TextButton(onClick = { keyboard?.hide(); onTmuxRefresh(); showTmux = true }) {
+                                TextButton(onClick = { keyboard?.hide(); onOpenTmux() }) {
                                     Text(stringResource(R.string.tmux_select_session))
                                 }
                             } else if (endNotice == TerminalEndNotice.REMOTE_ENDED) {
@@ -698,21 +692,6 @@ fun TerminalScreen(
             )
         }
     }
-
-    if (showTmux) {
-        TmuxPanel(
-            state = tmuxState,
-            targetLabel = tmuxTargetLabel,
-            onDismiss = { showTmux = false },
-            onRefresh = onTmuxRefresh,
-            onAttach = onTmuxAttach,
-            onTakeOver = onTmuxTakeOver,
-            onRename = onTmuxRename,
-            onDetach = { revealTerminalAfterTmuxAction(onTmuxDetach(it)) },
-            onKill = { revealTerminalAfterTmuxAction(onTmuxKill(it)) },
-            onNew = onTmuxNew,
-        )
-    }
 }
 
 /**
@@ -811,6 +790,7 @@ private fun TerminalTopBar(
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
     tmuxCount: Int,
+    tmuxQuerying: Boolean,
     onOpenTmux: () -> Unit,
     forwardCount: Int,
     onOpenForwards: () -> Unit,
@@ -893,12 +873,18 @@ private fun TerminalTopBar(
                     }
                 }
             }
-            // Keep discovery/retry discoverable even when tmux is missing or not yet checked.
-            // The badge is a list count, never proof of this terminal's current identity.
-            IconButton(onClick = onOpenTmux) {
+            // Keep discovery/retry discoverable. Actual query activity replaces the list-count
+            // badge, which is never proof of this terminal's current attachment.
+            val tmuxQueryDescription = if (tmuxQuerying) stringResource(R.string.tmux_checking) else ""
+            IconButton(onClick = onOpenTmux, modifier = Modifier.semantics { stateDescription = tmuxQueryDescription }) {
                 BadgedBox(
                     badge = {
-                        if (tmuxCount > 0) {
+                        if (tmuxQuerying) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp).clearAndSetSemantics {},
+                                strokeWidth = 2.dp,
+                            )
+                        } else if (tmuxCount > 0) {
                             Badge(
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

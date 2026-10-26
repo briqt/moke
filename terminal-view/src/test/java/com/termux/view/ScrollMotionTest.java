@@ -35,12 +35,14 @@ public class ScrollMotionTest {
         assertFalse(motion.isRunning());
     }
 
-    @Test public void cadenceUsesThreeRowHeightsPerWheelWithoutExtraAcceleration() {
+    @Test public void touchWheelCadenceUsesTwoRowHeightsWithoutExtraAcceleration() {
         ScrollMotion.Quantizer quantizer = new ScrollMotion.Quantizer();
-        assertEquals(0, quantizer.add(-20, 60, 8));
-        assertEquals(0, quantizer.add(-20, 60, 8));
-        assertEquals(-1, quantizer.add(-20, 60, 8));
-        assertEquals(2, quantizer.add(120, 60, 8));
+        double unitPixels = 20 * ScrollMotion.TOUCH_WHEEL_LINE_HEIGHTS;
+        assertEquals(0, quantizer.add(-20, unitPixels, 8));
+        assertEquals(-1, quantizer.add(-20, unitPixels, 8));
+        assertEquals(3, quantizer.add(120, unitPixels, 8));
+        assertEquals(0, quantizer.add(20, unitPixels, 8));
+        assertEquals(1, quantizer.add(20, unitPixels, 8));
     }
 
     @Test public void perFrameAndGestureBoundsDropRatherThanQueueExcess() {

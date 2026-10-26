@@ -5,6 +5,8 @@ import com.briqt.moke.terminal.TmuxIntent
 import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.terminal.TmuxSession
 import com.briqt.moke.terminal.TmuxUiState
+import com.briqt.moke.terminal.TmuxUnknownReason
+import com.briqt.moke.terminal.TmuxPhase
 import com.briqt.moke.terminal.selectionFor
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -51,6 +53,13 @@ internal fun currentTmuxSelection(state: TmuxUiState): TmuxSelection? {
         it.scope == binding.scope && it.session == binding.session && it.expectedClient == binding.client
     }
 }
+
+/** A known unsupported backend or missing lifetime carrier cannot recover through refresh. */
+internal fun canRefreshTmuxObservation(state: TmuxUiState): Boolean =
+    state.phase != TmuxPhase.ERROR || when ((state.presence as? TmuxPresence.Unknown)?.reason) {
+        TmuxUnknownReason.UNSUPPORTED, TmuxUnknownReason.RECONNECT_REQUIRED -> false
+        else -> true
+    }
 
 /** This requests observation, not proof that a tmux client exists. */
 internal fun observesCurrentTmux(useMosh: Boolean, persistenceTmux: Boolean, intent: TmuxIntent): Boolean =

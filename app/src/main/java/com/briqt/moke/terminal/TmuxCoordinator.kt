@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 enum class TmuxProblem {
     CONNECTION_ENDED, PROBE_UNAVAILABLE, INVALID_RESPONSE, IDENTITY_UNKNOWN, TARGET_CHANGED,
     OBJECT_CHANGED, ACTION_FAILED, RESULT_UNKNOWN, NAME_EXISTS, NOT_INSTALLED, REMOTE_ENDED,
+    PLATFORM_UNSUPPORTED, OWNER_UNAVAILABLE,
 }
 
 /**
@@ -31,6 +32,7 @@ class TmuxCoordinator(
     private val message: (TmuxProblem) -> String,
     private val clockNanos: () -> Long = System::nanoTime,
     private val observationParser: (String, String) -> TmuxObservation? = TmuxRemote::parseObservation,
+    private val observerCapability: () -> TmuxObserverCapability? = { null },
 ) {
     interface Bridge {
         suspend fun observe(command: String): String?
@@ -65,7 +67,7 @@ class TmuxCoordinator(
             val oldBinding = listOfNotNull(previous.currentBinding, previous.lastBinding, endedBinding).any { it.scope != scope }
             if (oldSnapshot || oldBinding) previous.copy(phase = TmuxPhase.IDLE, sessions = emptyList(),
                 snapshot = null, presence = TmuxPresence.Pending, lastBinding = null, restoreMissing = false,
-                busy = false, message = null) else previous
+                busy = false, refreshing = false, message = null) else previous
         }
     }
 
@@ -193,7 +195,7 @@ class TmuxCoordinator(
         if (!closed) {
             endData()
             closed = true
-            state.update { it.copy(busy = false) }
+            state.update { it.copy(busy = false, refreshing = false) }
         }
     }
 
@@ -291,16 +293,31 @@ class TmuxCoordinator(
                 return@synchronized null
             }
             if (!dataAlive()) { endData(); return@synchronized null }
+            when (observerCapability()) {
+                TmuxObserverCapability.Unsupported -> {
+                    uncertain(TmuxProblem.PLATFORM_UNSUPPORTED, reason = TmuxUnknownReason.UNSUPPORTED)
+                    return@synchronized null
+                }
+                TmuxObserverCapability.Failure -> if (requireOwner) {
+                    // Mosh cannot recover a missing lifetime carrier by observing over SSH.
+                    uncertain(TmuxProblem.OWNER_UNAVAILABLE, reason = TmuxUnknownReason.RECONNECT_REQUIRED)
+                    return@synchronized null
+                }
+                // SSH's startup preflight may have failed transiently. A fresh ownerless
+                // observation can still prove a management list, never a current binding.
+                else -> Unit
+            }
             val nonce = ownerNonce()
             if (requireOwner && nonce == null) {
-                uncertain(TmuxProblem.IDENTITY_UNKNOWN, pending = true)
+                // Data is already ready: a missing carrier is not an owner record still publishing.
+                uncertain(TmuxProblem.OWNER_UNAVAILABLE, reason = TmuxUnknownReason.RECONNECT_REQUIRED)
                 return@synchronized null
             }
             if (nonce != null && !TmuxCoordinatorRules.validNonce(nonce)) {
                 uncertain(TmuxProblem.IDENTITY_UNKNOWN)
                 return@synchronized null
             }
-            if (state.value.snapshot == null) state.update { it.copy(phase = TmuxPhase.CHECKING) }
+            state.update { it.copy(phase = if (it.snapshot == null) TmuxPhase.CHECKING else it.phase, refreshing = true) }
             // A list alone does not establish a current server. Only our witnessed binding or an
             // explicit frozen Open can distinguish a lost control socket from a dead old server.
             val previousServer = state.value.lastBinding?.takeIf { it.scope == scope }?.server
@@ -308,6 +325,16 @@ class TmuxCoordinator(
                 ?: (intent as? TmuxIntent.Open)?.target?.server?.takeIf(TmuxCoordinatorRules::strongServer)
             ReadTicket(++generation, readEpoch, nonce, pinnedSocket, previousServer)
         } ?: return null
+        try {
+            return observeLocked(ticket)
+        } finally {
+            // IO is serialized; neither a stale publication nor cancellation can leave the indicator
+            // running after this actual read ends. Lifecycle disposal may clear it earlier.
+            synchronized(lifecycle) { state.update { it.copy(refreshing = false) } }
+        }
+    }
+
+    private suspend fun observeLocked(ticket: ReadTicket): Fresh? {
         val requestId = "r_${ticket.generation}_${clockNanos().toULong().toString(16)}"
         var problem = TmuxProblem.PROBE_UNAVAILABLE
         val observation = try {
@@ -346,6 +373,8 @@ class TmuxCoordinator(
             if (!TmuxCoordinatorRules.verified(observation, ticket.nonce, requireOwner, ticket.socket)) {
                 when (observation.kind) {
                     TmuxProbeKind.NOT_INSTALLED -> uncertain(TmuxProblem.NOT_INSTALLED, phase = TmuxPhase.NOT_INSTALLED,
+                        reason = TmuxUnknownReason.UNSUPPORTED)
+                    TmuxProbeKind.UNSUPPORTED -> uncertain(TmuxProblem.PLATFORM_UNSUPPORTED,
                         reason = TmuxUnknownReason.UNSUPPORTED)
                     TmuxProbeKind.PENDING -> uncertain(TmuxProblem.IDENTITY_UNKNOWN, pending = true)
                     TmuxProbeKind.ERROR -> uncertain(TmuxProblem.PROBE_UNAVAILABLE)
@@ -410,7 +439,8 @@ class TmuxCoordinator(
         state.update {
             val ended = it.presence as? TmuxPresence.Ended
             val last = it.currentBinding ?: it.lastBinding?.takeIf { binding -> binding.scope == scope }
-            it.copy(snapshot = it.snapshot?.copy(verified = false),
+            it.copy(snapshot = it.snapshot?.copy(verified = false), refreshing = false,
+                phase = if (it.phase == TmuxPhase.IDLE || it.phase == TmuxPhase.CHECKING) TmuxPhase.ERROR else it.phase,
                 presence = TmuxPresence.Ended(last, ended?.remoteEnded == true), lastBinding = last,
                 message = if (ended?.remoteEnded == true) it.message else message(TmuxProblem.CONNECTION_ENDED))
         }
@@ -492,7 +522,7 @@ class TmuxCoordinator(
 internal object TmuxCoordinatorRules {
     private val nonce = Regex("[a-f0-9]{32}")
     private val boot = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
-    private val tty = Regex("/dev/pts/[0-9]+")
+    private val tty = tmuxTtyPattern
     private val id = Regex("\\$[0-9]+")
     private val paneId = Regex("%[0-9]{1,10}")
     fun validNonce(value: String) = nonce.matches(value)
@@ -511,7 +541,7 @@ internal object TmuxCoordinatorRules {
         val owner = o.owner
         if (requireOwner && owner == null) return false
         if (owner != null && (owner.nonce != expectedNonce || !validNonce(owner.nonce) || owner.pid <= 1 ||
-            owner.uid < 0 || owner.startedTicks <= 0 || !tty.matches(owner.tty))) return false
+            owner.uid < 0 || !tmuxBirthMatchesTty(owner.startedTicks, owner.tty))) return false
         return when (o.kind) {
             TmuxProbeKind.NO_SERVER -> o.server == null && o.sessions.isEmpty() && o.clients.isEmpty() &&
                 o.defaultSocketPath?.let { validSocket(it) && (socket == null || socket == it) } == true
@@ -522,7 +552,8 @@ internal object TmuxCoordinatorRules {
                     o.sessions.isNotEmpty() && o.sessions.all { validRef(it.ref(server)) && it.windows > 0 && it.clients >= 0 } &&
                     o.sessions.map { it.id }.distinct().size == o.sessions.size &&
                     o.sessions.map { it.name }.distinct().size == o.sessions.size &&
-                    o.clients.all { c -> c.identity.pid > 1 && c.identity.created > 0 && tty.matches(c.identity.tty) &&
+                    (owner == null || (owner.startedTicks < 0) == (server.startedTicks < 0)) &&
+                    o.clients.all { c -> c.identity.pid > 1 && c.identity.created > 0 && tmuxBirthMatchesTty(server.startedTicks, c.identity.tty) &&
                         o.sessions.count { it.id == c.sessionId && (c.sessionCreated == null || it.created == c.sessionCreated) } == 1 &&
                         (c.pane == null || (c.sessionCreated != null && validPane(c.pane))) } &&
                     o.clients.map { it.identity.pid }.distinct().size == o.clients.size &&

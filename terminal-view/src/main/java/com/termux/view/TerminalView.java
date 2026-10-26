@@ -720,7 +720,7 @@ public final class TerminalView extends View {
             x = Math.max(1, Math.min(emulator.mColumns, (int) Math.floor(px / mRenderer.mFontWidth) + 1));
             y = Math.max(1, Math.min(emulator.mRows, currentScreenRow(py) + 1));
             // One wheel notch is not one program row. No phone-side acceleration is added.
-            unitPixels = mRenderer.mFontLineSpacing * (action == MokeScroll.ACTION_WHEEL ? 3.0 : 1.0);
+            unitPixels = mRenderer.mFontLineSpacing * (action == MokeScroll.ACTION_WHEEL ? ScrollMotion.TOUCH_WHEEL_LINE_HEIGHTS : 1.0);
         }
     }
 

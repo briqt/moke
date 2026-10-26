@@ -13,14 +13,14 @@ data class TmuxScripts(val observer: String, val probe: String) {
     }
 }
 
-/** Linux witness protocol. A transport failure, truncated frame, or absent result is never success. */
+/** Platform-isolated witness protocol. Transport failure, truncation or an absent result is never success. */
 object TmuxRemote {
     private const val P = "__MOKE_TMUX_V1__|"
     private val noncePattern = Regex("[a-f0-9]{32}")
     private val requestPattern = Regex("[A-Za-z0-9_-]{1,96}")
     private val bootPattern = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
     private val idPattern = Regex("\\$[0-9]+")
-    private val ttyPattern = Regex("/dev/pts/[0-9]+")
+    private val ttyPattern = tmuxTtyPattern
     private val panePattern = Regex("%[0-9]{1,10}")
 
     // Escape only framing metacharacters. Returned values are never evaluated as shell or formats.
@@ -52,7 +52,7 @@ object TmuxRemote {
 
     // All discovery ignores inherited TMUX. Every operation pins an explicit socket; only create
     // may start a server. Stat %d/%i and tty %t/%T are available in GNU coreutils 8.32.
-    private val core = """
+    private val linuxCore = """
         moke_saved_lc_set=${'$'}{LC_ALL+x}; moke_saved_lc=${'$'}{LC_ALL-}
         export LC_ALL=C
         moke_restore_locale() {
@@ -191,17 +191,36 @@ object TmuxRemote {
         }
     """.trimIndent()
 
+    private val core: String get() = linuxCore + "\n" + """
+        moke_platform=${'$'}(uname -s 2>/dev/null) || moke_platform=
+        case "${'$'}moke_platform" in
+            Linux) :;;
+            Darwin)
+    """.trimIndent() + "\n" + TmuxDarwin.core + "\n;;\n*) moke_boot() { return 1; };;\nesac\n"
+
     /** Read-only preflight. Unsupported hosts must use their original unwrapped terminal path. */
     fun capabilityCommand(): String = shell(core + "\n" + """
+        case "${'$'}moke_platform" in
+            Darwin) moke_cap=${'$'}(moke_darwin_capability)
+                case "${'$'}moke_cap" in SUPPORTED|UNSUPPORTED|FAILURE) :;; *) moke_cap=FAILURE;; esac
+                printf '${P}CAPABILITY|%s\n' "${'$'}moke_cap"; exit 0;;
+            Linux) :;;
+            *) printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0;;
+        esac
         for moke_tool in id stat readlink grep tty mkdir chmod mv rm rmdir cat; do
             command -v "${'$'}moke_tool" >/dev/null 2>&1 || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
         done
-        moke_boot && moke_ticks "${'$'}${'$'}" >/dev/null && moke_default || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
+        moke_fields=${'$'}(stat -c '%d %i %u %a' -- /dev/null 2>/dev/null) || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
+        set -- ${'$'}moke_fields
+        [ "${'$'}#" -eq 4 ] && moke_uint "${'$'}1" && moke_uint "${'$'}2" && moke_uint "${'$'}3" && moke_uint "${'$'}4" &&
+            [ "${'$'}(readlink -f -- / 2>/dev/null)" = / ] || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
+        [ -e /proc/sys/kernel/random/boot_id ] && [ -d /proc/self ] || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
+        moke_boot && moke_ticks "${'$'}${'$'}" >/dev/null && moke_default || { printf '${P}CAPABILITY|FAILURE\n'; exit 0; }
         moke_base=${'$'}{TMPDIR:-/tmp}
         moke_meta=${'$'}(stat -c '%u %a' -- "${'$'}moke_base" 2>/dev/null)
         [ -d "${'$'}moke_base" ] && [ ! -L "${'$'}moke_base" ] &&
-            [ "${'$'}(readlink -f -- "${'$'}moke_base")" = "${'$'}moke_base" ] || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
-        case "${'$'}moke_meta" in '0 1777'|"${'$'}moke_uid 700") :;; *) printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0;; esac
+            [ "${'$'}(readlink -f -- "${'$'}moke_base")" = "${'$'}moke_base" ] || { printf '${P}CAPABILITY|FAILURE\n'; exit 0; }
+        case "${'$'}moke_meta" in '0 1777'|"${'$'}moke_uid 700") :;; *) printf '${P}CAPABILITY|FAILURE\n'; exit 0;; esac
         printf 'moke\000' | grep -Fzqx -- moke || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
         moke_fields=${'$'}(stat -c '%d %i %u %a' -- "/proc/${'$'}${'$'}" 2>/dev/null) || { printf '${P}CAPABILITY|UNSUPPORTED\n'; exit 0; }
         set -- ${'$'}moke_fields
@@ -215,7 +234,9 @@ object TmuxRemote {
 
     fun launch(scripts: TmuxScripts, nonce: String, originalCommand: String?): String {
         require(noncePattern.matches(nonce)) { "Invalid owner nonce" }
-        return shell(scripts.observer, nonce, if (originalCommand == null) "shell" else "command", originalCommand.orEmpty())
+        val observer = core + "\nif [ \"\$moke_platform\" = Darwin ]; then\n" + TmuxDarwin.observer +
+            "\nfi\nmoke_restore_locale\n" + scripts.observer
+        return shell(observer, nonce, if (originalCommand == null) "shell" else "command", originalCommand.orEmpty())
     }
 
     private fun owner(scripts: TmuxScripts, nonce: String?, required: Boolean, observation: Boolean): String {
@@ -226,7 +247,11 @@ object TmuxRemote {
         }
         if (nonce == null) return if (required) "moke_witness=PENDING; $failure\n" else ""
         require(noncePattern.matches(nonce)) { "Invalid owner nonce" }
-        return "moke_witness=\$(${shell(scripts.probe, nonce)}); " +
+        // Each backend may return normally after emitting WITNESS. Never fall through into
+        // another platform's parser, and do not rely on the asset calling exit on success.
+        val probe = core + "\ncase \"\$moke_platform\" in\nDarwin)\n" + TmuxDarwin.probe +
+            "\n;;\nLinux)\n" + scripts.probe + "\n;;\n*) printf 'UNKNOWN\\n';;\nesac"
+        return "moke_witness=\$(${shell(probe, nonce)}); " +
             "case \"\$moke_witness\" in WITNESS\\|*) :;; *) " +
             (if (required) "$failure" else "moke_witness=''") + ";; esac\n" +
             if (observation) "if [ -n \"\$moke_witness\" ]; then printf '${P}OWNER|%s|%s\\n' ${q(nonce)} \"\${moke_witness#WITNESS|}\"; fi\n" else ""
@@ -259,6 +284,8 @@ object TmuxRemote {
         )
         # 0: the old birth is known gone; 1: it is alive; 2: cannot prove either.
         moke_prior_gone() {
+            # Never interpret a Darwin birth tag as a changed Linux tick count.
+            [ ${q(server.startedTicks.toString())} -gt 0 ] || return 2
             moke_boot && [ "${'$'}moke_boot_id" = ${q(server.bootId)} ] || return 2
             [ "${'$'}(stat -f -c %T -- /proc 2>/dev/null)" = proc ] || return 2
             moke_prior_uid=${'$'}(stat -c %u -- /proc/${server.pid} 2>&1)
@@ -280,7 +307,8 @@ object TmuxRemote {
             [ "${'$'}moke_prior_uid" = "${'$'}(id -u)" ] || return 2
             case "${'$'}1" in Z|X|x) return 0;; R|S|D|T|t|W|I|P) return 1;; *) return 2;; esac
         }
-    """.trimIndent() + "\n"
+    """.trimIndent() + "\nif [ \"\$moke_platform\" = Darwin ]; then\n" +
+        TmuxDarwin.previousServer(server) + "\nfi\n"
 
     /** Only a binding/explicit Open may supply previousServer; an ordinary list is not presence.
      * An unavailable/replaced control socket cannot prove that a still-live old server ended.
@@ -306,6 +334,12 @@ object TmuxRemote {
         val body = core + "\n" + """
             moke_finish() { printf '${P}KIND|%s\n${P}END|$requestId|0\n' "${'$'}1"; exit 0; }
             printf '${P}BEGIN|$requestId\n'
+            case "${'$'}moke_platform" in
+                Darwin) moke_cap=${'$'}(moke_darwin_capability)
+                    case "${'$'}moke_cap" in SUPPORTED) :;; UNSUPPORTED) moke_finish UNSUPPORTED;; *) moke_finish ERROR;; esac;;
+                Linux) :;;
+                *) moke_finish UNSUPPORTED;;
+            esac
             moke_boot || moke_finish UNKNOWN
             printf '${P}PEER|%s\n' "${'$'}moke_boot_id"
         """.trimIndent() + "\n" + owner(scripts, ownerNonce, requireOwner, true) + prior + """
@@ -552,7 +586,7 @@ object TmuxRemote {
 
     private val attachFailure = """
         moke_attach_failure() {
-            printf '\nmoke: tmux attach failed; the following terminal is an ordinary shell.\n'
+            printf '\nmoke: tmux attach failed; the following terminal is an ordinary shell.\n' || exit 1
             moke_restore_locale
             moke_login_shell=${'$'}{SHELL:-/bin/sh}
             moke_login_name=${'$'}{moke_login_shell##*/}
@@ -672,13 +706,16 @@ object TmuxRemote {
 
     private fun uint(value: String): Long? = value.takeIf { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }?.toLongOrNull()
     private fun positive(value: String): Long? = uint(value)?.takeIf { it > 0 }
+    private fun birth(value: String): Long? = positive(value) ?: value.takeIf {
+        it.startsWith('-') && it.drop(1).firstOrNull() in '1'..'9' && it.drop(1).all { c -> c in '0'..'9' }
+    }?.toLongOrNull()?.takeIf { it in -9_007_199_254_740_991L..-1L }
     private fun server(row: String): TmuxServerId? {
         val p = row.split('|', limit = 7)
         if (p.size != 7 || !bootPattern.matches(p[5]) || !text(p[6]) || !p[6].startsWith('/')) return null
         return TmuxServerId(
             pid = positive(p[0])?.takeIf { it > 1 } ?: return null,
             started = positive(p[1]) ?: return null,
-            socketPath = p[6], bootId = p[5], startedTicks = positive(p[2]) ?: return null,
+            socketPath = p[6], bootId = p[5], startedTicks = birth(p[2]) ?: return null,
             socketDevice = uint(p[3]) ?: return null, socketInode = positive(p[4]) ?: return null,
         )
     }
@@ -713,7 +750,9 @@ object TmuxRemote {
                     if (owner != null) return null
                     val p = value.split('|', limit = 5)
                     if (p.size != 5 || !noncePattern.matches(p[0]) || !ttyPattern.matches(p[4])) return null
-                    owner = TmuxOwnerProof(p[0], positive(p[1])?.takeIf { it > 1 } ?: return null, uint(p[2]) ?: return null, positive(p[3]) ?: return null, p[4])
+                    val started = birth(p[3]) ?: return null
+                    if (!tmuxBirthMatchesTty(started, p[4])) return null
+                    owner = TmuxOwnerProof(p[0], positive(p[1])?.takeIf { it > 1 } ?: return null, uint(p[2]) ?: return null, started, p[4])
                 }
                 "DEFAULT_SOCKET" -> { if (defaultSocket != null || !text(value) || !value.startsWith('/')) return null; defaultSocket = value }
                 "SERVER" -> { if (server != null) return null; server = server(value) ?: return null }
@@ -749,6 +788,8 @@ object TmuxRemote {
         val actualKind = kind ?: return null
         if (actualKind == TmuxProbeKind.READY) {
             if (server == null || peer != server.bootId || sessions.isEmpty()) return null
+            if (clients.any { !tmuxBirthMatchesTty(server.startedTicks, it.identity.tty) } ||
+                (owner != null && (owner.startedTicks < 0) != (server.startedTicks < 0))) return null
         } else if (server != null || sessions.isNotEmpty() || clients.isNotEmpty() || term != null) return null
         if (actualKind == TmuxProbeKind.NO_SERVER && (defaultSocket == null || peer == null)) return null
         if (actualKind == TmuxProbeKind.READY && defaultSocket != null && defaultSocket != server?.socketPath) return null

@@ -36,6 +36,8 @@ data class TmuxUiState(
     val restoreMissing: Boolean = false,
     val targetChanged: Boolean = false,
     val canStartNewConnection: Boolean = false,
+    /** True only while an observation is in flight; separate from mutation/action busy. */
+    val refreshing: Boolean = false,
 ) {
     val currentBinding: TmuxBinding? get() = (presence as? TmuxPresence.Attached)?.binding
     /** No cached/unverified pane is current, even if a last binding is retained for reconnect. */

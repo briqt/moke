@@ -41,11 +41,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -77,6 +79,7 @@ fun TmuxPanel(
     onDetach: suspend (TmuxSelection) -> Boolean,
     onKill: suspend (TmuxSelection) -> Boolean,
     onNew: suspend (String) -> Boolean,
+    onPresented: (() -> Unit)? = null,
 ) {
     TmuxSessionSheet(
         state = state,
@@ -89,6 +92,7 @@ fun TmuxPanel(
         onReturnCurrent = onDismiss,
         onNew = onNew,
         management = TmuxManagement(onTakeOver, onRename, onDetach, onKill),
+        onPresented = onPresented,
     )
 }
 
@@ -117,6 +121,7 @@ internal fun TmuxSessionSheet(
     onReturnCurrent: (() -> Unit)? = null,
     onPlainShell: (() -> Unit)? = null,
     management: TmuxManagement? = null,
+    onPresented: (() -> Unit)? = null,
 ) {
     var creating by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
@@ -129,6 +134,10 @@ internal fun TmuxSessionSheet(
         skipPartiallyExpanded = true,
         confirmValueChange = { value -> value != SheetValue.Hidden || (!opening && !busy) },
     )
+    LaunchedEffect(sheetState, onPresented) {
+        val report = onPresented ?: return@LaunchedEffect
+        reportTmuxSheetPresented(snapshotFlow { sheetState.isVisible }, report)
+    }
     ModalBottomSheet(
         onDismissRequest = { if (!opening && !state.busy) onDismiss() },
         sheetState = sheetState,
@@ -143,7 +152,7 @@ internal fun TmuxSessionSheet(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                if (onRefresh != null) {
+                if (onRefresh != null && canRefreshTmuxObservation(state)) {
                     IconButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                         Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.tmux_refresh))
                     }
@@ -182,7 +191,7 @@ internal fun TmuxSessionSheet(
                     }
                     TmuxPhase.ERROR -> item("error") {
                         if (state.message == null) TmuxStatusText(stringResource(R.string.tmux_control_unavailable))
-                        if (onRefresh != null) {
+                        if (onRefresh != null && canRefreshTmuxObservation(state)) {
                             TextButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.heightIn(min = 48.dp)) {
                                 Text(stringResource(R.string.tmux_retry))
                             }
@@ -409,14 +418,14 @@ internal fun TmuxNameDialog(
     originalName: String? = null,
     fromEndNotice: Boolean = false,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    val draft = remember { TmuxNameDraft(initial, selectAll = originalName == null) }
     var submitted by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val target = remember { EditorTarget() }
     androidx.compose.runtime.LaunchedEffect(Unit) { target.reveal() }
-    val validName = FormValidation.tmuxName(text)
+    val validName = FormValidation.tmuxName(draft.value.text)
     val allowed = when {
         originalName != null -> state.canManage
         fromEndNotice -> canCreateTmuxFromEndNotice(state)
@@ -430,7 +439,7 @@ internal fun TmuxNameDialog(
         failed = false
         scope.launch {
             try {
-                completeTmuxUiAction({ onSubmit(text.trim()) }, onSuccess, { failed = true })
+                completeTmuxUiAction({ onSubmit(draft.value.text.trim()) }, onSuccess, { failed = true })
             } finally { submitting = false }
         }
     }
@@ -441,7 +450,7 @@ internal fun TmuxNameDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (originalName != null) Text(originalName, style = MaterialTheme.typography.bodyMedium)
                 FormTextField(
-                    value = text, onValueChange = { text = it }, label = stringResource(R.string.tmux_name_hint),
+                    value = draft.value, onValueChange = draft::update, label = stringResource(R.string.tmux_name_hint),
                     error = if (!validName) stringResource(R.string.tmux_name_invalid) else null, submitted = submitted,
                     enabled = !submitting && !state.busy,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

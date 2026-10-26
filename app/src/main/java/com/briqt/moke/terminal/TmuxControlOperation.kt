@@ -29,20 +29,32 @@ internal fun execTmuxChannel(client: SSHClient, command: String): String? = clie
     }
 }
 
-internal fun supportsTmuxObserver(client: SSHClient): Boolean = runCatching {
-    val output = execTmuxChannel(client, TmuxRemote.capabilityCommand()) ?: return@runCatching false
-    isTmuxObserverSupported(output)
-}.getOrDefault(false)
+internal fun supportsTmuxObserver(client: SSHClient): TmuxObserverCapability = runCatching {
+    val output = execTmuxChannel(client, TmuxRemote.capabilityCommand())
+        ?: return@runCatching TmuxObserverCapability.Failure
+    parseTmuxObserverCapability(output)
+}.getOrDefault(TmuxObserverCapability.Failure)
 
-internal fun isTmuxObserverSupported(output: String): Boolean {
-    val lines = output.replace("\r\n", "\n").split('\n')
-    // The final element is not a complete line. Do not accept a truncated record or a conflict.
+internal fun parseTmuxObserverCapability(output: String): TmuxObserverCapability {
+    if (output.length > 262_144) return TmuxObserverCapability.Failure
+    val normalized = output.replace("\r\n", "\n")
+    if (normalized.any { it.isISOControl() && it != '\n' }) return TmuxObserverCapability.Failure
+    val lines = normalized.split('\n')
+    // The final element is not a complete line. Truncation/conflict is Failure, not Unsupported.
     val records = lines.dropLast(1).filter { it.startsWith("__MOKE_TMUX_V1__|") }
-    return records == listOf("__MOKE_TMUX_V1__|CAPABILITY|SUPPORTED") &&
-        !lines.last().startsWith("__MOKE_TMUX_V1__|")
+    if (records.size != 1 || lines.last().startsWith("__MOKE_TMUX_V1__|")) return TmuxObserverCapability.Failure
+    return when (records.single()) {
+        "__MOKE_TMUX_V1__|CAPABILITY|SUPPORTED" -> TmuxObserverCapability.Supported
+        "__MOKE_TMUX_V1__|CAPABILITY|UNSUPPORTED" -> TmuxObserverCapability.Unsupported
+        else -> TmuxObserverCapability.Failure
+    }
 }
 
-internal data class TmuxStartup(val command: String?, val nonce: String? = null)
+internal data class TmuxStartup(
+    val command: String?,
+    val nonce: String? = null,
+    val capability: TmuxObserverCapability? = null,
+)
 
 /** Ordinary SSH, including Windows and host-configured commands, never gets a POSIX wrapper. */
 internal fun sshTmuxStartup(
@@ -51,7 +63,7 @@ internal fun sshTmuxStartup(
     observerNonce: String?,
     scripts: TmuxScripts?,
     observeDefaultShell: Boolean = false,
-    capability: () -> Boolean,
+    capability: () -> TmuxObserverCapability,
 ): TmuxStartup = tmuxStartup(
     effectiveStartup, observerNonce.takeIf { observeDefaultShell || !startupCommand.isNullOrBlank() }, scripts, capability,
 )
@@ -61,13 +73,15 @@ internal fun tmuxStartup(
     effectiveStartup: String?,
     observerNonce: String?,
     scripts: TmuxScripts?,
-    capability: () -> Boolean,
+    capability: () -> TmuxObserverCapability,
 ): TmuxStartup {
     if (observerNonce == null || scripts == null) return TmuxStartup(effectiveStartup)
     return runCatching {
-        if (capability()) TmuxStartup(TmuxRemote.launch(scripts, observerNonce, effectiveStartup), observerNonce)
-        else TmuxStartup(effectiveStartup)
-    }.getOrElse { TmuxStartup(effectiveStartup) }
+        val result = capability()
+        if (result == TmuxObserverCapability.Supported)
+            TmuxStartup(TmuxRemote.launch(scripts, observerNonce, effectiveStartup), observerNonce, result)
+        else TmuxStartup(effectiveStartup, capability = result)
+    }.getOrElse { TmuxStartup(effectiveStartup, capability = TmuxObserverCapability.Failure) }
 }
 
 internal fun readTmuxResult(input: InputStream, limit: Int = 262_144): String? {

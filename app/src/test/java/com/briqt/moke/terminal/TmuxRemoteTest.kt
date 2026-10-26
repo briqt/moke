@@ -65,7 +65,8 @@ class TmuxRemoteTest {
     @Test fun `real assets are carried intact with argv and original payload`() {
         val command = "printf '%s\\n' \"\$TERM\"; exec weird 'x|y' \"a'b\"\n# payload"
         val argv = words(TmuxRemote.launch(scripts, nonce, command))
-        assertEquals(scripts.observer, argv[2])
+        assertTrue(argv[2].endsWith(scripts.observer))
+        assertTrue(argv[2].contains(TmuxDarwin.observer))
         assertEquals(listOf(nonce, "command", command), argv.drop(4))
         assertEquals(listOf(nonce, "shell", ""), words(TmuxRemote.launch(scripts, nonce, null)).drop(4))
         assertEquals(listOf(nonce, "command", ""), words(TmuxRemote.launch(scripts, nonce, "")).drop(4))
@@ -218,13 +219,14 @@ class TmuxRemoteTest {
 
     @Test fun `observation carries actual probe and checks owner before touching tmux`() {
         val command = body(TmuxRemote.observe(scripts, "r1", nonce, true))
-        assertTrue(command.contains(qForTest(scripts.probe)))
+        assertTrue(command.contains(qForTest(scripts.probe).drop(1).dropLast(1)))
         val witness = command.indexOf("moke_witness=\$(sh -c")
         val listing = command.indexOf("moke_sessions=\$(tmux")
         assertTrue(witness in 1 until listing)
         val path = command.substring(command.indexOf("moke_witness=\$(sh -c"))
-        assertTrue(path.indexOf("moke_finish PENDING") < path.indexOf("moke_default"))
-        assertTrue(path.indexOf("moke_finish UNKNOWN") < path.indexOf("moke_default"))
+        val ownerCheck = path.substringAfter("case \"\$moke_witness\"")
+        assertTrue(ownerCheck.indexOf("moke_finish PENDING") < ownerCheck.indexOf("moke_default"))
+        assertTrue(ownerCheck.indexOf("moke_finish UNKNOWN") < ownerCheck.indexOf("moke_default"))
         assertTrue(path.contains("unset TMUX TMUX_PANE"))
         assertTrue(path.contains("DEFAULT_SOCKET|%s"))
         assertTrue(path.contains("moke_server && [ \"\$moke_before\" = \"\$moke_server_row\" ] || moke_finish ERROR"))
@@ -446,7 +448,7 @@ class TmuxRemoteTest {
     }
 
     @Test fun `scroll setup neither installs copy policy nor queries unsupported key formats`() {
-        val command = body(TmuxRemote.scrollSetup(target))
+        val command = body(TmuxRemote.scrollSetup(target)).substringAfter("unset TMUX TMUX_PANE")
         for (forbidden in listOf("bind -n", "bind -T copy", "bind-key -T copy", "unbind", "kill-server",
             "source-file", "key_command", "list-keys -F", "eval ", "sed ", "tr ")) {
             assertFalse(forbidden, command.contains(forbidden))
@@ -580,7 +582,7 @@ class TmuxRemoteTest {
     @Test fun `ordinary startup exit seven stays an ordinary command not a tmux fallback`() {
         val launched = words(TmuxRemote.launch(scripts, nonce, "exit 7"))
         assertEquals(listOf(nonce, "command", "exit 7"), launched.drop(4))
-        assertEquals(scripts.observer, launched[2])
+        assertTrue(launched[2].endsWith(scripts.observer))
         assertFalse(scripts.observer.contains("moke_attach_failure"))
         assertTrue(scripts.observer.contains("command) sh -c \"\$payload\""))
         assertTrue(scripts.observer.contains("exit \"\$result\""))
@@ -626,7 +628,7 @@ class TmuxRemoteTest {
     @Test fun `peer guard repeats actual owner and boot proof inside same operation command`() {
         val create = TmuxRemote.create("work", socket)
         val command = body(TmuxRemote.guardPeer(scripts, nonce, true, boot, create))
-        assertTrue(command.contains(qForTest(scripts.probe)))
+        assertTrue(command.contains(qForTest(scripts.probe).drop(1).dropLast(1)))
         assertTrue(command.contains("[ \"\$moke_boot_id\" = '$boot' ]"))
         assertTrue(command.indexOf("moke_witness=\$(sh -c") < command.indexOf(create))
         assertTrue(command.contains("moke_result STALE"))

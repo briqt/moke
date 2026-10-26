@@ -13,18 +13,22 @@ fun TmuxPickerDialog(
     defaultName: String,
     onPick: suspend (TmuxSelection) -> Boolean,
     onNew: suspend (String) -> Boolean,
+    onRefresh: () -> Unit,
     onPlainShell: () -> Unit,
+    onPresented: (() -> Unit)? = null,
 ) {
     TmuxSessionSheet(
         state = state,
         targetLabel = targetLabel,
         defaultName = defaultName,
         onDismiss = onPlainShell,
+        onRefresh = onRefresh,
         onOpen = onPick,
         // Success is owned by the caller's picker state; never open a plain shell on success.
         onOpened = {},
         onNew = onNew,
         onReturnCurrent = onPlainShell,
         onPlainShell = onPlainShell.takeIf { TmuxLaunchPolicy.offersPlainShell(state) },
+        onPresented = onPresented,
     )
 }

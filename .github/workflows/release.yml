@@ -125,10 +125,3 @@ jobs:
           files: dist/moke-*.apk
           body: |
             ${{ steps.changelog.outputs.body }}
-
-            ### 安装
-            需要 Android 11 及以上、arm64-v8a 设备。下载 `moke-${{ github.ref_name }}.apk`，按系统提示允许安装。发布包使用固定签名，可覆盖升级。
-
-            mosh 需要远端安装 `mosh-server` 且 UDP 可达；经代理使用时，需 SOCKS5 服务端支持 UDP 转发。
-
-            完整变更记录见 [CHANGELOG](https://github.com/briqt/moke/blob/${{ github.ref_name }}/CHANGELOG.md)。

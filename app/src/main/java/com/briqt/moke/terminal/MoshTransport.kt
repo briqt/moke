@@ -59,6 +59,8 @@ class MoshTransport(
     @Volatile override var tmuxNonce: String? = null
         private set
     override val tmuxOwnerRequired: Boolean = true
+    @Volatile override var tmuxObserverCapability: TmuxObserverCapability? = null
+        private set
 
     override fun execTmuxOperation(command: String): String? {
         if (closed) return null
@@ -283,6 +285,7 @@ class MoshTransport(
             connect = { SshConnector(appContext).connect(host, jumpHost, network, dialHost = bootstrapDialHost) },
             prepare = { connected ->
                 val startup = tmuxStartup(effectiveStartup, observerNonce, tmuxScripts) { supportsTmuxObserver(connected.client) }
+                tmuxObserverCapability = startup.capability
                 BootstrapCommand(MoshOrphanGuard.serverCommand(startup.command, instanceNonce), startup.nonce)
             },
             startSession = { it.client.startSession() },

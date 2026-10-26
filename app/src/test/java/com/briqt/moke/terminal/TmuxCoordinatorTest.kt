@@ -114,6 +114,92 @@ class TmuxCoordinatorTest {
         fun ended(): TmuxPresence.Ended = state.value.presence as TmuxPresence.Ended
     }
 
+    @Test fun queryActivityTracksFirstAndSubsequentReadsNotSessionCount() = runBlocking {
+        val f = Fixture()
+        for (firstRead in listOf(true, false)) {
+            val release = CompletableDeferred<Unit>()
+            f.bridge.beforeObserve = { release.await() }
+            val read = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.refresh() }
+            assertTrue(f.state.value.refreshing)
+            assertFalse(f.state.value.busy)
+            assertEquals(if (firstRead) TmuxPhase.CHECKING else TmuxPhase.READY, f.state.value.phase)
+            val count = f.bridge.observations.size
+            f.coordinator.refresh() // An overlapping timer/manual request coalesces.
+            assertEquals(count, f.bridge.observations.size)
+            assertTrue(f.state.value.refreshing)
+            release.complete(Unit)
+            read.await()
+            assertFalse(f.state.value.refreshing)
+            assertEquals(2, f.state.value.sessions.size)
+        }
+    }
+
+    @Test fun queryActivityEndsBeforeIndependentOperationAcknowledgement() = runBlocking {
+        val f = Fixture()
+        val readRelease = CompletableDeferred<Unit>()
+        val operationRelease = CompletableDeferred<Unit>()
+        val operationEntered = CompletableDeferred<Unit>()
+        f.bridge.beforeObserve = { readRelease.await() }
+        f.bridge.beforeOperation = { operationEntered.complete(Unit); operationRelease.await() }
+        val created = first.copy(id = "\$9", name = "created", created = 1010).ref(server)
+        f.bridge.operationOutput = ack(created = created)
+        val create = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.create(created.name) }
+        assertTrue(f.state.value.busy)
+        assertTrue(f.state.value.refreshing)
+        readRelease.complete(Unit)
+        // The operation entry confirms that the fresh read has finished, without timing sleeps.
+        withTimeout(2_000) { operationEntered.await() }
+        assertTrue(f.state.value.busy)
+        assertFalse(f.state.value.refreshing)
+        operationRelease.complete(Unit)
+        assertEquals(created, create.await())
+        assertFalse(f.state.value.busy)
+        assertFalse(f.state.value.refreshing)
+    }
+
+    @Test fun failedAndCancelledQueriesClearActivityWithoutInventingUnsupported() = runBlocking {
+        val f = Fixture()
+        f.bridge.output = { null }
+        f.coordinator.refresh()
+        assertEquals(TmuxPhase.ERROR, f.state.value.phase)
+        assertFalse(f.state.value.refreshing)
+        val release = CompletableDeferred<Unit>()
+        f.bridge.beforeObserve = { release.await() }
+        val read = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.refresh() }
+        assertTrue(f.state.value.refreshing)
+        read.cancel()
+        read.join()
+        assertFalse(f.state.value.refreshing)
+        assertEquals(TmuxPhase.ERROR, f.state.value.phase)
+    }
+
+    @Test fun endingOrClosingDuringQueryCannotLeavePermanentCheckingOrLateActivity() = runBlocking {
+        for (close in listOf(false, true)) {
+            val f = Fixture()
+            val release = CompletableDeferred<Unit>()
+            f.bridge.beforeObserve = { release.await() }
+            val read = async(start = CoroutineStart.UNDISPATCHED) { f.coordinator.refresh() }
+            assertTrue(f.state.value.refreshing)
+            if (close) f.coordinator.close() else f.coordinator.dataEnded()
+            assertFalse(f.state.value.refreshing)
+            assertEquals(TmuxPhase.ERROR, f.state.value.phase)
+            assertTrue(f.state.value.presence is TmuxPresence.Ended)
+            release.complete(Unit)
+            read.await()
+            assertFalse(f.state.value.refreshing)
+            assertNull(f.state.value.snapshot)
+            assertEquals(TmuxPhase.ERROR, f.state.value.phase)
+        }
+    }
+
+    @Test fun waitingForDataIsNotAnActualQuery() = runBlocking {
+        val f = Fixture()
+        f.ready = false
+        f.coordinator.refresh()
+        assertFalse(f.state.value.refreshing)
+        assertTrue(f.bridge.observations.isEmpty())
+    }
+
     @Test fun startupWaitsForDataAndKeepsRestoreIntent() = runBlocking {
         val f = Fixture(TmuxIntent.Restore("first"))
         f.ready = false
@@ -919,7 +1005,8 @@ class TmuxCoordinatorTest {
         f.ready = true
         f.currentNonce = null
         f.coordinator.refresh()
-        assertEquals(TmuxPresence.Pending, f.state.value.presence)
+        assertEquals(TmuxPresence.Unknown(TmuxUnknownReason.RECONNECT_REQUIRED), f.state.value.presence)
+        assertEquals(TmuxProblem.OWNER_UNAVAILABLE.name, f.state.value.message)
         assertTrue(f.bridge.observations.isEmpty())
         f.currentNonce = nonce
         f.coordinator.refresh()

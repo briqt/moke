@@ -165,6 +165,33 @@ class TerminalScrollGestureTest {
     }
 
     @Test
+    fun sixLineTouchDragSendsThreeRemoteWheelNotches() {
+        output("\u001b[?1000h\u001b[?1006h")
+        val steps = onMain {
+            val view = fixture.view
+            val lineHeight = view.mRenderer.fontLineSpacing.toFloat()
+            val start = view.mRenderer.fontWidth * 3.5f to (view.getPointY(4) + lineHeight / 2f)
+            val end = start.first to start.second + 6f * lineHeight
+            assertTrue("The controlled drag must exceed touch slop",
+                6f * lineHeight > ViewConfiguration.get(view.context).scaledTouchSlop)
+            listOf(
+                step(0, MotionEvent.ACTION_DOWN, start),
+                step(40, MotionEvent.ACTION_MOVE, end),
+                // CANCEL excludes fling distance from the measured six-line drag.
+                step(80, MotionEvent.ACTION_CANCEL, end),
+            )
+        }
+
+        touches(*steps.toTypedArray(), pumpRemoteFrames = true)
+
+        onMain {
+            assertEquals("Six line heights must send three wheel notches at the starting cell",
+                "\u001b[<64;4;5M".repeat(3), fixture.transport.text())
+            assertEquals(0, fixture.keyboardRequests)
+        }
+    }
+
+    @Test
     fun cancelledMouseScrollDoesNotConsumeTheNextTap() {
         output("\u001b[?1000h\u001b[?1006h")
 

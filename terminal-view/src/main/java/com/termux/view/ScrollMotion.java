@@ -5,6 +5,7 @@ public final class ScrollMotion {
     public static final int MAX_UNITS_PER_FRAME = 8;
     public static final int MAX_UNITS_PER_GESTURE = 256;
     public static final int REMOTE_FLING_UNITS = 12;
+    public static final double TOUCH_WHEEL_LINE_HEIGHTS = 2.0;
     private double velocity, remainingPixels;
     private long lastTime, endTime;
     private boolean running, remote;

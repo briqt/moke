@@ -646,12 +646,35 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- tmux：管理动作永远使用来源连接；新连接另行校验最新持久化 Route。 ----------
     private val tmuxTracking = mutableMapOf<String, kotlinx.coroutines.Job>()
     private val tmuxOpening = mutableMapOf<String, kotlinx.coroutines.sync.Mutex>()
-    private val pickerSources = mutableSetOf<String>()
-    private val _tmuxPicker = MutableStateFlow<Set<String>>(emptySet())
-    val tmuxPicker: StateFlow<Set<String>> = _tmuxPicker.asStateFlow()
+    private val tmuxSheets = TmuxSheetController()
+    internal val tmuxSheet: StateFlow<TmuxSheetRequest?> = tmuxSheets.request
+
+    /** A connection finishing in the background consumes, rather than defers, its automatic sheet. */
+    internal fun tmuxSessionOpened(id: String, visit: Any?) {
+        sessions.get(id)?.let {
+            tmuxSheets.opened(it.scopeKey, visit)
+            if (!it.alive.value || it.connectFailed.value) tmuxSheets.dataEnded(it.scopeKey)
+        }
+    }
+
+    internal fun enterTmuxVisit(ts: TermSession, visit: Any) {
+        if (sessions.get(ts.id) === ts) tmuxSheets.enter(ts.scopeKey, visit)
+    }
+
+    internal fun leaveTmuxVisit(ts: TermSession, visit: Any) = tmuxSheets.leave(ts.scopeKey, visit)
+    internal fun backgroundTmuxVisit(ts: TermSession, visit: Any) = tmuxSheets.background(ts.scopeKey, visit)
+    internal fun tmuxSheetPresented(request: TmuxSheetRequest) = tmuxSheets.presented(request)
+
+    internal fun openTmuxManagement(ts: TermSession, visit: Any) {
+        if (sessions.get(ts.id) !== ts || ts.connectFailed.value) return
+        tmuxSheets.manage(ts.scopeKey, visit)
+        refreshTmux(ts)
+    }
+
+    internal fun dismissTmuxSheet(request: TmuxSheetRequest) = tmuxSheets.dismiss(request)
 
     fun refreshTmux(ts: TermSession) = viewModelScope.launch {
-        if (sessions.get(ts.id) !== ts) return@launch
+        if (sessions.get(ts.id) !== ts || !ts.dataReady.value) return@launch
         updateTmuxRoute(ts, storedRouteOf(ts.host.id))
         ts.tmuxCoordinator.refresh()
         ts.negotiatedTerm.value = ts.tmuxState.value.snapshot?.observation?.term
@@ -688,10 +711,15 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         if (tmuxTracking[ts.id]?.isActive == true) return
         tmuxTracking[ts.id] = viewModelScope.launch {
             var scrollTarget: TmuxSessionRef? = null
-            combine(ts.tmuxState, store.state, networkStore.state) { state, hosts, networks ->
+            var dataEnded = false
+            combine(ts.tmuxState, store.state, networkStore.state, ts.alive, ts.connectFailed) { state, hosts, networks, _, _ ->
                 state to resolveRoute(ts.host.id, hosts, networks)
             }.collect { (state, route) ->
                 if (sessions.get(ts.id) !== ts) return@collect
+                if (!dataEnded && (!ts.alive.value || ts.connectFailed.value)) {
+                    dataEnded = true
+                    tmuxSheets.dataEnded(ts.scopeKey)
+                }
                 updateTmuxRoute(ts, route)
                 val binding = state.currentBinding ?: return@collect
                 if (binding.scope != ts.scopeKey || state.snapshot?.verified != true) return@collect
@@ -865,6 +893,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun reconnectSession(source: TermSession): String {
+        tmuxSheets.invalidate(source.scopeKey)
         val epoch = sessions.nextTmuxChoice(source.host.id)
         return sessions.tmuxMemoryMutex.withLock {
             val route = storedRouteOf(source.host.id)
@@ -885,7 +914,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             }
             trackTmux(session)
             ensureSessionService()
-            if (picker) { pickerSources += session.id; requestTmuxPickerWhenReady(session) }
+            if (picker) tmuxSheets.prepareSelection(session.scopeKey)
             session.id
         }
     }
@@ -916,38 +945,30 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         ).also { it.recovery.value = route.recovery }
         trackTmux(ts)
         ensureSessionService()
-        if (picker) { pickerSources += ts.id; requestTmuxPickerWhenReady(ts, explicitHostChoice = true) }
+        if (picker) tmuxSheets.prepareSelection(ts.scopeKey)
         return ts.id
     }
 
-    /** TOFU and bootstrap finish before the bounded observation window begins. */
-    private fun requestTmuxPickerWhenReady(ts: TermSession, explicitHostChoice: Boolean = false) = viewModelScope.launch {
-        if (awaitTmuxReady(ts) && sessions.get(ts.id) === ts &&
-            TmuxLaunchPolicy.presentsPicker(ts.tmuxState.value, explicitHostChoice)) {
-            _tmuxPicker.update { it + ts.id }
-        }
+    private fun tmuxSheetSource(request: TmuxSheetRequest): TermSession? =
+        sessions.get(request.source.connectionId)?.takeIf { tmuxSheets.owns(request) && it.scopeKey == request.source }
+
+    private fun finishTmuxSheet(request: TmuxSheetRequest, newId: String) {
+        val disposable = tmuxSheets.finish(request, newId) ?: return
+        // A late completion from an abandoned visit cannot dispose a source now used independently.
+        sessions.get(disposable.connectionId)?.takeIf { it.scopeKey == disposable }?.let { closeSession(it.id) }
     }
 
-    fun dismissTmuxPicker(id: String) { _tmuxPicker.update { it - id }; pickerSources -= id }
-
-    private fun finishTmuxPicker(source: TermSession, newId: String) {
-        _tmuxPicker.update { it - source.id }
-        val transient = pickerSources.remove(source.id)
-        // Only this picker's newly created source is disposable; an attached tmux stays remote.
-        if (transient && newId != source.id) closeSession(source.id)
-    }
-
-    suspend fun pickTmuxSession(sourceId: String, target: TmuxSelection): String? {
-        val source = sessions.get(sourceId) ?: return null
-        val id = openTmuxSession(source, target) ?: return null
-        finishTmuxPicker(source, id)
+    internal suspend fun pickTmuxSession(request: TmuxSheetRequest, target: TmuxSelection, detachOthers: Boolean = false): String? {
+        val source = tmuxSheetSource(request) ?: return null
+        val id = openTmuxSession(source, target, detachOthers) ?: return null
+        finishTmuxSheet(request, id)
         return id
     }
 
-    suspend fun createPickedTmuxSession(sourceId: String, name: String): String? {
-        val source = sessions.get(sourceId) ?: return null
+    internal suspend fun createPickedTmuxSession(request: TmuxSheetRequest, name: String): String? {
+        val source = tmuxSheetSource(request) ?: return null
         val id = tmuxNew(source, name) ?: return null
-        finishTmuxPicker(source, id)
+        finishTmuxSheet(request, id)
         return id
     }
 
@@ -982,14 +1003,14 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSession(id: String) {
-        dismissTmuxPicker(id)
+        sessions.get(id)?.let { tmuxSheets.invalidate(it.scopeKey) }
         tmuxTracking.remove(id)?.cancel()
         sessions.close(id)
     }
 
     /** 一次清掉列表里所有已结束的会话（保留活着的）。 */
     fun closeEndedSessions() {
-        sessions.sessions.value.filterNot { it.alive.value }.forEach { sessions.close(it.id) }
+        sessions.sessions.value.filterNot { it.alive.value }.forEach { closeSession(it.id) }
     }
 
     // ---------- 文件（SFTP） ----------
@@ -1262,8 +1283,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         sessions.sessions.onEach { current ->
             val ids = current.map { it.id }.toSet()
             tmuxTracking.keys.filterNot { it in ids }.toList().forEach { tmuxTracking.remove(it)?.cancel() }
-            pickerSources.retainAll(ids)
-            _tmuxPicker.update { it.intersect(ids) }
+            tmuxSheets.retainSources(current.map { it.scopeKey }.toSet())
             current.forEach(::trackTmux)
         }.launchIn(viewModelScope)
         repairLegacyTmuxLoginCommands()

@@ -47,6 +47,8 @@ class SshTransport(
     @Volatile override var tmuxNonce: String? = null
         private set
     override val tmuxOwnerRequired: Boolean = false
+    @Volatile override var tmuxObserverCapability: TmuxObserverCapability? = null
+        private set
 
     override fun execTmuxOperation(command: String): String? {
         if (closed) return null
@@ -142,6 +144,7 @@ class SshTransport(
                     openChannel = { s ->
                         val command = selectedStartup.command
                         (if (command == null) s.startShell() else s.exec(command)).also {
+                            tmuxObserverCapability = selectedStartup.capability
                             tmuxNonce = selectedStartup.nonce
                         }
                     },

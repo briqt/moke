@@ -77,6 +77,8 @@
     <string name="tmux_create_open">Create and open</string>
     <string name="tmux_more_for">Actions for %1$s</string>
     <string name="tmux_current_unknown">Current session unconfirmed.</string>
+    <string name="tmux_detection_unsupported">tmux status detection is not supported on this host.</string>
+    <string name="tmux_owner_unavailable">Could not initialize tmux detection. Reconnect to retry.</string>
     <string name="tmux_result_unknown">Operation result unconfirmed.</string>
     <string name="tmux_session_changed">Session changed. Try again.</string>
     <string name="tmux_name_exists">Session name already exists.</string>

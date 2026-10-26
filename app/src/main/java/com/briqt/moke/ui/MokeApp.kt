@@ -29,6 +29,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.R
 import com.briqt.moke.terminal.HostKeyChangePrompt
@@ -41,6 +44,7 @@ import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.terminal.Tmux
+import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
 
@@ -54,7 +58,7 @@ enum class HomeTab { Connections, Sessions, Settings }
 sealed interface Screen {
     data object Home : Screen
     data class Edit(val host: Host?, val back: Screen = Home) : Screen
-    data class Terminal(val sessionId: String) : Screen
+    data class Terminal(val sessionId: String, val visit: Any = Any()) : Screen
     data object Appearance : Screen
     data object TerminalSettings : Screen
     data object Fonts : Screen
@@ -78,6 +82,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var homeTab by remember { mutableStateOf(HomeTab.Connections) }
     val navigationScope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
     var pendingFilesReturn by remember { mutableStateOf<Pair<Screen, Job>?>(null) }
     LaunchedEffect(screen) {
         pendingFilesReturn?.takeIf { it.first !== screen }?.let { pending ->
@@ -125,7 +130,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
     val hostKeyChange by vm.hostKeyChange.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
-    val tmuxPickerFor by vm.tmuxPicker.collectAsState()
+    val tmuxSheetRequest by vm.tmuxSheet.collectAsState()
     val includePrerelease by vm.includePrerelease.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
     val openSessionsRequest by vm.openSessionsRequest.collectAsState()
@@ -147,10 +152,19 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
         pendingConnections = pendingConnections + key
         return try {
             val id = open()?.takeIf { it.isNotBlank() } ?: return false
-            currentCoroutineContext().ensureActive()
-            // A completed connection may remain in the background; it must not steal navigation.
-            if (screen === source && activeNavigationVisit === sourceVisit && (source !is Screen.Home || homeTab == sourceTab)) {
-                screen = Screen.Terminal(id)
+            var navigated = false
+            try {
+                currentCoroutineContext().ensureActive()
+                // A completed connection may remain in the background; neither navigation nor its
+                // automatic tmux sheet may replay when the user later visits that connection.
+                if (screen === source && activeNavigationVisit === sourceVisit && (source !is Screen.Home || homeTab == sourceTab)) {
+                    val target = Screen.Terminal(id)
+                    vm.tmuxSessionOpened(id, target.visit.takeIf { lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) })
+                    screen = target
+                    navigated = true
+                }
+            } finally {
+                if (!navigated) vm.tmuxSessionOpened(id, null)
             }
             true
         } finally {
@@ -395,6 +409,28 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 // key(sessionId)：Terminal→Terminal 直接切会话时强制重建子树，
                 // 否则 AndroidView 只创建一次会残留旧 View（重连表现为「坏了」）。
                 key(s.sessionId) {
+                    val dataReady by ts.dataReady.collectAsState()
+                    val alive by ts.alive.collectAsState()
+                    val connectFailed by ts.connectFailed.collectAsState()
+                    val tmuxState by ts.tmuxState.collectAsState()
+                    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+                    val foreground = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+                    val sheetRequest = tmuxSheetRequest?.takeIf {
+                        it.visibleFor(ts.scopeKey, s.visit, dataReady, alive, foreground) && !connectFailed &&
+                            (it.presented || (hostKeyRequest == null && hostKeyChange == null))
+                    }
+                    DisposableEffect(ts, s.visit, lifecycleOwner) {
+                        vm.enterTmuxVisit(ts, s.visit)
+                        val observer = LifecycleEventObserver { _, event ->
+                            if (event == Lifecycle.Event.ON_STOP) vm.backgroundTmuxVisit(ts, s.visit)
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) vm.backgroundTmuxVisit(ts, s.visit)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                            vm.leaveTmuxVisit(ts, s.visit)
+                        }
+                    }
                     // 正看着的会话不发提醒；进来即收起它已有的提醒。
                     val appContext = LocalContext.current.applicationContext
                     DisposableEffect(s.sessionId) {
@@ -452,42 +488,61 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onFontSize = { vm.setFontSize(it) },
                         onKeyboardMode = { vm.setKeyboardMode(it) },
                         onToggleExtraKeys = { vm.setExtraKeysVisible(!extraKeysVisible) },
+                        tmuxSheetVisible = sheetRequest != null,
+                        onOpenTmux = { vm.openTmuxManagement(ts, s.visit) },
                         onTmuxRefresh = { vm.refreshTmux(ts) },
                         onTmuxNew = { name -> requestSession("session:${ts.id}", s) { vm.tmuxNew(ts, name) } },
-                        onTmuxRename = { selection, name -> vm.tmuxRename(ts, selection, name) },
-                        onTmuxDetach = { vm.tmuxDetach(ts, it) },
-                        onTmuxKill = { vm.tmuxKill(ts, it) },
                         onEndTmux = { vm.tmuxEndCurrent(ts, it) },
-                        onTmuxAttach = { selection ->
-                            requestSession("session:${ts.id}", s) { vm.openTmuxSession(ts, selection) }
-                        },
-                        onTmuxTakeOver = { selection ->
-                            requestSession("session:${ts.id}", s) { vm.openTmuxSession(ts, selection, detachOthers = true) }
-                        },
                         onOpenFiles = { openFiles(ts.host, ts.id) },
                     )
-                    // 主机入口每次明确选择；原连接返回与重连仍遵循各自的恢复边界。
-                    if (ts.id in tmuxPickerFor) {
-                        val tmuxState by ts.tmuxState.collectAsState()
+                    // One visit-scoped owner for automatic choice and explicit management. A query
+                    // only updates tmuxState; it can never open another sheet or restore a dismissal.
+                    sheetRequest?.let { request ->
+                        val onPresented = remember(request.serial) { { vm.tmuxSheetPresented(request) } }
                         val viaJump = ts.jumpHost?.let { stringResource(R.string.tmux_via_jump, it.displayName) }.orEmpty()
-                        TmuxPickerDialog(
-                            state = tmuxState,
-                            targetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, viaJump),
-                            defaultName = Tmux.defaultSessionName(ts.host.displayName),
-                            onPick = { selection ->
-                                requestSession("session:${ts.id}", s) {
-                                    vm.pickTmuxSession(ts.id, selection)?.takeIf { it.isNotBlank() }
-                                        ?.also { vm.dismissTmuxPicker(ts.id) }
-                                }
-                            },
-                            onNew = { name ->
-                                requestSession("session:${ts.id}", s) {
-                                    vm.createPickedTmuxSession(ts.id, name)?.takeIf { it.isNotBlank() }
-                                        ?.also { vm.dismissTmuxPicker(ts.id) }
-                                }
-                            },
-                            onPlainShell = { vm.dismissTmuxPicker(ts.id) },
-                        )
+                        val targetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, viaJump)
+                        val pick: suspend (TmuxSelection) -> Boolean = { selection ->
+                            requestSession("session:${ts.id}", s) { vm.pickTmuxSession(request, selection) }
+                        }
+                        val create: suspend (String) -> Boolean = { name ->
+                            requestSession("session:${ts.id}", s) { vm.createPickedTmuxSession(request, name) }
+                        }
+                        if (request.mode == TmuxSheetMode.SELECT) {
+                            TmuxPickerDialog(
+                                state = tmuxState,
+                                targetLabel = targetLabel,
+                                defaultName = Tmux.defaultSessionName(ts.host.displayName),
+                                onPick = pick,
+                                onNew = create,
+                                onRefresh = { vm.refreshTmux(ts) },
+                                onPlainShell = { vm.dismissTmuxSheet(request) },
+                                onPresented = onPresented,
+                            )
+                        } else {
+                            TmuxPanel(
+                                state = tmuxState,
+                                targetLabel = targetLabel,
+                                onDismiss = { vm.dismissTmuxSheet(request) },
+                                onRefresh = { vm.refreshTmux(ts) },
+                                onAttach = pick,
+                                onTakeOver = { selection ->
+                                    requestSession("session:${ts.id}", s) { vm.pickTmuxSession(request, selection, detachOthers = true) }
+                                },
+                                onRename = { selection, name -> vm.tmuxRename(ts, selection, name) },
+                                onDetach = { selection ->
+                                    val success = vm.tmuxDetach(ts, selection)
+                                    if (shouldRevealTerminalAfterTmuxAction(success, ts.tmuxState.value)) vm.dismissTmuxSheet(request)
+                                    success
+                                },
+                                onKill = { selection ->
+                                    val success = vm.tmuxKill(ts, selection)
+                                    if (shouldRevealTerminalAfterTmuxAction(success, ts.tmuxState.value)) vm.dismissTmuxSheet(request)
+                                    success
+                                },
+                                onNew = create,
+                                onPresented = onPresented,
+                            )
+                        }
                     }
                 }
             }
