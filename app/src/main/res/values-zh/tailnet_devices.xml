@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tailnet_choose_device">选择设备</string>
+    <string name="tailnet_search_devices">搜索设备</string>
+    <string name="tailnet_devices_scope">当前网络中可见的设备</string>
+    <string name="tailnet_devices_loading">正在读取设备…</string>
+    <string name="tailnet_devices_empty">没有可见设备。请检查网络的设备访问权限，或手动填写地址。</string>
+    <string name="tailnet_devices_no_matches">没有匹配的设备，请换个名称或地址搜索。</string>
+    <string name="tailnet_devices_error">无法读取设备，请重试。</string>
+    <string name="tailnet_devices_stale">请刷新列表后再选择设备。</string>
+    <string name="tailnet_device_online">在线</string>
+    <string name="tailnet_device_offline">离线</string>
+    <string name="tailnet_devices_clear_search">清除搜索</string>
+    <string name="auth_tailscale_ssh">Tailscale SSH</string>
+    <string name="tailnet_ssh_hint">使用 Tailscale 身份登录，远端需允许此系统用户名。</string>
+    <string name="tailnet_ssh_route_hint">Tailscale SSH 需选择 Tailscale 网络、使用 22 端口，且不经跳板机。</string>
+    <string name="tailnet_ssh_cancel_connection">取消连接</string>
+    <string name="tailnet_ssh_browser_unavailable">无法打开浏览器，请安装或启用浏览器后重试。</string>
+</resources>

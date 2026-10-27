@@ -36,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.R
 import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
+import com.briqt.moke.terminal.TailscaleSshAuth
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.ListState
@@ -129,6 +130,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val terminalAlerts by vm.terminalAlerts.collectAsState()
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
     val hostKeyChange by vm.hostKeyChange.collectAsState()
+    val sshAuthRequests by TailscaleSshAuth.pending.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxSheetRequest by vm.tmuxSheet.collectAsState()
     val includePrerelease by vm.includePrerelease.collectAsState()
@@ -376,7 +378,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 networkState = networksState,
                 hostStoreState = hostsState,
                 onRetryNetworks = vm::retryNetworkReads,
-                networkEditor = { kind, onClose -> networkEditor(kind, null, onClose) },
+                networkEditor = { kind, initial, onClose -> networkEditor(kind, initial, onClose) },
+                loadDevices = vm::tailnetDevices,
             )
         }
 
@@ -712,11 +715,17 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
         )
     }
 
+    if (hostKeyRequest == null && hostKeyChange == null) {
+        sshAuthRequests.firstOrNull()?.let { request -> key(request.id) { TailscaleSshDialog(request) } }
+    }
+
     // 首连指纹确认：连接线程正卡在这上面等答案，所以放在导航之外的最外层——
     // 不管当前在哪个页面（终端、文件页、设置）发起的连接，都要能弹出来。
     hostKeyRequest?.let { req ->
+        val targetLabel = hostKeyTargetLabel(req.target, networks)
         HostKeyConfirmDialog(
             request = req,
+            targetLabel = targetLabel,
             onTrust = { vm.resolveHostKey(req.id, true) },
             onCancel = { vm.resolveHostKey(req.id, false) },
         )
@@ -734,6 +743,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 @Composable
 private fun HostKeyConfirmDialog(
     request: HostKeyPrompt.Request,
+    targetLabel: HostKeyTargetLabel,
     onTrust: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -743,9 +753,12 @@ private fun HostKeyConfirmDialog(
         text = {
             Column {
                 Text(
-                    request.target,
+                    targetLabel.address,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                targetLabel.networkName?.let { networkName ->
+                    Text(networkName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 // 指纹用等宽字体单独一段：核对逐字符进行，混在正文里更容易看错。
                 Text(
                     text = listOf(request.keyType, request.fingerprint)

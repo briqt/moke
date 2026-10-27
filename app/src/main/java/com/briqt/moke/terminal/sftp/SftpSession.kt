@@ -4,6 +4,7 @@ import android.content.Context
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.terminal.SshConnector
+import com.briqt.moke.terminal.TailscaleSshAuthException
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.SFTPClient
@@ -11,6 +12,9 @@ import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.EnumSet
+
+/** An explicit approval failure needs a user retry, not a second hidden authentication. */
+internal fun shouldRetrySftpBrowse(failure: Throwable): Boolean = failure !is TailscaleSshAuthException
 
 /** 远端目录里的一项。[mtime] 是 epoch 秒（SFTP 协议口径）。 */
 data class RemoteEntry(
@@ -87,7 +91,7 @@ class SftpSession(
     private fun <T> withReconnect(block: (SFTPClient) -> T): T = try {
         block(client())
     } catch (t: Throwable) {
-        if (closed) throw t
+        if (closed || !shouldRetrySftpBrowse(t)) throw t
         runCatching { sftp?.close() }
         runCatching { conn?.close() }
         sftp = null

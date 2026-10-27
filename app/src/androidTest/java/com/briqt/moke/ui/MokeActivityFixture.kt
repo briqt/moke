@@ -21,7 +21,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-/** Starts only the debuggable target's launcher; no test-APK bootstrap Activity is involved. */
+/** Starts only the debuggable target's launcher and waits for its input-ready window. */
 internal class MokeActivityFixture private constructor(private val activity: MainActivity) : AutoCloseable {
     private val closed = AtomicBoolean(false)
 
@@ -77,7 +77,9 @@ internal class MokeActivityFixture private constructor(private val activity: Mai
                     ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
                         .filterIsInstance<MainActivity>()
                         .singleOrNull {
-                            it !in existing && it.packageName == packageName && !it.isFinishing && !it.isDestroyed
+                            it !in existing && it.packageName == packageName && !it.isFinishing && !it.isDestroyed &&
+                                it.hasWindowFocus() && it.window.decorView.isShown &&
+                                it.window.decorView.width > 0 && it.window.decorView.height > 0
                         }
                 }
                 if (resumed != null) return MokeActivityFixture(resumed)

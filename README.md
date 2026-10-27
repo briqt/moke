@@ -14,8 +14,8 @@
 
 ## Features
 
-- **SSH / mosh**: password and PEM private-key authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
-- **Built-in Tailscale**: connect to hosts in your tailnet, with support for official and self-hosted control servers, Tailscale IP addresses, and MagicDNS hostnames. The userspace client does not use the system VPN slot.
+- **SSH / mosh**: password, PEM private-key and Tailscale SSH identity authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
+- **Built-in Tailscale**: select visible devices in the app or connect using Tailscale IP addresses and MagicDNS hostnames, with support for official and self-hosted control servers. The userspace client does not use the system VPN slot.
 - **Proxies**: HTTP / HTTPS / SOCKS4 / SOCKS5 proxies, selectable per host.
 - **Sessions & tmux**: multiple sessions, background connections, remote tmux session management, and port forwarding that listens only on the device's loopback interface.
 - **Files**: SFTP browsing, uploads and downloads with resume, and sending file paths to the terminal.
@@ -26,9 +26,11 @@ Network credentials and tailnet login state are encrypted with the Android Keyst
 ## Use built-in Tailscale
 
 1. Open **Settings → Network**, add Tailscale, choose the official or a self-hosted control server, and sign in.
-2. Edit a host, select the Tailscale network under **Network**, and enter the target host's Tailscale IP address or MagicDNS hostname.
+2. Add or edit a host, select the Tailscale network under **Network**, then choose **Select device**. You can also enter a Tailscale IP address or MagicDNS hostname manually.
 
-The built-in network is used only for Moke connections; it does not provide network access for other apps. SSH authentication still uses the password or private key configured for the host.
+If the target has Tailscale SSH enabled and its policy permits the requested system user, choose **Tailscale SSH** authentication without a password or private key. This requires a direct connection over the selected network on port 22, without a jump host. Ordinary SSH still uses the password or private key configured for the host.
+
+The built-in network is used only for Moke connections; it does not provide network access for other apps.
 
 ## Screenshots
 

@@ -3,6 +3,15 @@ package com.briqt.moke.ui
 import com.briqt.moke.R
 import com.briqt.moke.data.NetworkEntry
 
+internal data class HostKeyTargetLabel(val address: String, val networkName: String?)
+
+/** Namespaced trust keys stay internal; users compare the real target and selected network name. */
+internal fun hostKeyTargetLabel(target: String, networks: List<NetworkEntry>): HostKeyTargetLabel {
+    val network = networks.firstOrNull { target.startsWith(it.id + "/") }
+    return if (network == null) HostKeyTargetLabel(target, null)
+    else HostKeyTargetLabel(target.removePrefix(network.id + "/"), network.name)
+}
+
 /** Display only: the stored address and dial parameters stay unchanged. */
 internal fun proxyAddressLabel(host: String, port: Int): String {
     val displayHost = if (':' in host && !(host.startsWith('[') && host.endsWith(']'))) "[$host]" else host

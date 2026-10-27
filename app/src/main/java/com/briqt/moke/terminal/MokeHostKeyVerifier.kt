@@ -26,16 +26,17 @@ class MokeHostKeyVerifier(
 
     override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
         val id = KnownHosts.idOf(hostname, port, namespace)
+        val address = KnownHosts.idOf(hostname, port)
         val fp = HostKeyFingerprint.of(key)
         val saved = known.stored(id)
         return when (HostKeyFingerprint.check(saved, key)) {
             HostKeyFingerprint.Result.UNKNOWN -> {
                 if (!HostKeyPrompt.autoTrust && !HostKeyPrompt.ask(id, fp, keyTypeOf(HostKeyFingerprint.hostKeyOf(key)))) {
-                    onMessage(context.localized(R.string.hostkey_rejected, id).replace("\n", "\r\n"))
+                    onMessage(context.localized(R.string.hostkey_rejected, address).replace("\n", "\r\n"))
                     return false
                 }
                 known.store(id, fp)
-                onMessage(context.localized(R.string.hostkey_first_seen, id, fp))
+                onMessage(context.localized(R.string.hostkey_first_seen, address, fp))
                 true
             }
             HostKeyFingerprint.Result.MATCH -> true

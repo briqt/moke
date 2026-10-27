@@ -1,0 +1,10 @@
+<resources>
+    <string name="tailscale_ssh_auth_title">Tailscale SSH authentication</string>
+    <string name="tailscale_ssh_auth_open_browser">Open authentication link</string>
+    <string name="tailscale_ssh_auth_waiting">Complete the check in your browser, then wait for the server. Returning here does not confirm authentication.</string>
+    <string name="tailscale_ssh_auth_cancelled">Tailscale SSH authentication was cancelled.</string>
+    <string name="tailscale_ssh_auth_timed_out">Tailscale SSH authentication timed out. Reconnect and complete the browser check within five minutes.</string>
+    <string name="tailscale_ssh_auth_rejected">Tailscale SSH authentication failed. Check the username and the tailnet SSH policy.</string>
+    <string name="tailscale_ssh_auth_rejected_detail">Tailscale SSH authentication failed: %1$s</string>
+    <string name="tailscale_ssh_auth_invalid_route">Tailscale SSH requires a direct first-hop connection through the host\'s selected Tailscale network on port 22. Check the network, port, jump host, or authentication method.</string>
+</resources>

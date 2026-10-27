@@ -3,7 +3,7 @@ package com.briqt.moke.data
 import org.json.JSONObject
 import java.util.UUID
 
-enum class AuthType { PASSWORD, KEY }
+enum class AuthType { PASSWORD, KEY, TAILSCALE_SSH }
 
 /**
  * 会话持久化：连接这台主机时是否自动接入多路复用器。

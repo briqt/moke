@@ -408,6 +408,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val networkNotice: StateFlow<String?> = _networkNotice.asStateFlow()
     fun consumeNetworkNotice() { _networkNotice.value = null }
 
+    suspend fun tailnetDevices(entry: NetworkEntry): List<com.briqt.moke.net.TailnetDevice> = withContext(Dispatchers.IO) {
+        networkManager.devices(entry)
+    }
+
     private var watchers = 0
     private var watchJob: kotlinx.coroutines.Job? = null
 

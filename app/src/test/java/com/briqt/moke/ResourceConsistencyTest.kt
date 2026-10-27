@@ -63,11 +63,27 @@ class ResourceConsistencyTest {
         return result
     }
 
+    private fun parseFiles(files: List<String>): Map<String, Resource> {
+        val result = linkedMapOf<String, Resource>()
+        for (xml in files) for ((key, value) in parse(xml)) {
+            require(key !in result) { "Duplicate resource across files: $key" }
+            result[key] = value
+        }
+        return result
+    }
+
+    @Test fun `split resource files are checked together and cross-file duplicates are rejected`() {
+        val first = "<resources><string name=\"first\">one</string></resources>"
+        val second = "<resources><string name=\"second\">two</string></resources>"
+        assertEquals(setOf("string/first", "string/second"), parseFiles(listOf(first, second)).keys)
+        assertThrows(IllegalArgumentException::class.java) { parseFiles(listOf(first, first)) }
+    }
+
     @Test fun `Chinese and default resources have matching keys and parameter signatures`() {
         val root = listOf(File("src/main/res"), File("app/src/main/res")).firstOrNull { File(it, "values/strings.xml").isFile }
             ?: error("Cannot locate application resources")
-        val english = parse(File(root, "values/strings.xml").readText())
-        val chinese = parse(File(root, "values-zh/strings.xml").readText())
+        val english = parseFiles(File(root, "values").listFiles().orEmpty().filter { it.extension == "xml" }.map { it.readText() })
+        val chinese = parseFiles(File(root, "values-zh").listFiles().orEmpty().filter { it.extension == "xml" }.map { it.readText() })
         assertEquals("Resource keys differ", english.keys, chinese.keys)
         for ((key, translated) in chinese) {
             val original = english.getValue(key)

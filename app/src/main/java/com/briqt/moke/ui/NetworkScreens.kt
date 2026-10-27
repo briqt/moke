@@ -136,12 +136,15 @@ fun proxyTypeLabel(t: ProxyType): String = when (t) {
 }
 
 /** Authorization URLs go only to the browser, never to logs or the clipboard. */
-fun openLoginPage(context: Context, url: String) {
+fun openLoginPage(context: Context, url: String): Boolean {
     val uri = url.toUri()
-    try {
+    return try {
         CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, uri)
+        true
     } catch (_: ActivityNotFoundException) {
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+    } catch (_: SecurityException) {
+        false
     }
 }
 

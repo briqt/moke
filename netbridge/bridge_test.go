@@ -59,6 +59,7 @@ type fakeNode struct {
 	state      string
 	authURL    string
 	loginCalls int
+	peers      func(context.Context) ([]tailnet.Peer, error)
 	dial       func(ctx context.Context, target string) (net.Conn, error)
 	packet     func() (net.PacketConn, error)
 }
@@ -74,6 +75,12 @@ func (f *fakeNode) Snapshot(context.Context) (tailnet.Snapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return tailnet.Snapshot{State: f.state, AuthURL: f.authURL, IPs: []netip.Addr{netip.MustParseAddr("100.64.0.1")}}, nil
+}
+func (f *fakeNode) Peers(ctx context.Context) ([]tailnet.Peer, error) {
+	if f.peers != nil {
+		return f.peers(ctx)
+	}
+	return []tailnet.Peer{}, nil
 }
 func (f *fakeNode) StartLogin(context.Context) error {
 	f.mu.Lock()
@@ -695,6 +702,195 @@ func TestRelayBulkCloseReturnsOnlyOwnedLeases(t *testing.T) {
 	}
 	if err := tb.stop("b"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNodePeersIsolatedAndRejectsOtherNetworkTypes(t *testing.T) {
+	b := newBridge()
+	b.initialized = true
+	for _, id := range []string{"a", "b"} {
+		b.networks[id] = &network{id: id, node: &fakeNode{peers: func(context.Context) ([]tailnet.Peer, error) {
+			if b.leaseCount(id) != 1 {
+				t.Errorf("peer read on %s is not tracked", id)
+			}
+			return []tailnet.Peer{{ID: id + "-peer", IPs: []string{"100.64.0.2"}}}, nil
+		}}}
+	}
+	if err := b.startProxy(`{"id":"proxy","type":"socks5","host":"proxy.example","port":1080}`); err != nil {
+		t.Fatal(err)
+	}
+	b.networks["starting"] = &network{id: "starting", node: &fakeNode{}, stopping: true}
+	for _, id := range []string{"a", "b"} {
+		peers, err := b.nodePeers(id)
+		if err != nil || len(peers) != 1 || peers[0].ID != id+"-peer" {
+			t.Fatalf("%s read another network's peers: %+v, %v", id, peers, err)
+		}
+		if b.leaseCount(id) != 0 {
+			t.Fatalf("peer read on %s kept its lease", id)
+		}
+	}
+	for _, tc := range []struct {
+		id   string
+		want codes.Code
+	}{{"missing", codes.NotStarted}, {"proxy", codes.InvalidArgument}, {"starting", codes.NotStarted}} {
+		peers, err := b.nodePeers(tc.id)
+		if codeOf(t, err) != tc.want || peers != nil || b.leaseCount(tc.id) != 0 {
+			t.Fatalf("%s: %+v, %v; want %s with no lease", tc.id, peers, err, tc.want)
+		}
+	}
+}
+
+func TestNodePeersLeaseBlocksStopButNotOtherNetworks(t *testing.T) {
+	b := newBridge()
+	entered, gate := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	f := &fakeNode{}
+	f.peers = func(ctx context.Context) ([]tailnet.Peer, error) {
+		close(entered)
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if f.closed.Load() != 0 {
+			t.Error("Stop closed a node during its peer read")
+		}
+		return []tailnet.Peer{{ID: "original-peer", IPs: []string{"100.64.0.2"}}}, nil
+	}
+	b.networks["slow"] = &network{id: "slow", node: f}
+	b.networks["other"] = &network{id: "other", node: &fakeNode{}}
+	done := make(chan error, 1)
+	go func() {
+		peers, err := b.nodePeers("slow")
+		if err == nil && (len(peers) != 1 || peers[0].ID != "original-peer") {
+			err = fmt.Errorf("wrong instance's peers: %+v", peers)
+		}
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("peer read never entered the node")
+	}
+	otherDone := make(chan error, 1)
+	go func() {
+		if err := b.stop("slow"); err == nil || codes.Of(err, codes.Internal).Code != codes.Busy {
+			otherDone <- fmt.Errorf("Stop during read = %v, want BUSY", err)
+			return
+		}
+		if _, err := b.nodePeers("other"); err != nil {
+			otherDone <- err
+			return
+		}
+		otherDone <- b.stop("other")
+	}()
+	select {
+	case err := <-otherDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("peer I/O blocked the registry or another network")
+	}
+	if b.leaseCount("slow") != 1 || f.closed.Load() != 0 {
+		t.Fatal("Stop cut an in-flight peer read")
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if b.leaseCount("slow") != 0 {
+		t.Fatal("completed peer read kept its lease")
+	}
+	if err := b.stop("slow"); err != nil || f.closed.Load() != 1 {
+		t.Fatalf("Stop after read = %v, closes = %d", err, f.closed.Load())
+	}
+	if _, err := b.nodePeers("slow"); codeOf(t, err) != codes.NotStarted {
+		t.Fatal("stopped node still returned peers")
+	}
+	// Reusing the ID must use the new instance and must not inherit a lease.
+	b.networks["slow"] = &network{id: "slow", node: &fakeNode{}}
+	if peers, err := b.nodePeers("slow"); err != nil || len(peers) != 0 || b.leaseCount("slow") != 0 {
+		t.Fatalf("replacement node inherited old data or lease: %+v, %v", peers, err)
+	}
+}
+
+func TestNodePeersErrorsAreBoundedRedactedAndReleaseLease(t *testing.T) {
+	b := newBridge()
+	saved := defaultBridge
+	defaultBridge = b
+	defer func() { defaultBridge = saved }()
+	const detail = "configured-secret tskey-auth-test-key Bearer admin-token https://control.example/a/login-token"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want codes.Code
+	}{
+		{"internal", errors.New(detail), codes.Internal},
+		{"needs-login", codes.New(codes.NeedsLogin, detail), codes.NeedsLogin},
+		{"expired", codes.New(codes.LoginExpired, detail), codes.LoginExpired},
+		{"approval", codes.New(codes.NeedsMachineAuth, detail), codes.NeedsMachineAuth},
+		{"not-ready", codes.New(codes.NotReady, detail), codes.NotReady},
+		{"timeout", context.DeadlineExceeded, codes.Timeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var readCtx context.Context
+			f := &fakeNode{peers: func(ctx context.Context) ([]tailnet.Peer, error) {
+				readCtx = ctx
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > requestTimeout {
+					t.Error("peer read lacks the finite request timeout")
+				}
+				return []tailnet.Peer{{ID: "must-not-escape-on-error"}}, tc.err
+			}}
+			b.networks["a"] = &network{id: "a", node: f, secrets: []string{"configured-secret"}}
+			result, err := NodePeers("a")
+			if codeOf(t, err) != tc.want || result != "" || b.leaseCount("a") != 0 {
+				t.Fatalf("result = %q, %v, leases = %d", result, err, b.leaseCount("a"))
+			}
+			for _, secret := range []string{"configured-secret", "tskey-auth-test-key", "admin-token", "login-token"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("boundary error leaked %q: %v", secret, err)
+				}
+			}
+			if readCtx == nil || readCtx.Err() != context.Canceled {
+				t.Fatal("peer read context was not canceled on return")
+			}
+			if err := b.stop("a"); err != nil || f.closed.Load() != 1 {
+				t.Fatalf("failed peer read prevented Stop: %v", err)
+			}
+		})
+	}
+}
+
+func TestNodePeersJSONAndStatusRemainSeparate(t *testing.T) {
+	b := newBridge()
+	saved := defaultBridge
+	defaultBridge = b
+	defer func() { defaultBridge = saved }()
+	calls := 0
+	f := &fakeNode{state: "Running", authURL: "https://control.example/a/private-login-token",
+		peers: func(context.Context) ([]tailnet.Peer, error) {
+			calls++
+			return []tailnet.Peer{{ID: "stable-id", DNSName: "peer.tail.example", IPs: []string{"100.64.0.2"}, TailscaleSSH: true}}, nil
+		}}
+	b.networks["a"] = &network{id: "a", node: f, secrets: []string{"tskey-auth-private"}}
+	result, err := NodePeers("a")
+	want := `{"peers":[{"id":"stable-id","hostname":"","dnsName":"peer.tail.example","ips":["100.64.0.2"],"os":"","online":false,"tailscaleSsh":true}]}`
+	if err != nil || result != want || strings.Contains(result, "private") {
+		t.Fatalf("peer JSON = %s, %v; want %s", result, err, want)
+	}
+	status, err := NodeStatus("a")
+	if err != nil || strings.Contains(status, "peers") || strings.Contains(status, "private") || calls != 1 {
+		t.Fatalf("NodeStatus became a peer read or leaked secrets: %s, %v, calls = %d", status, err, calls)
+	}
+	for _, peers := range [][]tailnet.Peer{nil, {}} {
+		f.peers = func(context.Context) ([]tailnet.Peer, error) { return peers, nil }
+		if result, err := NodePeers("a"); err != nil || result != `{"peers":[]}` {
+			t.Fatalf("empty peers JSON = %s, %v", result, err)
+		}
 	}
 }
 

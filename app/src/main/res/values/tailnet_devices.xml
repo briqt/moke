@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tailnet_choose_device">Select device</string>
+    <string name="tailnet_search_devices">Search devices</string>
+    <string name="tailnet_devices_scope">Devices visible on this network</string>
+    <string name="tailnet_devices_loading">Loading devices…</string>
+    <string name="tailnet_devices_empty">No devices are visible. Check this network’s device access, or enter an address manually.</string>
+    <string name="tailnet_devices_no_matches">No matching devices. Try another name or address.</string>
+    <string name="tailnet_devices_error">Could not load devices. Try again.</string>
+    <string name="tailnet_devices_stale">Refresh the list before selecting a device.</string>
+    <string name="tailnet_device_online">Online</string>
+    <string name="tailnet_device_offline">Offline</string>
+    <string name="tailnet_devices_clear_search">Clear search</string>
+    <string name="auth_tailscale_ssh">Tailscale SSH</string>
+    <string name="tailnet_ssh_hint">Uses your Tailscale identity. The remote device must allow this system username.</string>
+    <string name="tailnet_ssh_route_hint">Tailscale SSH requires a Tailscale network, port 22, and no jump host.</string>
+    <string name="tailnet_ssh_cancel_connection">Cancel connection</string>
+    <string name="tailnet_ssh_browser_unavailable">Could not open a browser. Install or enable one, then try again.</string>
+</resources>

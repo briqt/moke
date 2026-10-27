@@ -1,0 +1,10 @@
+<resources>
+    <string name="tailscale_ssh_auth_title">Tailscale SSH 认证</string>
+    <string name="tailscale_ssh_auth_open_browser">打开认证链接</string>
+    <string name="tailscale_ssh_auth_waiting">请在浏览器中完成检查，然后等待服务端返回结果。返回此处不会自动确认认证。</string>
+    <string name="tailscale_ssh_auth_cancelled">已取消 Tailscale SSH 认证。</string>
+    <string name="tailscale_ssh_auth_timed_out">Tailscale SSH 认证超时。请重新连接，并在五分钟内完成浏览器检查。</string>
+    <string name="tailscale_ssh_auth_rejected">Tailscale SSH 认证失败。请检查用户名及 tailnet 的 SSH 策略。</string>
+    <string name="tailscale_ssh_auth_rejected_detail">Tailscale SSH 认证失败：%1$s</string>
+    <string name="tailscale_ssh_auth_invalid_route">Tailscale SSH 需作为第一跳，经该主机选定的 Tailscale 网络直连 22 端口。请检查网络、端口、跳板机或认证方式。</string>
+</resources>

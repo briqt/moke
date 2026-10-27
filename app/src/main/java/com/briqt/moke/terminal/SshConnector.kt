@@ -2,9 +2,12 @@ package com.briqt.moke.terminal
 
 import android.content.Context
 import com.briqt.moke.MokeApplication
+import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
+import com.briqt.moke.data.NetworkKind
+import com.briqt.moke.localized
 import com.briqt.moke.net.NetworkSocketFactory
 import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
@@ -13,6 +16,7 @@ import net.schmizz.sshj.userauth.keyprovider.PKCS8KeyFile
 import net.schmizz.sshj.userauth.password.PasswordFinder
 import net.schmizz.sshj.userauth.password.PasswordUtils
 import java.io.File
+import java.io.IOException
 import java.io.StringReader
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
@@ -86,6 +90,10 @@ class SshConnector(
         /** 见 [newClient]；只用于不经跳板机、直接经网络的连接。 */
         dialHost: String? = null,
     ): Connected {
+        // Validate before creating either client (including KnownHosts / socket-factory side effects).
+        if (!validTailscaleSshRoute(host, jumpHost, network)) {
+            throw IOException(appContext.localized(R.string.tailscale_ssh_auth_invalid_route))
+        }
         val direct = if (jumpHost == null) network else null
         val client = newClient(heartbeat, awaitsTrust(host, direct), direct, dialHost.takeIf { direct != null })
         val (_, jump) = connectSshOwned(
@@ -113,9 +121,24 @@ class SshConnector(
         }
     }
 
-    /** 密码 / 私钥认证。私钥先落盘交给 sshj 识别格式，用完立即删除（加口令 PKCS#8 例外，只在内存里解）。 */
+    /** 认证。私钥用后立即删除；Tailscale SSH 只发送 none，不尝试任何凭据或回退。 */
     fun authenticate(client: SSHClient, h: Host) {
         when (h.authType) {
+            AuthType.TAILSCALE_SSH -> try {
+                TailscaleSshAuth.authenticate(client, h.username, h.displayName)
+            } catch (failure: TailscaleSshAuthFailure) {
+                val message = when (failure.kind) {
+                    TailscaleSshAuthFailureKind.CANCELLED -> appContext.localized(R.string.tailscale_ssh_auth_cancelled)
+                    TailscaleSshAuthFailureKind.TIMED_OUT -> appContext.localized(R.string.tailscale_ssh_auth_timed_out)
+                    TailscaleSshAuthFailureKind.REJECTED -> if (failure.detail.isBlank()) {
+                        appContext.localized(R.string.tailscale_ssh_auth_rejected)
+                    } else {
+                        appContext.localized(R.string.tailscale_ssh_auth_rejected_detail, failure.detail)
+                    }
+                }
+                // Do not attach the raw sshj cause; disconnect errors can contain check URLs.
+                throw TailscaleSshAuthException(failure.kind, message)
+            }
             AuthType.PASSWORD -> client.authPassword(h.username, h.password)
             AuthType.KEY -> if (EncryptedPkcs8.matches(h.privateKeyPem)) {
                 // 加口令的 PKCS#8 不走 sshj 自己的解密（Android 上会空指针），见 EncryptedPkcs8。
@@ -167,6 +190,14 @@ class SshConnector(
         /** 首连等用户确认指纹时的握手超时（略大于 HostKeyPrompt 自己的 120s）。 */
         private const val TRUST_PROMPT_TIMEOUT_MS = 150_000
     }
+}
+
+/** Tailscale SSH must itself be the first hop, through its selected tailnet, on the SSH service port. */
+internal fun validTailscaleSshRoute(host: Host, jump: Host?, network: NetworkEntry?): Boolean {
+    fun firstHop(h: Host): Boolean = h.port == 22 && h.jumpHostId.isBlank() &&
+        network?.kind == NetworkKind.TAILSCALE && h.networkId.isNotBlank() && network.id == h.networkId
+    return (host.authType != AuthType.TAILSCALE_SSH || (jump == null && firstHop(host))) &&
+        (jump == null || jump.authType != AuthType.TAILSCALE_SSH || firstHop(jump))
 }
 
 /** A nonempty key passphrase is opaque, including leading, trailing or exclusively whitespace. */

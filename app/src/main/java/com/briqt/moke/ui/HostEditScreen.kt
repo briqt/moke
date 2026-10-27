@@ -2,6 +2,7 @@ package com.briqt.moke.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -55,6 +56,8 @@ import com.briqt.moke.data.StoreFailure
 import com.briqt.moke.data.StoreResult
 import com.briqt.moke.terminal.KnownHosts
 import com.briqt.moke.terminal.PortForwards
+import com.briqt.moke.net.TailnetDevice
+import com.briqt.moke.net.selectTailnetDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
@@ -71,7 +74,8 @@ fun HostEditScreen(
     onClearFingerprint: (Host) -> Unit = {},
     networks: List<NetworkEntry> = emptyList(),
     networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
-    networkEditor: @Composable (kind: NetworkKind, onClose: (String?) -> Unit) -> Unit = { _, _ -> },
+    networkEditor: @Composable (kind: NetworkKind, initial: NetworkEntry?, onClose: (String?) -> Unit) -> Unit = { _, _, _ -> },
+    loadDevices: suspend (NetworkEntry) -> List<TailnetDevice> = { emptyList() },
     onSaved: () -> Unit = {},
     networkState: ListState<NetworkEntry> = ListState.Ready(networks),
     hostStoreState: ListState<Host> = ListState.Ready(allHosts),
@@ -94,6 +98,10 @@ fun HostEditScreen(
     var jumpHostId by remember(base.id) { mutableStateOf(base.jumpHostId) }
     var networkId by remember(base.id) { mutableStateOf(base.networkId) }
     var creatingNetwork by remember(base.id) { mutableStateOf<NetworkKind?>(null) }
+    var editingNetwork by remember(base.id) { mutableStateOf<NetworkEntry?>(null) }
+    var choosingDevice by remember(base.id) { mutableStateOf(false) }
+    var automaticLabel by remember(base.id) { mutableStateOf<String?>(null) }
+    var authenticationChosen by remember(base.id) { mutableStateOf(false) }
     var startupCommand by remember(base.id) { mutableStateOf(base.startupCommand) }
     var loginCommand by remember(base.id) { mutableStateOf(base.loginCommand) }
     var forwardPorts by remember(base.id) { mutableStateOf(base.forwardPorts) }
@@ -116,7 +124,12 @@ fun HostEditScreen(
     val hostError = if (!FormValidation.host(host)) stringResource(R.string.form_host_invalid) else null
     val portError = if (validPort == null) stringResource(R.string.form_port_invalid) else null
     val usernameError = if (username.isBlank() || username.any { it.isISOControl() }) stringResource(R.string.form_username_invalid) else null
-    val keyError = if (authType == AuthType.KEY && privateKey.isBlank()) stringResource(R.string.form_private_key_required) else null
+    val keyError = when {
+        authType == AuthType.KEY && privateKey.isBlank() -> stringResource(R.string.form_private_key_required)
+        authType == AuthType.TAILSCALE_SSH && (jumpHostId.isNotEmpty() || selectedNetwork?.kind != NetworkKind.TAILSCALE || validPort != 22) ->
+            stringResource(R.string.tailnet_ssh_route_hint)
+        else -> null
+    }
     val jumpError = when {
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Loading -> stringResource(R.string.route_loading)
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Unreadable -> stringResource(R.string.hosts_unreadable_title)
@@ -203,50 +216,10 @@ fun HostEditScreen(
                 label = stringResource(R.string.field_group), value = group, onValueChange = { if (!submitting) group = it },
                 options = loadedHosts.mapNotNull { it.group.trim().ifEmpty { null } }.distinct().sorted(), modifier = Modifier.fillMaxWidth(),
             )
-            FormTextField(host, { host = it }, stringResource(R.string.field_host), error = hostError, submitted = submitted,
-                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[0]))
-            FormTextField(port, { port = it }, stringResource(R.string.field_port), error = portError, submitted = submitted,
-                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[1]))
-            FormTextField(username, { username = it }, stringResource(R.string.field_username), error = usernameError, submitted = submitted,
-                enabled = !submitting, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[2]))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = authType == AuthType.PASSWORD, onClick = { authType = AuthType.PASSWORD }, enabled = !submitting, label = { Text(stringResource(R.string.field_password)) })
-                FilterChip(selected = authType == AuthType.KEY, onClick = { authType = AuthType.KEY }, enabled = !submitting, label = { Text(stringResource(R.string.auth_key)) })
-            }
-            if (authType == AuthType.PASSWORD) {
-                FormTextField(password, { password = it }, stringResource(R.string.field_password), enabled = !submitting,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { RevealToggle(showPassword) { showPassword = !showPassword } })
-            } else {
-                if (!showPrivateKey && privateKey.isNotBlank()) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = keySummary(privateKey), onValueChange = {}, readOnly = true, singleLine = true,
-                        label = { Text(stringResource(R.string.field_private_key)) }, modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = { RevealToggle(false) { showPrivateKey = true } },
-                    )
-                } else {
-                    FormTextField(privateKey, { privateKey = it }, stringResource(R.string.field_private_key), enabled = !submitting,
-                        error = keyError, submitted = submitted, singleLine = false, minLines = 3, maxLines = 6,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.editorTarget(targets[3]),
-                        trailingIcon = if (privateKey.isNotBlank()) { { RevealToggle(true) { showPrivateKey = false } } } else null)
-                }
-                FormTextField(passphrase, { passphrase = it }, stringResource(R.string.field_passphrase), enabled = !submitting,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-                    visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { RevealToggle(showPassphrase) { showPassphrase = !showPassphrase } })
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.label_protocol), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(selected = !useMosh, onClick = { useMosh = false }, enabled = !submitting, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("SSH") }
-                    SegmentedButton(selected = useMosh, onClick = { useMosh = true }, enabled = !submitting, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("mosh") }
-                }
-            }
             if (jumpOptions.size > 1 || jumpHostId.isNotEmpty()) {
                 Column(modifier = Modifier.editorTarget(targets[4])) {
                     RichDropdown(label = stringResource(R.string.field_jump_host), options = jumpOptions, selectedId = jumpHostId,
-                        onSelect = { jumpHostId = it }, enabled = !submitting && hostStoreState is ListState.Ready,
+                        onSelect = { jumpHostId = it; choosingDevice = false }, enabled = !submitting && hostStoreState is ListState.Ready,
                         isError = jumpError != null, missingTitle = if (hostStoreState is ListState.Ready) stringResource(R.string.badge_jump_deleted) else stringResource(R.string.field_jump_host), supportingText = jumpError)
                     if (useMosh && jumpHostId.isNotEmpty()) InfoNote(stringResource(R.string.mosh_jump_hint))
                 }
@@ -254,20 +227,25 @@ fun HostEditScreen(
             Column(modifier = Modifier.editorTarget(targets[5])) {
                 RichDropdown(
                     label = stringResource(R.string.field_network), options = networkOptions, selectedId = networkId,
-                    onSelect = { networkId = it }, enabled = !submitting && jumpHostId.isEmpty() && networkState is ListState.Ready,
+                    onSelect = { networkId = it; choosingDevice = false }, enabled = !submitting && jumpHostId.isEmpty() && networkState is ListState.Ready,
                     isError = networkError != null, missingTitle = if (networkState is ListState.Ready) stringResource(R.string.network_missing_option) else stringResource(R.string.field_network), supportingText = networkError,
                     footer = { dismiss ->
                         val limit = loadedNetworks.count { it.kind == NetworkKind.TAILSCALE } >= MAX_TAILNET_ENTRIES
                         DropdownMenuItem(text = { Text(stringResource(R.string.network_new_tailnet_item)) }, enabled = !limit,
-                            onClick = { dismiss(); creatingNetwork = NetworkKind.TAILSCALE })
+                            onClick = { dismiss(); editingNetwork = null; creatingNetwork = NetworkKind.TAILSCALE })
                         if (limit) Text(stringResource(R.string.tailnet_limit, MAX_TAILNET_ENTRIES), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-                        DropdownMenuItem(text = { Text(stringResource(R.string.network_new_proxy_item)) }, onClick = { dismiss(); creatingNetwork = NetworkKind.PROXY })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.network_new_proxy_item)) }, onClick = { dismiss(); editingNetwork = null; creatingNetwork = NetworkKind.PROXY })
                     },
                 )
                 if (networkState == ListState.Loading) InfoNote(stringResource(R.string.networks_loading))
                 if (networkState == ListState.Unreadable) {
                     InfoNote(stringResource(R.string.networks_unreadable), error = true)
                     TextButton(onClick = onRetryNetworks) { Text(stringResource(R.string.action_retry)) }
+                }
+                if (selectedNetwork?.kind == NetworkKind.TAILSCALE && jumpHostId.isEmpty()) {
+                    TextButton(onClick = { choosingDevice = true }, enabled = !submitting && networkState is ListState.Ready, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                        Text(stringResource(R.string.tailnet_choose_device))
+                    }
                 }
             }
             if (jumpHost != null) {
@@ -278,6 +256,51 @@ fun HostEditScreen(
                     else -> loadedNetworks.firstOrNull { it.id == jumpHost.networkId }?.name ?: stringResource(R.string.network_missing_option)
                 }
                 InfoNote(stringResource(R.string.network_via_jump, jumpHost.displayName, via))
+            }
+            FormTextField(host, { host = it }, stringResource(R.string.field_host), error = hostError, submitted = submitted,
+                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[0]))
+            FormTextField(port, { port = it }, stringResource(R.string.field_port), error = portError, submitted = submitted,
+                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[1]))
+            FormTextField(username, { username = it }, stringResource(R.string.field_username), error = usernameError, submitted = submitted,
+                enabled = !submitting, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[2]))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = authType == AuthType.PASSWORD, onClick = { authType = AuthType.PASSWORD; authenticationChosen = true }, enabled = !submitting, label = { Text(stringResource(R.string.field_password)) })
+                FilterChip(selected = authType == AuthType.KEY, onClick = { authType = AuthType.KEY; authenticationChosen = true }, enabled = !submitting, label = { Text(stringResource(R.string.auth_key)) })
+                FilterChip(selected = authType == AuthType.TAILSCALE_SSH, onClick = { authType = AuthType.TAILSCALE_SSH; authenticationChosen = true }, enabled = !submitting, label = { Text(stringResource(R.string.auth_tailscale_ssh)) })
+            }
+            if (authType == AuthType.PASSWORD) {
+                FormTextField(password, { password = it; authenticationChosen = true }, stringResource(R.string.field_password), enabled = !submitting,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { RevealToggle(showPassword) { showPassword = !showPassword } })
+            } else if (authType == AuthType.KEY) {
+                if (!showPrivateKey && privateKey.isNotBlank()) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = keySummary(privateKey), onValueChange = {}, readOnly = true, singleLine = true,
+                        label = { Text(stringResource(R.string.field_private_key)) }, modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = { RevealToggle(false) { showPrivateKey = true } },
+                    )
+                } else {
+                    FormTextField(privateKey, { privateKey = it; authenticationChosen = true }, stringResource(R.string.field_private_key), enabled = !submitting,
+                        error = keyError, submitted = submitted, singleLine = false, minLines = 3, maxLines = 6,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.editorTarget(targets[3]),
+                        trailingIcon = if (privateKey.isNotBlank()) { { RevealToggle(true) { showPrivateKey = false } } } else null)
+                }
+                FormTextField(passphrase, { passphrase = it }, stringResource(R.string.field_passphrase), enabled = !submitting,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                    visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { RevealToggle(showPassphrase) { showPassphrase = !showPassphrase } })
+            } else {
+                Column(Modifier.editorTarget(targets[3])) {
+                    InfoNote(keyError ?: stringResource(R.string.tailnet_ssh_hint), error = keyError != null && submitted)
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.label_protocol), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(selected = !useMosh, onClick = { useMosh = false }, enabled = !submitting, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("SSH") }
+                    SegmentedButton(selected = useMosh, onClick = { useMosh = true }, enabled = !submitting, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("mosh") }
+                }
             }
             RichDropdown(label = stringResource(R.string.host_persistence), options = listOf(
                 DropdownOption(SessionPersistence.NONE.name, stringResource(R.string.persistence_none)),
@@ -308,10 +331,35 @@ fun HostEditScreen(
             confirmLabel = stringResource(R.string.action_clear_fingerprint), destructive = true,
             onConfirm = { onClearFingerprint(target); confirmFingerprint = null; fingerprintCleared = true }, onDismiss = { confirmFingerprint = null })
     }
+    if (choosingDevice && networkState is ListState.Ready && selectedNetwork?.kind == NetworkKind.TAILSCALE && jumpHostId.isEmpty()) {
+        val chosenNetwork = selectedNetwork
+        TailnetDevicePicker(
+            network = chosenNetwork,
+            load = loadDevices,
+            onSelect = select@{ device ->
+                if (!choosingDevice || networkId != chosenNetwork.id || jumpHostId.isNotEmpty()) return@select
+                val draft = base.copy(label = label, host = host, port = validPort ?: base.port, username = username,
+                    authType = authType, password = password, privateKeyPem = privateKey, networkId = networkId)
+                val selected = selectTailnetDevice(draft, chosenNetwork.id, device, initial == null, automaticLabel, authenticationChosen)
+                val generated = label.isBlank() || label == automaticLabel
+                host = selected.host
+                label = selected.label
+                if (generated) automaticLabel = selected.label
+                if (initial == null && !authenticationChosen && draft.password.isEmpty() && draft.privateKeyPem.isBlank() && device.tailscaleSsh) port = selected.port.toString()
+                authType = selected.authType
+                choosingDevice = false
+            },
+            onOpenNetwork = { choosingDevice = false; editingNetwork = chosenNetwork; creatingNetwork = chosenNetwork.kind },
+            onDismiss = { choosingDevice = false },
+        )
+    }
     creatingNetwork?.let { kind ->
         Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnBackPress = false, dismissOnClickOutside = false)) {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                networkEditor(kind) { savedId -> creatingNetwork = null; if (savedId != null) networkId = savedId }
+                networkEditor(kind, editingNetwork) { savedId ->
+                    creatingNetwork = null; editingNetwork = null
+                    if (savedId != null) networkId = savedId
+                }
             }
         }
     }

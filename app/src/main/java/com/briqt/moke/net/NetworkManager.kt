@@ -172,6 +172,12 @@ class NetworkManager(context: Context) {
     fun dialError(t: DialTicket, e: NetworkEntry): NetworkException? =
         Netbridge.dialError(t.username).takeIf { it.isNotBlank() }?.let { NetworkException.from(Exception(it), e) }
 
+    /** Explicit device discovery starts only this network; the runtime rejects retired identities. */
+    fun devices(e: NetworkEntry): List<TailnetDevice> = guard(e) {
+        if (e.kind != NetworkKind.TAILSCALE) throw NetworkRuntime.Failure("INVALID_ARGUMENT", "network is not a tailnet")
+        runtime.withStarted(configured(e)) { parseTailnetDevices(Netbridge.nodePeers(instanceId(e))) }
+    }
+
     /** 只查选定 tailnet 的节点，不走系统 DNS。 */
     fun resolveTarget(e: NetworkEntry, host: String, port: Int): String = guard(e) {
         runtime.withStarted(configured(e)) {

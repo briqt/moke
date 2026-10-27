@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/briqt/moke/netbridge/internal/tailnet"
 	"tailscale.com/envknob"
 	"tailscale.com/logtail"
 	"tailscale.com/net/netmon"
@@ -88,10 +89,10 @@ func StartNode(configJSON string) error { return defaultBridge.startNode(configJ
 // StartProxy registers an external proxy: {"id","type","host","port","username","password",...}.
 func StartProxy(configJSON string) error { return defaultBridge.startProxy(configJSON) }
 
-// Stop stops a node or proxy. It fails with BUSY while connections or relays use it.
+// Stop stops a node or proxy. It fails with BUSY while connections, relays or peer reads use it.
 func Stop(id string) error { return defaultBridge.stop(id) }
 
-// Leases is how many connections, pending dials and relays use network id.
+// Leases is how many connections, pending dials, relays and peer reads use network id.
 func Leases(id string) int { return defaultBridge.leaseCount(id) }
 
 // SweepTickets releases dial tickets that were never consumed and have expired. The idle reaper
@@ -138,6 +139,22 @@ func NodeStatus(id string) (string, error) {
 		out.KeyExpiry = s.KeyExpiry.Unix()
 	}
 	data, err := json.Marshal(out)
+	return string(data), err
+}
+
+// NodePeers returns {"peers":[...]} from this node's current visible netmap,
+// without probing peers. tailscaleSsh is an advertisement, not login authorization.
+func NodePeers(id string) (string, error) {
+	peers, err := defaultBridge.nodePeers(id)
+	if err != nil {
+		return "", err
+	}
+	if peers == nil {
+		peers = []tailnet.Peer{}
+	}
+	data, err := json.Marshal(struct {
+		Peers []tailnet.Peer `json:"peers"`
+	}{Peers: peers})
 	return string(data), err
 }
 

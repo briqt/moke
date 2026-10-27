@@ -38,6 +38,7 @@ type tailnetNode interface {
 	Start() error
 	Close() error
 	Snapshot(context.Context) (tailnet.Snapshot, error)
+	Peers(context.Context) ([]tailnet.Peer, error)
 	StartLogin(context.Context) error
 	Logout(context.Context) error
 	Dial(context.Context, string) (net.Conn, error)
@@ -359,7 +360,7 @@ func (b *bridge) release(n *network) {
 }
 
 // stop closes a network only when nothing uses it: a stop must never cut a
-// live connection or relay (the app retries after its idle delay).
+// live connection, relay or peer read (the app retries after its idle delay).
 func (b *bridge) stop(id string) error {
 	b.mu.Lock()
 	n := b.networks[id]
@@ -422,6 +423,30 @@ func (b *bridge) nodeStatus(id string) (tailnet.Snapshot, error) {
 		return tailnet.Snapshot{}, codes.Boundary("read node status", err, codes.Internal, n.secrets...)
 	}
 	return s, nil
+}
+
+func (b *bridge) nodePeers(id string) ([]tailnet.Peer, error) {
+	n, err := b.nodeOf(id)
+	if err != nil {
+		return nil, err
+	}
+	// Pin this exact instance: Stop and a new StartNode may have run since
+	// nodeOf. The read holds a lease, but no registry lock during local I/O.
+	b.mu.Lock()
+	if b.networks[id] != n || n.stopping {
+		b.mu.Unlock()
+		return nil, codes.New(codes.NotStarted, "network is not started")
+	}
+	n.leases++
+	b.mu.Unlock()
+	defer b.release(n)
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+	peers, err := n.node.Peers(ctx)
+	if err != nil {
+		return nil, codes.Boundary("read node peers", err, codes.Internal, n.secrets...)
+	}
+	return peers, nil
 }
 
 // loginURL starts an interactive login and waits for the control server's URL.
