@@ -93,6 +93,17 @@ class SettingsStore(private val context: Context) {
         /** 把任意字号规整到 0.5 网格并夹到范围内（避免浮点漂移）。 */
         fun snapFontSize(v: Float): Float =
             (Math.round(v / FONT_SIZE_STEP) * FONT_SIZE_STEP).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
+
+        /**
+         * 读取行距/字间距时规整持久化值：落在范围内原样保留，越界（含 NaN/∞）一律回落到默认 1.0。
+         *
+         * 为什么不用 coerceIn：v0.1.3 把范围从 0.8–1.6 收窄到 0.7–1.3，旧版本存下的 1.4–1.6 会被夹到
+         * 滑轨最右端的 1.3——看上去就像用户自己把行距拉满，终端比默认松 30%，而用户既没改过设置、
+         * 也无从察觉（滑轨显示 1.3，是个合法值）。越界值属于「当前版本不再支持的陈旧偏好」，
+         * 按未设置处理、回到中性默认，才不会把一次范围变更伪装成一次极值选择。
+         */
+        fun sanitizeSpacing(v: Float?): Float =
+            if (v != null && v in MIN_SPACING..MAX_SPACING) v else DEFAULT_SPACING
     }
 
     /** 终端配色（关闭联动时的唯一选择；开启联动后作为「深色模式用」那一套）。 */
@@ -266,12 +277,12 @@ class SettingsStore(private val context: Context) {
 
     /** 行距倍数（1.0=字体自然行距）。 */
     val lineSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
-        (prefs[lineSpacingKey] ?: DEFAULT_SPACING).coerceIn(MIN_SPACING, MAX_SPACING)
+        sanitizeSpacing(prefs[lineSpacingKey])
     }
 
     /** 字间距倍数（1.0=正常）。 */
     val letterSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
-        (prefs[letterSpacingKey] ?: DEFAULT_SPACING).coerceIn(MIN_SPACING, MAX_SPACING)
+        sanitizeSpacing(prefs[letterSpacingKey])
     }
 
     suspend fun setColorScheme(id: String) {

@@ -494,33 +494,38 @@ public final class TerminalView extends View {
      *
      * @param textSize the new font size, in density-independent pixels.
      */
-    // moke 扩展：行距倍数 / 字间距（em），随渲染器一并生效；默认值等价上游。
+    // moke 扩展：行距倍数 / 字距倍数，随渲染器一并生效；默认值等价上游。
     private float mLineSpacingMul = 1f;
-    private float mLetterSpacingEm = 0f;
+    private float mLetterSpacingMul = 1f;
 
     public void setTextSize(int textSize) {
         if (mRenderer != null && mRenderer.mTextSize == textSize) return;
         mFontGeometryDirty = true;
-        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface, mLineSpacingMul, mLetterSpacingEm);
+        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface, mLineSpacingMul, mLetterSpacingMul);
         updateSize();
     }
 
     public void setTypeface(Typeface newTypeface) {
         if (java.util.Objects.equals(mRenderer.mTypeface, newTypeface)) return;
         mFontGeometryDirty = true;
-        mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface, mLineSpacingMul, mLetterSpacingEm);
+        mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface, mLineSpacingMul, mLetterSpacingMul);
         updateSize();
         invalidate();
     }
 
-    /** moke 扩展：设置行距倍数与字间距（em），重建渲染器并重算行列。 */
-    public void setFontSpacing(float lineSpacingMul, float letterSpacingEm) {
-        if (mLineSpacingMul == lineSpacingMul && mLetterSpacingEm == letterSpacingEm) return;
+    /**
+     * moke 扩展：设置行距倍数与字距倍数，重建渲染器并重算行列。
+     *
+     * <p>两个倍数缩的都是<b>格子</b>：行距 → 格子高，字距 → 格子宽。字形永远按自己的 advance 出墨，
+     * 不会被拉伸（详见 {@link GridMetrics}）。
+     */
+    public void setFontSpacing(float lineSpacingMul, float letterSpacingMul) {
+        if (mLineSpacingMul == lineSpacingMul && mLetterSpacingMul == letterSpacingMul) return;
         mFontGeometryDirty = true;
         mLineSpacingMul = lineSpacingMul;
-        mLetterSpacingEm = letterSpacingEm;
+        mLetterSpacingMul = letterSpacingMul;
         if (mRenderer != null) {
-            mRenderer = new TerminalRenderer(mRenderer.mTextSize, mRenderer.mTypeface, mLineSpacingMul, mLetterSpacingEm);
+            mRenderer = new TerminalRenderer(mRenderer.mTextSize, mRenderer.mTypeface, mLineSpacingMul, mLetterSpacingMul);
             updateSize();
             invalidate();
         }

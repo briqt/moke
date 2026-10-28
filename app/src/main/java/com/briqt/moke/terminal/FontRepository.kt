@@ -167,10 +167,22 @@ class FontRepository(private val context: Context) {
         loadSymbolsFont()?.let {
             builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
         }
-        // Nerd Font 图标回退（内置 Symbols Nerd Font Mono）：powerline 分隔符、devicons、git/文件类型
-        // 图标都在私有区（U+E000 起），常规等宽字体一概没有 → 不补就是一片豆腐块。
-        // 放在符号回退之后：普通 Unicode 仍优先走前面的字体，私有区才落到这里。
-        loadNerdSymbolsFont()?.let {
+        // Nerd Font 图标回退分两段，因为"图标"和"线画"要的度量不一样：
+        //
+        // 1) 设计尺寸图标（内置 Symbols Nerd Font Mono，每个字形 advance = 1.0em）：
+        //    devicons / Font Awesome / git 图标都是按 1em 方形设计的。按设计尺寸画、让它对称溢出到
+        //    相邻格，图标才和桌面终端（alacritty/foot）里看到的一样大；压进 0.6em 的格子会只剩 60%
+        //    大小——这正是"yazi 里图标偏小"的成因。渲染器对"比格子宽的外来字形"不再缩小。
+        // 2) 格子度量图标（内置 JetBrainsMono NFM，每个字形 advance = 0.6em = 默认主字体）：
+        //    box drawing / 块元素 / powerline 必须与格子严丝合缝，否则接缝会断开。设计尺寸字体没有
+        //    box drawing（U+2500 缺失），所以这些字形会落到这一段；主字体自带这些字形时（JBM、
+        //    Maple NF）则根本走不到回退。
+        //
+        // 两段的度量差异由 BundledFontMetricsTest 守住。
+        loadNerdSymbolsDesignFont()?.let {
+            builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
+        }
+        loadNerdSymbolsMonoFont()?.let {
             builder.addCustomFallback(android.graphics.fonts.FontFamily.Builder(it).build())
         }
         builder.setSystemFallback("sans-serif")
@@ -181,8 +193,14 @@ class FontRepository(private val context: Context) {
         android.graphics.fonts.Font.Builder(context.resources, R.font.noto_sans_symbols2).build()
     }.getOrNull()
 
-    private fun loadNerdSymbolsFont(): android.graphics.fonts.Font? = runCatching {
-        android.graphics.fonts.Font.Builder(context.resources, R.font.symbols_nerd_font).build()
+    /** 设计尺寸（1em advance）的 Nerd 图标：pictograph 用它。 */
+    private fun loadNerdSymbolsDesignFont(): android.graphics.fonts.Font? = runCatching {
+        android.graphics.fonts.Font.Builder(context.resources, R.font.nerd_symbols_design).build()
+    }.getOrNull()
+
+    /** 与格子同度量（0.6em advance）的 Nerd 图标：线画（powerline / box drawing / 块元素）用它。 */
+    private fun loadNerdSymbolsMonoFont(): android.graphics.fonts.Font? = runCatching {
+        android.graphics.fonts.Font.Builder(context.resources, R.font.nerd_symbols_mono).build()
     }.getOrNull()
 
     /** 导入本地字体文件（TTF/OTF）：拷进 fonts 目录并校验可加载，返回生成的字体 id。 */
