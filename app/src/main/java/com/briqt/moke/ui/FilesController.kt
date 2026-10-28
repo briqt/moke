@@ -273,7 +273,7 @@ class FilesController(context: Context, private val scope: CoroutineScope) {
     private fun detach(): FilesWork.Page<SftpSession>? {
         job?.cancel()
         job = null
-        return work.detachPage()
+        return work.detachPage()?.also { it.connection.cancelAuthentication() }
     }
     private fun disconnect() {
         detach()?.let { retired -> scope.launch(Dispatchers.IO) { runCatching { retired.connection.close() } } }

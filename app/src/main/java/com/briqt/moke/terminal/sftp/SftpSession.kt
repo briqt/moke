@@ -4,6 +4,7 @@ import android.content.Context
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.terminal.SshConnector
+import com.briqt.moke.terminal.TailscaleSshAuth
 import com.briqt.moke.terminal.TailscaleSshAuthException
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
@@ -50,6 +51,7 @@ class SftpSession(
 ) : Closeable {
 
     private val appContext = context.applicationContext
+    internal val authenticationOwner = TailscaleSshAuth.Owner()
 
     /**
      * 连接期间收到的 TOFU 等提示；没有终端可写，由调用方接到 UI（失败原因/横幅）。
@@ -73,7 +75,7 @@ class SftpSession(
         check(!closed) { "session closed" }
         sftp?.let { return it }
         val connector = SshConnector(appContext) { notice = it }
-        val c = connector.connect(host, jumpHost, network, heartbeat = true)
+        val c = connector.connect(host, jumpHost, network, heartbeat = true, authOwner = authenticationOwner)
         // 心跳间隔必须显式给：只设 KeepAliveProvider.HEARTBEAT 而不给间隔等于没开，
         // 浏览连接会在用户看着列表发呆几分钟后被中间设备静默掐断（真机实测）。
         runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
@@ -189,8 +191,12 @@ class SftpSession(
         }
     }
 
+    /** Metadata only: page retirement must not wait for its IO cleanup job. */
+    internal fun cancelAuthentication() = authenticationOwner.cancel()
+
     override fun close() {
         closed = true
+        cancelAuthentication()
         runCatching { sftp?.close() }
         runCatching { conn?.close() }
         sftp = null

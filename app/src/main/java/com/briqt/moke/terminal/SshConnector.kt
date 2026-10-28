@@ -89,6 +89,7 @@ class SshConnector(
         heartbeat: Boolean = false,
         /** 见 [newClient]；只用于不经跳板机、直接经网络的连接。 */
         dialHost: String? = null,
+        authOwner: TailscaleSshAuth.Owner? = null,
     ): Connected {
         // Validate before creating either client (including KnownHosts / socket-factory side effects).
         if (!validTailscaleSshRoute(host, jumpHost, network)) {
@@ -100,12 +101,12 @@ class SshConnector(
             target = client,
             createJump = jumpHost?.let { h -> { newClient(heartbeat, awaitsTrust(h, network), network) } },
             connectJump = { it.connect(jumpHost!!.host, jumpHost.port) },
-            authenticateJump = { authenticate(it, jumpHost!!) },
+            authenticateJump = { authenticate(it, jumpHost!!, authOwner) },
             connectTarget = { j ->
                 if (j == null) client.connect(host.host, host.port)
                 else client.connectVia(j.newDirectConnection(host.host, host.port))
             },
-            authenticateTarget = { authenticate(it, host) },
+            authenticateTarget = { authenticate(it, host, authOwner) },
             disconnect = { it.disconnect() },
         )
         return Connected(client, jump)
@@ -122,10 +123,10 @@ class SshConnector(
     }
 
     /** 认证。私钥用后立即删除；Tailscale SSH 只发送 none，不尝试任何凭据或回退。 */
-    fun authenticate(client: SSHClient, h: Host) {
+    fun authenticate(client: SSHClient, h: Host, authOwner: TailscaleSshAuth.Owner? = null) {
         when (h.authType) {
             AuthType.TAILSCALE_SSH -> try {
-                TailscaleSshAuth.authenticate(client, h.username, h.displayName)
+                TailscaleSshAuth.authenticate(client, h.username, h.displayName, authOwner)
             } catch (failure: TailscaleSshAuthFailure) {
                 val message = when (failure.kind) {
                     TailscaleSshAuthFailureKind.CANCELLED -> appContext.localized(R.string.tailscale_ssh_auth_cancelled)

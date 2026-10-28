@@ -18,12 +18,36 @@ object TailscaleSshAuth {
     private val requests = TailscaleSshAuthRequests()
     val pending: StateFlow<List<Request>> = requests.pending
 
+    /** One connection owner; cancellation callbacks only update authentication metadata. */
+    class Owner {
+        private val lock = Any()
+        private var cancelled = false
+        private val listeners = linkedSetOf<() -> Unit>()
+
+        internal fun onCancel(listener: () -> Unit): () -> Unit {
+            val active = synchronized(lock) {
+                if (cancelled) false else { listeners.add(listener); true }
+            }
+            if (!active) listener()
+            return { synchronized(lock) { listeners.remove(listener) } }
+        }
+
+        fun cancel() {
+            val pending = synchronized(lock) {
+                if (cancelled) return
+                cancelled = true
+                listeners.toList().also { listeners.clear() }
+            }
+            pending.forEach { runCatching(it) }
+        }
+    }
+
     /** Metadata only, safe on the UI thread. The attempt's worker closes its actual socket. */
     fun cancel(id: String) = requests.cancel(id)
 
     internal const val AUTH_TIMEOUT_MS = 300_000L
 
-    internal fun authenticate(client: SSHClient, username: String, target: String) {
+    internal fun authenticate(client: SSHClient, username: String, target: String, owner: Owner? = null) {
         val previousTimeout = client.transport.timeoutMs
         try {
             // SSHClient.auth reads this timeout for its promise. Never widen handshake/password timeouts.
@@ -32,6 +56,7 @@ object TailscaleSshAuth {
                 target = target,
                 readBanner = { client.userAuth.banner },
                 abort = { client.socket?.close() },
+                owner = owner,
                 authenticate = { client.auth(username, AuthNone()) },
             )
         } finally {
@@ -78,6 +103,7 @@ internal class TailscaleSshAuthRequests {
         abort: () -> Unit,
         timeoutMs: Long = TailscaleSshAuth.AUTH_TIMEOUT_MS,
         pollMs: Long = 100L,
+        owner: TailscaleSshAuth.Owner? = null,
         authenticate: () -> Unit,
     ) {
         require(timeoutMs > 0 && pollMs > 0)
@@ -119,9 +145,13 @@ internal class TailscaleSshAuthRequests {
         var failure: Throwable? = null
         var reason: TailscaleSshAuthFailureKind?
         var detail = ""
+        var releaseOwner: (() -> Unit)? = null
         try {
-            observer.start()
-            authenticate()
+            releaseOwner = owner?.onCancel { stop(attempt, TailscaleSshAuthFailureKind.CANCELLED) }
+            if (attempt.stopped == null) {
+                observer.start()
+                if (attempt.stopped == null) authenticate()
+            }
         } catch (t: Throwable) {
             failure = t
         } finally {
@@ -140,6 +170,7 @@ internal class TailscaleSshAuthRequests {
                 attempt.wake.countDown()
                 attempt.stopped
             }
+            releaseOwner?.invoke()
             observer.interrupt()
             // No monitor survives normal completion; bound cleanup even if the socket implementation stalls.
             var interrupted = Thread.interrupted() && !attempt.interruptedByObserver || externallyInterrupted

@@ -26,6 +26,7 @@ class TailscaleSshAuthTest {
         initialBanner: String = "Check https://login.example.test/check?token=secret",
         timeoutMs: Long = 5_000,
         private val fail: Boolean = false,
+        owner: TailscaleSshAuth.Owner? = null,
     ) : AutoCloseable {
         val banner = AtomicReference(initialBanner)
         val started = CountDownLatch(1)
@@ -42,6 +43,7 @@ class TailscaleSshAuthTest {
                     abort = { abortThread.set(Thread.currentThread()); aborts.incrementAndGet(); release.countDown() },
                     timeoutMs = timeoutMs,
                     pollMs = 5,
+                    owner = owner,
                 ) {
                     started.countDown()
                     check(release.await(10, TimeUnit.SECONDS)) { "test authentication did not complete" }
@@ -250,6 +252,90 @@ class TailscaleSshAuthTest {
         }.start()
         assertTrue(done.await(2, TimeUnit.SECONDS))
         assertEquals(TailscaleSshAuthFailureKind.CANCELLED, (result.get() as TailscaleSshAuthFailure).kind)
+        assertTrue(requests.pending.value.isEmpty())
+    }
+
+    @Test fun `cancelled owner cannot start authentication or publish a late banner`() {
+        val requests = TailscaleSshAuthRequests()
+        val owner = TailscaleSshAuth.Owner().also { it.cancel() }
+        val calls = AtomicInteger()
+        val failure = assertThrows(TailscaleSshAuthFailure::class.java) {
+            requests.authenticate("host", { "Check https://login.example.test/check" }, {}, owner = owner) {
+                calls.incrementAndGet()
+            }
+        }
+        assertEquals(TailscaleSshAuthFailureKind.CANCELLED, failure.kind)
+        assertEquals(0, calls.get())
+        assertTrue(requests.pending.value.isEmpty())
+    }
+
+    @Test fun `closing owner before its first banner aborts the pending authentication`() {
+        val requests = TailscaleSshAuthRequests()
+        val owner = TailscaleSshAuth.Owner()
+        Running(requests, initialBanner = "", owner = owner).use { attempt ->
+            assertTrue(attempt.started.await(2, TimeUnit.SECONDS))
+            owner.cancel()
+            attempt.banner.set("Late check https://login.example.test/check")
+            assertTrue("closed owner kept waiting for authentication", attempt.done.await(2, TimeUnit.SECONDS))
+            assertEquals(TailscaleSshAuthFailureKind.CANCELLED, (attempt.failure.get() as TailscaleSshAuthFailure).kind)
+            assertEquals(1, attempt.aborts.get())
+            assertNotSame(Thread.currentThread(), attempt.abortThread.get())
+            assertTrue(requests.pending.value.isEmpty())
+        }
+    }
+
+    @Test fun `owner cancellation removes its visible request immediately and is idempotent`() {
+        val requests = TailscaleSshAuthRequests()
+        val owner = TailscaleSshAuth.Owner()
+        Running(requests, owner = owner).use { attempt ->
+            val request = awaitRequest(requests).single()
+            owner.cancel()
+            assertTrue(requests.pending.value.isEmpty())
+            owner.cancel()
+            assertTrue(attempt.done.await(2, TimeUnit.SECONDS))
+            assertEquals(1, attempt.aborts.get())
+            assertNoObserver(request.id)
+        }
+    }
+
+    @Test fun `one owner cancels all its checks without cancelling another owner at the same host`() {
+        val requests = TailscaleSshAuthRequests()
+        val owner = TailscaleSshAuth.Owner()
+        Running(requests, owner = owner).use { first ->
+            Running(requests, owner = owner).use { second ->
+                val otherOwner = TailscaleSshAuth.Owner()
+                Running(requests, owner = otherOwner).use { other ->
+                    awaitRequest(requests, 3)
+                    owner.cancel()
+                    assertEquals(1, requests.pending.value.size)
+                    assertTrue(first.done.await(2, TimeUnit.SECONDS))
+                    assertTrue(second.done.await(2, TimeUnit.SECONDS))
+                    assertEquals(1, first.aborts.get())
+                    assertEquals(1, second.aborts.get())
+                    assertEquals(0, other.aborts.get())
+                    other.finish()
+                    assertNull(other.failure.get())
+                }
+            }
+        }
+        assertTrue(requests.pending.value.isEmpty())
+    }
+
+    @Test fun `closing a completed owner does not abort completed or replacement authentication`() {
+        val requests = TailscaleSshAuthRequests()
+        val owner = TailscaleSshAuth.Owner()
+        Running(requests, owner = owner).use { completed ->
+            awaitRequest(requests)
+            completed.finish()
+            Running(requests, owner = TailscaleSshAuth.Owner()).use { replacement ->
+                val request = awaitRequest(requests).single()
+                owner.cancel()
+                assertEquals(0, completed.aborts.get())
+                assertEquals(0, replacement.aborts.get())
+                assertEquals(listOf(request), requests.pending.value)
+                replacement.finish()
+            }
+        }
         assertTrue(requests.pending.value.isEmpty())
     }
 

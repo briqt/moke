@@ -69,6 +69,7 @@ class SshTransport(
     @Volatile private var sshSession: SessionChannel? = null
     @Volatile private var out: OutputStream? = null
     private val resources = TransportResources()
+    internal val authenticationOwner = TailscaleSshAuth.Owner()
     private val closed get() = resources.closed
     private val inputQueue = TerminalInputQueue("moke-ssh-input") { if (closed) null else out }
     private val windowSize = TerminalSizeState(inputQueue::execute)
@@ -124,7 +125,7 @@ class SshTransport(
                 var selectedStartup = TmuxStartup(effectiveStartup)
                 withSshChannel(
                     resources,
-                    connect = { connector.connect(host, jumpHost, network, heartbeat = true).also { connected = it } },
+                    connect = { connector.connect(host, jumpHost, network, heartbeat = true, authOwner = authenticationOwner).also { connected = it } },
                     disconnect = { it.close() },
                     startSession = { conn ->
                         runCatching { conn.client.connection.keepAlive.keepAliveInterval = 30 }
@@ -285,6 +286,7 @@ class SshTransport(
     }
 
     private fun stopAuxiliaryWork() {
+        authenticationOwner.cancel()
         latencyThread?.interrupt()
         loginThread?.interrupt()
         inputQueue.shutdownNow()

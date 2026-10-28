@@ -81,6 +81,7 @@ class MoshTransport(
     @Volatile private var out: FileOutputStream? = null
     @Volatile private var loginThread: Thread? = null
     private val resources = TransportResources()
+    internal val authenticationOwner = TailscaleSshAuth.Owner()
     private val closed get() = resources.closed
     private val inputQueue = TerminalInputQueue("moke-mosh-input") { if (closed) null else out }
     private val windowSize = TerminalSizeState(inputQueue::execute)
@@ -282,7 +283,7 @@ class MoshTransport(
         // Not an authentication key, and deliberately independent of the tmux owner nonce.
         val instanceNonce = java.util.UUID.randomUUID().toString().replace("-", "")
         return bootstrapOperation.run(
-            connect = { SshConnector(appContext).connect(host, jumpHost, network, dialHost = bootstrapDialHost) },
+            connect = { SshConnector(appContext).connect(host, jumpHost, network, dialHost = bootstrapDialHost, authOwner = authenticationOwner) },
             prepare = { connected ->
                 val startup = tmuxStartup(effectiveStartup, observerNonce, tmuxScripts) { supportsTmuxObserver(connected.client) }
                 tmuxObserverCapability = startup.capability
@@ -393,7 +394,7 @@ class MoshTransport(
     private fun controlClient(): SSHClient {
         control?.takeIf { it.client.isConnected && it.client.isAuthenticated }?.let { return it.client }
         closeControl()
-        val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true, dialHost = bootstrapDialHost)
+        val c = SshConnector(appContext).connect(host, jumpHost, network, heartbeat = true, dialHost = bootstrapDialHost, authOwner = authenticationOwner)
         control = c
         if (closed) {
             closeControl()
@@ -470,6 +471,7 @@ class MoshTransport(
     }
 
     private fun stopAuxiliaryWork() {
+        authenticationOwner.cancel()
         inputQueue.shutdownNow()
         loginThread?.interrupt()
         if (!auxiliaryStopped.compareAndSet(false, true)) return
