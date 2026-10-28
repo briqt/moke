@@ -309,7 +309,7 @@ fun TerminalScreen(
         val px = Math.round(fontSizeSp * density)
         view.setTextSize(px)
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
-        view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        view.setFontSpacing(lineSpacing, letterSpacing)
         view.attachSession(ts.session)
         onDispose {
             if (composeView.viewTreeObserver.isAlive) composeView.viewTreeObserver.removeOnWindowFocusChangeListener(focusObserver)
@@ -348,7 +348,7 @@ fun TerminalScreen(
         view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, lineSpacing, letterSpacing) {
-        view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        view.setFontSpacing(lineSpacing, letterSpacing)
         view.onScreenUpdated()
     }
     LaunchedEffect(ts.id, cursorStyle) {
@@ -768,9 +768,6 @@ private fun syncMods(controller: TerminalController, mods: Modifiers) {
 private fun schemeBgColor(schemeId: String): Int =
     runCatching { android.graphics.Color.parseColor(TerminalThemes.byId(schemeId).bg) }
         .getOrDefault(android.graphics.Color.BLACK)
-
-/** 字间距倍数（1.0=正常）→ Android Paint 的 letterSpacing（em）。±0.1 倍 ≈ ±0.05em，微调而不过火。 */
-fun letterSpacingEm(mul: Float): Float = (mul - 1f) * 0.5f
 
 /** 字号显示：整数省略小数（11），半档保留一位（11.5）。 */
 fun fmtFontSize(sp: Float): String =

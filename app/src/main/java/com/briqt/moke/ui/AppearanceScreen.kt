@@ -1,5 +1,6 @@
 package com.briqt.moke.ui
 
+import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +75,7 @@ import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.terminal.TerminalSession
+import com.termux.view.GridMetrics
 import com.termux.view.TerminalView
 
 private fun hex(s: String): Color = Color(android.graphics.Color.parseColor(s))
@@ -226,9 +228,19 @@ fun AppearanceScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // 预览高度按样张 5 行估算：含中文回退时行高偏大（≈ 字号×行距×1.6dp）+ 上下 padding。
+            // 预览高度 = 真实行高 × 5 行 + 上下 padding。行高直接问 GridMetrics（与终端渲染器同一处真相），
+            // 不再用「字号 × 行距 × 1.6」这个估算值——它把 CJK 回退的行高当成所有字体的行高，
+            // 预览因此比实际松一大截，用户调行距时看不到真实节奏。
             // 上限 190dp：大字号时不至于吃掉整块滚动区（超出部分终端内部滚动，色带仍在底部可见）。
-            val previewHeight = (fontSizeSp * lineSpacing * 1.6f * 5 + 28).dp.coerceAtMost(190.dp)
+            val density = LocalDensity.current
+            val previewRowHeight = remember(fontSizeSp, lineSpacing, primaryFontId, fallbackFontId, density) {
+                val paint = Paint().apply {
+                    textSize = fontSizeSp * density.density
+                    typeface = resolveTypeface(primaryFontId, fallbackFontId)
+                }
+                GridMetrics.lineHeight(paint.fontSpacing, lineSpacing)
+            }
+            val previewHeight = with(density) { (previewRowHeight * PREVIEW_ROWS).toDp() + 28.dp }.coerceAtMost(190.dp)
             // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
             AppearancePreview(
                 // 预览必须跟"眼下真正生效"的那套一致，否则联动开启时改一个下拉、预览却不动。
@@ -462,6 +474,8 @@ private fun SchemeSwatches(s: TermColorScheme) {
  * 实时预览：真 TerminalView 渲染紧凑样张（Latin+中文+符号+0-15 色带），随外观设置即时变化。
  * 配色即时换：重新 applyToTerminal + 对预览 emulator `mColors.reset()` + 重绘（不清屏）。
  */
+private const val PREVIEW_ROWS = 5
+
 @Composable
 private fun AppearancePreview(
     schemeId: String,
@@ -491,7 +505,7 @@ private fun AppearancePreview(
         val px = Math.round(fontSizeSp * density)
         view.setTextSize(px)
         view.setTypeface(resolveTypeface(primaryFontId, fallbackFontId))
-        view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        view.setFontSpacing(lineSpacing, letterSpacing)
         view.attachSession(session)
         onDispose {
             if (controller.view === view) controller.view = null
@@ -511,7 +525,7 @@ private fun AppearancePreview(
         view.onScreenUpdated()
     }
     LaunchedEffect(lineSpacing, letterSpacing) {
-        view.setFontSpacing(lineSpacing, letterSpacingEm(letterSpacing))
+        view.setFontSpacing(lineSpacing, letterSpacing)
         PreviewTransport.redraw(session)
         view.onScreenUpdated()
     }

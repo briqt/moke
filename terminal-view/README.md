@@ -5,11 +5,16 @@
 
 ## moke 的修改
 
-除 `build.gradle` → `build.gradle.kts` 外，均为向后兼容的加法式改动：
+除 `build.gradle` → `build.gradle.kts` 外，改动分两类：向后兼容的加法式扩展，以及一处有意为之的渲染语义修正。
 
-- `TerminalRenderer`：新增可选构造参数——行距倍数（缩放 `mFontLineSpacing`）与字间距（em，作用于 `mTextPaint`）；默认 `1.0 / 0` 等价上游。
+- `GridMetrics`（新增）：格子几何的纯计算（列宽众数、行高、半行距、字形落位），无 Android 依赖，由 `src/test` 覆盖。
+- `TerminalRenderer`：
+  - 新增可选构造参数——行距倍数（缩放格子高）与字距倍数（缩放格子宽）；默认 `1.0 / 1.0` 等价上游。
+  - **渲染语义修正**：上游对宽度不符的 run 做 `canvas.scale(k, 1)`（只缩 X），会把 1em 的 Nerd 图标压窄 40%、
+    把 1em 的 CJK 字形拉宽 20%。现在改为等比缩放/居中，字形永不被横向拉伸；行距余量对半分到基线上下；
+    支持等宽连字（按 shaping 后的宽度精确落位）；开启亚像素定位。设计与理由见 [docs/terminal-experience.md](../docs/terminal-experience.md)。
 - `TerminalView`：
-  - 新增 `setFontSpacing(lineSpacingMul, letterSpacingEm)`，重建渲染器并重算行列；
+  - 新增 `setFontSpacing(lineSpacingMul, letterSpacingMul)`，重建渲染器并重算行列；
   - 全屏程序内的滑动处理：按应用层选择的模式决定滚本地历史、发滚轮事件或发方向键；滚屏位置变化与"无处可滚"回调；`mokeScrollToBottom()` 跳回最新输出。
 - 新增 `MokeScroll.java`：上述滑动决策的纯函数实现（无 Android 依赖，由单元测试覆盖）。
 - `TextSelectionCursorController`：去掉文本选择工具条中的 "More…" 项（本项目未注册上下文菜单，该项无作用）。
