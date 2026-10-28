@@ -2,9 +2,14 @@
 
 **English** · [简体中文](CONTRIBUTING.zh-CN.md)
 
-## Reporting problems
+## Issues and pull requests
 
-This project accepts [issue-based reports](https://github.com/briqt/moke/issues), not pull requests. PRs are closed automatically. Include steps to reproduce, expected and actual behavior, Android version, and relevant server or proxy capabilities. Remove credentials, private keys, tokens and identifying addresses from logs and screenshots.
+Bug reports, suggestions and pull requests are welcome.
+
+- **Bug reports**: Include steps to reproduce, expected and actual behavior, Android version, and relevant server or proxy capabilities.
+- **Pull requests**: Keep each PR focused on one issue. Describe the motivation, implementation and validation. Add or update tests for behavior changes, and run the relevant checks below.
+
+Do not include passwords, private keys, tokens or other sensitive information in code, logs or screenshots.
 
 ## Build requirements
 

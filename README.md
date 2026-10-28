@@ -47,7 +47,7 @@ mosh requires `mosh-server` on the remote host and a reachable UDP path. Proxy u
 
 ## Build & feedback
 
-Build requirements, commands and release conventions are maintained in [CONTRIBUTING](CONTRIBUTING.md). Report problems through [issues](https://github.com/briqt/moke/issues); pull requests are not accepted.
+See [CONTRIBUTING](CONTRIBUTING.md) for build instructions and contribution guidelines. Bug reports, suggestions and pull requests are welcome.
 
 ## License
 

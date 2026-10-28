@@ -47,7 +47,7 @@ mosh 需要远端安装 `mosh-server`，且 UDP 数据通路可达。经代理�
 
 ## 构建与反馈
 
-构建条件、命令与发布规范统一见 [CONTRIBUTING](CONTRIBUTING.zh-CN.md)。问题请通过 [issue](https://github.com/briqt/moke/issues) 反馈，暂不接受 PR。
+构建条件、命令与贡献指南见 [CONTRIBUTING](CONTRIBUTING.zh-CN.md)。欢迎通过 [issue](https://github.com/briqt/moke/issues) 反馈问题、提出建议，或提交 Pull Request 参与贡献。
 
 ## 许可
 
