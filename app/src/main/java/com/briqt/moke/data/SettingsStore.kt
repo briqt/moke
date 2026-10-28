@@ -93,6 +93,10 @@ class SettingsStore(private val context: Context) {
         /** 把任意字号规整到 0.5 网格并夹到范围内（避免浮点漂移）。 */
         fun snapFontSize(v: Float): Float =
             (Math.round(v / FONT_SIZE_STEP) * FONT_SIZE_STEP).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
+
+        /** 保留当前支持的间距；旧越界值、缺失及非有限值读取为默认，不改写存储。 */
+        fun sanitizeSpacing(v: Float?): Float =
+            if (v != null && v in MIN_SPACING..MAX_SPACING) v else DEFAULT_SPACING
     }
 
     /** 终端配色（关闭联动时的唯一选择；开启联动后作为「深色模式用」那一套）。 */
@@ -266,12 +270,12 @@ class SettingsStore(private val context: Context) {
 
     /** 行距倍数（1.0=字体自然行距）。 */
     val lineSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
-        (prefs[lineSpacingKey] ?: DEFAULT_SPACING).coerceIn(MIN_SPACING, MAX_SPACING)
+        sanitizeSpacing(prefs[lineSpacingKey])
     }
 
     /** 字间距倍数（1.0=正常）。 */
     val letterSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
-        (prefs[letterSpacingKey] ?: DEFAULT_SPACING).coerceIn(MIN_SPACING, MAX_SPACING)
+        sanitizeSpacing(prefs[letterSpacingKey])
     }
 
     suspend fun setColorScheme(id: String) {
