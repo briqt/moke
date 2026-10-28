@@ -17,7 +17,8 @@
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | `jetbrains_mono.ttf` | SIL OFL 1.1，未修改 |
 | [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk) | `noto_sans_sc.otf` | SIL OFL 1.1；子集化为 GB2312 汉字与常用标点，非完整字符集 |
 | [Noto Sans Symbols 2](https://github.com/notofonts/symbols) | `noto_sans_symbols2.ttf` | SIL OFL 1.1，未修改；符号回退 |
-| [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) | `symbols_nerd_font.ttf` | nerd-fonts 项目为 MIT，所含图标集另有各自许可；取官方 v3.4.0 Regular，未修改 |
+| [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) | `nerd_symbols_design.ttf` | nerd-fonts 项目为 MIT，所含图标集另有各自许可；取官方 v3.4.0 `SymbolsNerdFontMono-Regular`，**修改**：从 cmap 摘除 U+E0A0–U+E0D7（Powerline Symbols / Powerline Extra），改由下面的格子度量字体提供，以免 1em 设计尺寸的分隔符在 1.32em 行高下露出行缝。字形轮廓未改动 |
+| [JetBrainsMono Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) | `nerd_symbols_mono.ttf` | 同上项目；取官方 v3.4.0 `JetBrainsMonoNerdFontMono-Regular`，未修改。其每个字形 advance = 0.6em，与默认主字体同度量，负责 powerline / box drawing / 块元素这类必须与格子严丝合缝的线画 |
 | [Maple Mono NF CN](https://github.com/subframe7536/maple-font) | `maple_mono.ttf` | SIL OFL 1.1；官方 v7.9 NormalNL-NF-CN unhinted Regular，未修改；发布包内置，Debug 未准备时可下载 |
 
 含 Nerd 图标的字体还须遵守上游列明的图标集许可，见 [nerd-fonts LICENSE](https://github.com/ryanoasis/nerd-fonts/blob/master/LICENSE)。
