@@ -1,13 +1,15 @@
-# terminal-view (vendored, 小幅改动)
+# terminal-view (vendored)
 
 复制自 [termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-view` 模块，
 许可 **Apache License 2.0**（源自 [Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)）。
 
 ## moke 的修改
 
-除 `build.gradle` → `build.gradle.kts` 外，均为向后兼容的加法式改动：
+除构建脚本改为Kotlin DSL外，本地修改如下：
 
-- `TerminalRenderer`：新增可选构造参数——行距倍数（缩放 `mFontLineSpacing`）与字间距（em，作用于 `mTextPaint`）；默认 `1.0 / 0` 等价上游。
+- `TerminalRenderer`：保留行距和字间距接口；背景、光标与前景分层绘制，普通字形保持比例。
+- `CellGlyph` / `TerminalGraphics`：按单元格绘制块元素、线画和常用分隔符。
+- `GlyphLayout`：处理字形落位、右侧兼容空格借位及新增行距的上下分配。
 - `TerminalView`：
   - 新增 `setFontSpacing(lineSpacingMul, letterSpacingEm)`，重建渲染器并重算行列；
   - 全屏程序内的滑动处理：按应用层选择的模式决定滚本地历史、发滚轮事件或发方向键；滚屏位置变化与"无处可滚"回调；`mokeScrollToBottom()` 跳回最新输出。
