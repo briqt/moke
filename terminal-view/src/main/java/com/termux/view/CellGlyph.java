@@ -9,6 +9,7 @@ final class CellGlyph {
         void moveTo(float x, float y);
         void lineTo(float x, float y);
         void quadTo(float controlX, float controlY, float x, float y);
+        void cubicTo(float controlX1, float controlY1, float controlX2, float controlY2, float x, float y);
         void closePath();
     }
 
@@ -57,7 +58,7 @@ final class CellGlyph {
 
     static boolean supports(int codePoint) {
         return (codePoint >= 0x2500 && codePoint <= 0x259F)
-            || (codePoint >= 0xE0B0 && codePoint <= 0xE0B3);
+            || (codePoint >= 0xE0B0 && codePoint <= 0xE0B7);
     }
 
     /** Emits bounded geometry, without allocating per glyph. Unsupported code points emit nothing. */
@@ -237,19 +238,53 @@ final class CellGlyph {
     }
 
     private void shade(int level, Sink sink) {
-        // An even 4 by 8 stipple tile has exactly 1/4, 1/2 or 3/4 coverage at any
-        // cell size. It repeats across cell boundaries and bounds the geometry work.
-        for (int row = 0; row < 8; row++) {
-            for (int column = 0; column < 4; column++) {
+        // Centre the periodic 4 by 8 stipple on the cell edges, not its top-left
+        // microtile. Clipped half-dots join their neighbours across every edge;
+        // the ink stays balanced with exactly 1/4, 1/2 or 3/4 geometric coverage.
+        for (int row = 0; row <= 8; row++) {
+            for (int column = 0; column <= 4; column++) {
                 boolean light = (row & 1) == 0 && (column & 1) == 0;
                 boolean fill = level == 1 ? light : level == 2 ? ((row + column) & 1) == 0 : !light;
-                if (fill) rect(sink, width * (column / 4f), height * (row / 8f),
-                    width * ((column + 1) / 4f), height * ((row + 1) / 8f));
+                // Shared fractional endpoints avoid rounding neighbouring edges differently.
+                if (fill) rect(sink, width * ((2 * column - 1) / 8f), height * ((2 * row - 1) / 16f),
+                    width * ((2 * column + 1) / 8f), height * ((2 * row + 1) / 16f));
             }
         }
     }
 
+    private void roundedPowerline(int codePoint, Sink sink) {
+        boolean left = codePoint >= 0xE0B6;
+        float edge = left ? width : 0, direction = left ? -1 : 1;
+        float radius = Math.min(width, height / 2);
+        // Standard circular-arc approximation. Extra row height belongs to the
+        // straight middle, not to a stretched font glyph or an ellipse.
+        float control = radius * .55228475f;
+        float side = edge + direction * radius;
+        sink.moveTo(edge, 0);
+        sink.cubicTo(edge + direction * control, 0, side, radius - control, side, radius);
+        sink.lineTo(side, height - radius);
+        sink.cubicTo(side, height - radius + control, edge + direction * control, height, edge, height);
+        if ((codePoint & 1) != 0) {
+            // A filled ribbon gives an inward, constant-width outline with flat
+            // endpoints; it needs no stroke state and keeps its centre open.
+            float innerRadius = radius - lightStroke;
+            float innerControl = innerRadius * .55228475f;
+            float innerSide = edge + direction * innerRadius;
+            sink.lineTo(edge, height - lightStroke);
+            sink.cubicTo(edge + direction * innerControl, height - lightStroke,
+                innerSide, height - radius + innerControl, innerSide, height - radius);
+            sink.lineTo(innerSide, radius);
+            sink.cubicTo(innerSide, radius - innerControl, edge + direction * innerControl, lightStroke,
+                edge, lightStroke);
+        }
+        sink.closePath();
+    }
+
     private void powerline(int codePoint, Sink sink) {
+        if (codePoint >= 0xE0B4) {
+            roundedPowerline(codePoint, sink);
+            return;
+        }
         boolean left = codePoint >= 0xE0B2;
         float edge = left ? width : 0, tip = left ? 0 : width;
         if ((codePoint & 1) == 0) {

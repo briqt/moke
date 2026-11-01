@@ -54,6 +54,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,7 +108,9 @@ internal data class TmuxManagement(
 private enum class TmuxConfirmAction { TAKE_OVER, DETACH, END }
 private data class TmuxConfirmation(val action: TmuxConfirmAction, val target: TmuxRowTarget)
 
-/** Both entry points share rows, safety gates and the same create-and-open editor. */
+/** Both entry points share rows, safety gates and the same create-and-open editor.
+ * [state]'s refreshing flag is projected by the caller to this sheet's explicit request only.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TmuxSessionSheet(
@@ -153,8 +157,21 @@ internal fun TmuxSessionSheet(
                     modifier = Modifier.weight(1f),
                 )
                 if (onRefresh != null && canRefreshTmuxObservation(state)) {
-                    IconButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
-                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.tmux_refresh))
+                    val refreshDescription = stringResource(R.string.tmux_refresh)
+                    val refreshStatus = if (state.refreshing) stringResource(R.string.tmux_checking) else ""
+                    IconButton(
+                        onClick = onRefresh,
+                        enabled = !state.busy && !opening && !state.refreshing,
+                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics {
+                            contentDescription = refreshDescription
+                            stateDescription = refreshStatus
+                        },
+                    ) {
+                        if (state.refreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp).clearAndSetSemantics {}, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = null)
+                        }
                     }
                 }
             }
@@ -192,7 +209,7 @@ internal fun TmuxSessionSheet(
                     TmuxPhase.ERROR -> item("error") {
                         if (state.message == null) TmuxStatusText(stringResource(R.string.tmux_control_unavailable))
                         if (onRefresh != null && canRefreshTmuxObservation(state)) {
-                            TextButton(onClick = onRefresh, enabled = !state.busy && !opening, modifier = Modifier.heightIn(min = 48.dp)) {
+                            TextButton(onClick = onRefresh, enabled = !state.busy && !opening && !state.refreshing, modifier = Modifier.heightIn(min = 48.dp)) {
                                 Text(stringResource(R.string.tmux_retry))
                             }
                         }

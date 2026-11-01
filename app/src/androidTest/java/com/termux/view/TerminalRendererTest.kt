@@ -142,6 +142,93 @@ class TerminalRendererTest {
     }
 
     @Test
+    fun shadesAndFullBlocksShareTheWholeCellEnvelopeAcrossFontAndSpacingChanges() {
+        for ((name, face) in faces(null)) for (size in listOf(13, 31, 53)) {
+            for (line in listOf(0.7f, 1f, 1.3f)) for (letter in listOf(-0.15f, 0f, 0.15f)) {
+                val f = Fixture(face, size, line, letter, columns = 5)
+                f.put(1, 0, "█░▒▓█")
+                val image = f.draw()
+                for (column in 0..4) {
+                    val area = f.area(1, column)
+                    val ink = inkBounds(image, area)
+                    assertEquals("$name size=$size line=$line letter=$letter column=$column",
+                        Rect(0, 0, area.width(), area.height()), ink)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun shadePixelsAreBalancedAndJoinAcrossRowsAndColumnsWithoutLosingDensity() {
+        val width = 16
+        val height = 32
+        for (codePoint in 0x2591..0x2593) {
+            val image = bitmap(2 * width, 2 * height)
+            val canvas = Canvas(image)
+            canvas.drawColor(BG)
+            val graphics = TerminalGraphics(width.toFloat(), height)
+            repeat(2) { row -> repeat(2) { column ->
+                assertTrue(graphics.draw(canvas, codePoint, (column * width).toFloat(),
+                    (row * height).toFloat(), FG))
+            } }
+            val cell = Rect(0, 0, width, height)
+            assertEquals("U+${codePoint.toString(16)} bounds", cell, inkBounds(image, cell))
+            near("U+${codePoint.toString(16)} density", (codePoint - 0x2590) / 4.0,
+                coverage(image, cell), 0.0)
+            for (y in 0 until height) for (x in 0 until width) {
+                val pixel = image.getPixel(x, y)
+                assertEquals("Rotational balance", pixel, image.getPixel(width - 1 - x, height - 1 - y))
+                assertEquals("Horizontal periodicity", pixel, image.getPixel(x + width, y))
+                assertEquals("Vertical periodicity", pixel, image.getPixel(x, y + height))
+            }
+            for (y in 0 until 2 * height) {
+                assertEquals("No phase break at the column edge", image.getPixel(width - 1, y), image.getPixel(width, y))
+            }
+            for (x in 0 until 2 * width) {
+                assertEquals("No phase break at the row edge", image.getPixel(x, height - 1), image.getPixel(x, height))
+            }
+        }
+    }
+
+    @Test
+    fun shadeEdgesRemainPresentWithFractionalMetricsAndTranslatedClipping() {
+        for (width in listOf(7.25f, 25.8f)) for (origin in listOf(0.25f, 0.375f)) {
+            val height = 37
+            val image = bitmap(ceil(origin + 4 * width).toInt() + 2, 2 * height + 3)
+            val canvas = Canvas(image)
+            canvas.drawColor(BG)
+            val graphics = TerminalGraphics(width, height)
+            canvas.clipRect(origin, 0.375f, origin + 4 * width, 0.375f + 2 * height)
+            for (column in 0..3) repeat(2) { row ->
+                assertTrue(graphics.draw(canvas, 0x2591, origin + column * width, 0.375f + row * height, FG))
+            }
+            // A ceil/floor interior crop can remove a narrow half-dot at a fractional
+            // horizontal edge. Compare the complete raster envelope to a full-block
+            // reference under the same translation/clip, not to that inset crop.
+            val reference = bitmap(image.width, image.height)
+            val referenceCanvas = Canvas(reference)
+            referenceCanvas.drawColor(BG)
+            referenceCanvas.clipRect(origin, 0.375f, origin + 4 * width, 0.375f + 2 * height)
+            for (column in 0..3) repeat(2) { row ->
+                assertTrue(graphics.draw(referenceCanvas, 0x2588, origin + column * width,
+                    0.375f + row * height, FG))
+            }
+            val entireImage = Rect(0, 0, image.width, image.height)
+            assertEquals("width=$width origin=$origin whole-grid envelope",
+                inkBounds(reference, entireImage), inkBounds(image, entireImage))
+            for (column in 0..3) {
+                val cell = Rect(ceil(origin + column * width).toInt(), 1,
+                    floor(origin + (column + 1) * width).toInt(), height)
+                val ink = inkBounds(image, cell)
+                assertEquals("column=$column top edge", 0, ink.top)
+                assertEquals("column=$column bottom edge", cell.height(), ink.bottom)
+            }
+            assertSolid("Outside the translated clip", image,
+                Rect(ceil(origin + 4 * width).toInt(), 0, image.width, image.height), BG)
+        }
+    }
+
+    @Test
     fun singleDoubleAndMixedJunctionsHaveTheCorrectEdgeBranchesAndConnectedLines() {
         val f = Fixture(faces(null).first().second, size = 47)
         val junctions = listOf('┼' to (1 to 1), '╬' to (2 to 2),
@@ -202,6 +289,110 @@ class TerminalRendererTest {
                 coverage(image, outline) < coverage(image, cell) * 0.65)
             assertFalse("Chevron interior stays empty", isInk(sample(image, outline,
                 if (pointsRight) 0.15f else 0.85f, 0.5f)))
+        }
+    }
+
+    @Test
+    fun roundedSeparatorsJoinInverseHighlightsAndExplicitBackgroundSpansAtTheGridEdges() {
+        val cap = Color.rgb(0, 173, 180)
+        val outerLeft = Color.rgb(80, 30, 40)
+        val outerRight = Color.rgb(30, 45, 80)
+        for ((name, face) in faces(null)) for (size in listOf(17, 31, 47)) {
+            for (line in listOf(0.7f, 1.1f, 1.3f)) for (letter in listOf(-0.15f, 0f, 0.15f)) {
+                for (inverse in listOf(true, false)) {
+                    val f = Fixture(face, size, line, letter, columns = 8)
+                    val text = if (inverse) {
+                        "\u001b[38;2;0;173;180m\u001b[7m  \u001b[27m\u001b[0mX"
+                    } else {
+                        "\u001b[38;2;0;173;180;48;2;80;30;40m" +
+                            "\u001b[48;2;0;173;180m  \u001b[48;2;30;45;80m\u001b[0mX"
+                    }
+                    f.put(1, 1, text)
+                    val image = f.draw()
+                    val left = f.area(1, 1)
+                    val right = f.area(1, 4)
+                    val description = "$name size=$size line=$line letter=$letter inverse=$inverse"
+                    for (y in left.top until left.bottom) {
+                        assertTrue("$description left cap lost the row edge at ${y - left.top}",
+                            isInk(image.getPixel(left.right - 1, y), cap, if (inverse) BG else outerLeft))
+                        assertTrue("$description right cap lost the row edge at ${y - right.top}",
+                            isInk(image.getPixel(right.left, y), cap, if (inverse) BG else outerRight))
+                        assertEquals("$description left bar join", cap, image.getPixel(left.right, y))
+                        assertEquals("$description right bar join", cap, image.getPixel(right.left - 1, y))
+                    }
+                    assertEquals("The two caps and body do not change logical columns", 6, f.emulator.cursorCol)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun roundedCapsCoverTheReportedGridAndTranslatedAttachmentEdges() {
+        val width = 23f
+        val height = 61
+        for (origin in listOf(0f, .25f, .375f)) {
+            val image = bitmap(6 * width.toInt() + 2, 3 * height + 2)
+            val canvas = Canvas(image)
+            canvas.drawColor(BG)
+            canvas.translate(origin, origin)
+            val graphics = TerminalGraphics(width, height)
+            val paint = Paint(0).apply { color = FG }
+            canvas.drawRect(2 * width, height.toFloat(), 4 * width, (2 * height).toFloat(), paint)
+            assertTrue(graphics.draw(canvas, 0xe0b6, width, height.toFloat(), FG))
+            assertTrue(graphics.draw(canvas, 0xe0b4, 4 * width, height.toFloat(), FG))
+            // Independent native rounded-rectangle intersections, not the product's cubic path.
+            val reference = bitmap(image.width, image.height)
+            val referenceCanvas = Canvas(reference)
+            referenceCanvas.drawColor(BG)
+            referenceCanvas.translate(origin, origin)
+            referenceCanvas.drawRect(2 * width, height.toFloat(), 4 * width, (2 * height).toFloat(), paint)
+            val referencePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FG }
+            for (column in listOf(1, 4)) {
+                val radius = width
+                val roundLeft = if (column == 1) width else 3 * width
+                val path = android.graphics.Path().apply {
+                    addRoundRect(android.graphics.RectF(roundLeft, height.toFloat(), roundLeft + 2 * radius,
+                        (2 * height).toFloat()), radius, radius, android.graphics.Path.Direction.CW)
+                }
+                val half = android.graphics.Path().apply {
+                    addRect(column * width, height.toFloat(), (column + 1) * width,
+                        (2 * height).toFloat(), android.graphics.Path.Direction.CW)
+                }
+                assertTrue(path.op(half, android.graphics.Path.Op.INTERSECT))
+                referenceCanvas.drawPath(path, referencePaint)
+            }
+            val left = floor(origin + 2 * width - .5f).toInt()
+            val right = ceil(origin + 4 * width - .5f).toInt()
+            for (y in ceil(origin + height - .5f).toInt()..floor(origin + 2 * height - .5f).toInt()) {
+                val partialRow = y < origin + height || y + 1 > origin + 2 * height
+                if (partialRow) {
+                    // A corner pixel intersecting only part of the translated row can be
+                    // less than 50% covered even in the independent native reference.
+                    // It must retain the same coverage support, not an arbitrary ink threshold.
+                    assertEquals("Left fractional corner", reference.getPixel(left, y) != BG, image.getPixel(left, y) != BG)
+                    assertEquals("Right fractional corner", reference.getPixel(right, y) != BG, image.getPixel(right, y) != BG)
+                } else {
+                    assertTrue("Left attachment origin=$origin y=$y x=$left colour=${image.getPixel(left, y).toUInt().toString(16)} nativeReference=${reference.getPixel(left, y).toUInt().toString(16)}", isInk(image.getPixel(left, y)))
+                    assertTrue("Right attachment origin=$origin y=$y colour=${image.getPixel(right, y).toUInt().toString(16)} nativeReference=${reference.getPixel(right, y).toUInt().toString(16)}", isInk(image.getPixel(right, y)))
+                }
+                assertEquals("Background meets left cap", FG, image.getPixel(left + 1, y))
+                assertEquals("Background meets right cap", FG, image.getPixel(right - 1, y))
+            }
+        }
+    }
+
+    @Test
+    fun roundedOutlineSeparatorsStayHollowAndShareTheFullRowHeight() {
+        val f = Fixture(faces(null).first().second, size = 47, line = 1.3f, columns = 6)
+        f.put(1, 1, " X")
+        val image = f.draw()
+        for (column in listOf(1, 3)) {
+            val cell = f.area(1, column)
+            val bounds = inkBounds(image, cell)
+            assertEquals("Outline top endpoint", 0, bounds.top)
+            assertEquals("Outline bottom endpoint", cell.height(), bounds.bottom)
+            assertFalse("Outline must not become a solid cap", isInk(sample(image, cell,
+                if (column == 1) .95f else .05f, .5f)))
         }
     }
 
@@ -385,6 +576,44 @@ class TerminalRendererTest {
         assertSolid("italic state cannot distort a following graphic", image, f.area(1, 1), FG)
         assertSolid("true-color graphic", image, f.area(1, 2), Color.rgb(33, 177, 211))
         assertSolid("hidden ordinary glyph", image, f.area(2, 0), BG)
+    }
+
+    @Test
+    fun roundedGraphicsKeepTheirGeometryAcrossStylesSelectionAndAdjacentSpaces() {
+        val face = faces(null).first().second
+        val dim = Color.rgb(Color.red(FG) * 2 / 3, Color.green(FG) * 2 / 3, Color.blue(FG) * 2 / 3)
+        val trueColour = Color.rgb(33, 177, 211)
+        for (cp in 0xe0b4..0xe0b7) {
+            val glyph = cp.toChar().toString()
+            val plain = Fixture(face, size = 43, line = 1.3f, columns = 4)
+            plain.put(1, 1, glyph + " ")
+            val baseline = plain.draw()
+            for ((style, foreground, background) in listOf(
+                Triple("\u001b[1m", FG, BG), Triple("\u001b[3m", FG, BG), Triple("\u001b[2m", dim, BG),
+                Triple("\u001b[7m", BG, FG), Triple("\u001b[38;2;33;177;211m", trueColour, BG),
+            )) {
+                val styled = Fixture(face, size = 43, line = 1.3f, columns = 4)
+                styled.put(1, 1, style + glyph + "\u001b[0m ")
+                val expected = Fixture(face, size = 43, line = 1.3f, columns = 4)
+                expected.emulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_FOREGROUND] = foreground
+                expected.emulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_BACKGROUND] = background
+                expected.put(1, 1, glyph)
+                val image = styled.draw()
+                assertSameArea("Rounded style must use resolved colour without changing geometry", expected.draw(), image,
+                    styled.area(1, 1))
+                assertSolid("Geometric separators never borrow the adjacent blank", image, styled.area(1, 2), BG)
+            }
+            val hidden = Fixture(face, size = 43, line = 1.3f, columns = 4)
+            hidden.put(1, 1, "\u001b[8m$glyph\u001b[0m ")
+            assertSolid("Hidden rounded graphic", hidden.draw(), hidden.area(1, 1), BG)
+            val inverse = Fixture(face, size = 43, line = 1.3f, columns = 4)
+            inverse.emulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_FOREGROUND] = BG
+            inverse.emulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_BACKGROUND] = FG
+            inverse.put(1, 1, glyph)
+            assertSameArea("Local selection inverts colour, not rounded geometry", inverse.draw(),
+                plain.draw(Selection(1, 1, 1, 1)), plain.area(1, 1))
+            assertSolid("Baseline rounded separator stays in its logical span", baseline, plain.area(1, 2), BG)
+        }
     }
 
     @Test

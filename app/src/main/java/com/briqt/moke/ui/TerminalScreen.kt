@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -86,9 +85,6 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -425,7 +421,6 @@ fun TerminalScreen(
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 tmuxCount = tmuxState.sessions.size,
-                tmuxQuerying = tmuxState.refreshing,
                 onOpenTmux = { keyboard?.hide(); onOpenTmux() },
                 forwardCount = forwardEntries.size,
                 onOpenForwards = { keyboard?.hide(); showForwards = true },
@@ -790,7 +785,6 @@ private fun TerminalTopBar(
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
     tmuxCount: Int,
-    tmuxQuerying: Boolean,
     onOpenTmux: () -> Unit,
     forwardCount: Int,
     onOpenForwards: () -> Unit,
@@ -873,18 +867,12 @@ private fun TerminalTopBar(
                     }
                 }
             }
-            // Keep discovery/retry discoverable. Actual query activity replaces the list-count
-            // badge, which is never proof of this terminal's current attachment.
-            val tmuxQueryDescription = if (tmuxQuerying) stringResource(R.string.tmux_checking) else ""
-            IconButton(onClick = onOpenTmux, modifier = Modifier.semantics { stateDescription = tmuxQueryDescription }) {
+            // Keep discovery/retry and the known list count stable. Read feedback belongs to the
+            // sheet, and the count is never proof of this terminal's current attachment.
+            IconButton(onClick = onOpenTmux) {
                 BadgedBox(
                     badge = {
-                        if (tmuxQuerying) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp).clearAndSetSemantics {},
-                                strokeWidth = 2.dp,
-                            )
-                        } else if (tmuxCount > 0) {
+                        if (tmuxCount > 0) {
                             Badge(
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

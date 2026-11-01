@@ -19,10 +19,10 @@ public class CellGlyphTest {
         Recording sink = new Recording(WIDTH, HEIGHT);
         for (int codePoint = -1; codePoint <= 0x110000; codePoint++) {
             boolean expected = (codePoint >= 0x2500 && codePoint <= 0x259F)
-                || (codePoint >= 0xE0B0 && codePoint <= 0xE0B3);
+                || (codePoint >= 0xE0B0 && codePoint <= 0xE0B7);
             assertEquals(expected, CellGlyph.supports(codePoint));
         }
-        for (int codePoint : new int[]{-1, 0, 'A', 0x24FF, 0x25A0, 0xE0AF, 0xE0B4, 0x10FFFF}) {
+        for (int codePoint : new int[]{-1, 0, 'A', 0x24FF, 0x25A0, 0xE0AF, 0xE0B8, 0x10FFFF}) {
             assertFalse(glyph.draw(codePoint, sink));
         }
         assertEquals(0, sink.commands);
@@ -332,18 +332,76 @@ public class CellGlyphTest {
         CellGlyph glyph = new CellGlyph(7.25f, 13);
         for (int level = 1; level <= 3; level++) {
             Recording sink = render(glyph, 0x2590 + level);
-            assertEquals(8 * level, sink.rectangles.size());
+            assertTrue(sink.rectangles.size() <= 32);
             assertTrue(sink.contours.isEmpty());
             assertEquals(glyph.width * glyph.height * (level / 4f), sink.rectangleArea(), .0001);
-            // Every shade has foreground and background, rather than an opaque full block.
+            // Sample coverage independently of the implementation's tile size or phase.
             int filled = 0;
-            for (int row = 0; row < 8; row++) {
-                for (int column = 0; column < 4; column++) {
-                    if (sink.contains(glyph.width * (column + .5f) / 4,
-                            glyph.height * (row + .5f) / 8)) filled++;
+            for (int row = 0; row < 64; row++) {
+                for (int column = 0; column < 64; column++) {
+                    if (sink.contains(glyph.width * (column + .37f) / 64,
+                            glyph.height * (row + .37f) / 64)) filled++;
                 }
             }
-            assertEquals(8 * level, filled);
+            assertEquals(64 * 64 * level / 4, filled);
+        }
+    }
+
+    @Test public void shadesReachAllFourCellEdgesAndHaveCentredInk() {
+        for (float[] size : new float[][]{{.35f, 1}, {1, 1}, {7.25f, 13}, {16, 40}, {25.8f, 51}}) {
+            CellGlyph glyph = new CellGlyph(size[0], size[1]);
+            for (int cp = 0x2591; cp <= 0x2593; cp++) {
+                Recording sink = render(glyph, cp);
+                float left = glyph.width, top = glyph.height, right = 0, bottom = 0;
+                double area = 0, momentX = 0, momentY = 0;
+                for (float[] rect : sink.rectangles) {
+                    left = Math.min(left, rect[0]);
+                    top = Math.min(top, rect[1]);
+                    right = Math.max(right, rect[2]);
+                    bottom = Math.max(bottom, rect[3]);
+                    double part = (rect[2] - rect[0]) * (double) (rect[3] - rect[1]);
+                    area += part;
+                    momentX += part * (rect[0] + rect[2]) / 2;
+                    momentY += part * (rect[1] + rect[3]) / 2;
+                }
+                assertArrayEquals(label(cp), new float[]{0, 0, glyph.width, glyph.height},
+                    new float[]{left, top, right, bottom}, EPSILON);
+                assertEquals(label(cp) + " horizontal centre", glyph.width / 2, momentX / area, EPSILON);
+                assertEquals(label(cp) + " vertical centre", glyph.height / 2, momentY / area, EPSILON);
+                assertEquals(label(cp) + " density", (cp - 0x2590) / 4.0,
+                    area / (glyph.width * glyph.height), .000001);
+                // An edge-wrapped point must not be drawn twice inside this cell.
+                for (int i = 0; i < sink.rectangles.size(); i++) {
+                    for (int j = i + 1; j < sink.rectangles.size(); j++) {
+                        float[] a = sink.rectangles.get(i), b = sink.rectangles.get(j);
+                        double overlap = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
+                            * (double) Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+                        assertEquals(label(cp) + " overlapping stipple", 0, overlap, .000001);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test public void shadesAreRotationallyBalancedAndRepeatThroughCellBoundaries() {
+        for (float[] size : new float[][]{{7.25f, 13}, {16, 40}, {25.8f, 51}}) {
+            CellGlyph glyph = new CellGlyph(size[0], size[1]);
+            for (int cp = 0x2591; cp <= 0x2593; cp++) {
+                Recording sink = render(glyph, cp);
+                for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+                    float px = glyph.width * (x + .37f) / 64, py = glyph.height * (y + .37f) / 64;
+                    assertEquals(label(cp) + " rotation", sink.contains(px, py),
+                        sink.contains(glyph.width - px, glyph.height - py));
+                }
+                for (int step = 0; step < 64; step++) {
+                    float x = glyph.width * (step + .37f) / 64;
+                    float y = glyph.height * (step + .37f) / 64;
+                    assertEquals(label(cp) + " horizontal seam", sink.contains(glyph.width * .0001f, y),
+                        sink.contains(glyph.width * .9999f, y));
+                    assertEquals(label(cp) + " vertical seam", sink.contains(x, glyph.height * .0001f),
+                        sink.contains(x, glyph.height * .9999f));
+                }
+            }
         }
     }
 
@@ -365,10 +423,60 @@ public class CellGlyphTest {
         }
     }
 
+    @Test public void roundedSolidCapsMeetTheWholeAttachmentEdgeWithoutChangingTheirCornerRadius() {
+        for (float[] size : new float[][]{{.35f, 1}, {7.25f, 13}, {11, 21}, {23, 61}, {41, 16}}) {
+            CellGlyph glyph = new CellGlyph(size[0], size[1]);
+            float radius = Math.min(glyph.width, glyph.height / 2);
+            Recording right = render(glyph, 0xE0B4);
+            assertTrue(right.rectangles.isEmpty());
+            assertTrue(right.contains(glyph.width * .00001f, glyph.height * .0001f));
+            assertTrue(right.contains(glyph.width * .00001f, glyph.height * .9999f));
+            assertTrue(right.contains(radius * .99f, glyph.height / 2));
+            assertFalse(right.contains(radius * .9f, radius * .1f));
+            if (radius < glyph.width) assertFalse(right.contains((radius + glyph.width) / 2, glyph.height / 2));
+            double expected = radius * (glyph.height - 2 * radius) + Math.PI * radius * radius / 2;
+            assertEquals("solid cap area " + size[0] + "x" + size[1], expected,
+                right.geometryArea(), expected * .002);
+        }
+    }
+
+    @Test public void roundedOutlineCapsKeepAnOpenCentreAndAConsistentInsideStroke() {
+        for (float[] size : new float[][]{{.35f, 1}, {7.25f, 13}, {11, 21}, {23, 61}, {41, 16}}) {
+            CellGlyph glyph = new CellGlyph(size[0], size[1]);
+            float radius = Math.min(glyph.width, glyph.height / 2), stroke = glyph.lightStroke;
+            Recording outline = render(glyph, 0xE0B5);
+            assertTrue(outline.contains(radius - stroke / 2, glyph.height / 2));
+            assertFalse(outline.contains(radius / 10, glyph.height / 2));
+            assertTrue(outline.contains(glyph.width * .00001f, stroke / 2));
+            assertTrue(outline.contains(glyph.width * .00001f, glyph.height - stroke / 2));
+            double expected = stroke * (glyph.height - 2 * radius) +
+                Math.PI * (radius * radius - (radius - stroke) * (radius - stroke)) / 2;
+            assertEquals("outline area " + size[0] + "x" + size[1], expected,
+                outline.geometryArea(), expected * .003);
+        }
+    }
+
+    @Test public void roundedCapsMirrorAndRemainBalancedAtOddAndFractionalMetrics() {
+        for (float[] size : new float[][]{{7.25f, 13}, {11, 21}, {23, 61}, {41, 16}}) {
+            CellGlyph glyph = new CellGlyph(size[0], size[1]);
+            for (int cp : new int[]{0xE0B4, 0xE0B5}) {
+                Recording right = render(glyph, cp), left = render(glyph, cp + 2);
+                for (int row = 0; row < 64; row++) for (int column = 0; column < 64; column++) {
+                    float x = glyph.width * (column + .371f) / 64;
+                    float y = glyph.height * (row + .371f) / 64;
+                    assertEquals(label(cp) + " horizontal mirror", right.contains(x, y),
+                        left.contains(glyph.width - x, y));
+                    assertEquals(label(cp) + " vertical balance", right.contains(x, y),
+                        right.contains(x, glyph.height - y));
+                }
+            }
+        }
+    }
+
     private static int[] supportedCodePoints() {
-        int[] result = new int[164];
+        int[] result = new int[168];
         for (int i = 0; i < 160; i++) result[i] = 0x2500 + i;
-        for (int i = 0; i < 4; i++) result[160 + i] = 0xE0B0 + i;
+        for (int i = 0; i < 8; i++) result[160 + i] = 0xE0B0 + i;
         return result;
     }
 
@@ -472,6 +580,22 @@ public class CellGlyphTest {
             quadratics++;
         }
 
+        @Override public void cubicTo(float controlX1, float controlY1, float controlX2, float controlY2, float x, float y) {
+            assertTrue(open);
+            point(controlX1, controlY1);
+            point(controlX2, controlY2);
+            point(x, y);
+            float[] start = current.get(current.size() - 1);
+            for (int step = 1; step <= 32; step++) {
+                float t = step / 32f, u = 1 - t;
+                current.add(new float[]{u * u * u * start[0] + 3 * u * u * t * controlX1 +
+                    3 * u * t * t * controlX2 + t * t * t * x,
+                    u * u * u * start[1] + 3 * u * u * t * controlY1 +
+                    3 * u * t * t * controlY2 + t * t * t * y});
+            }
+            commands++;
+        }
+
         @Override public void closePath() {
             assertTrue(open);
             assertTrue(current.size() >= 3);
@@ -482,6 +606,19 @@ public class CellGlyphTest {
         double rectangleArea() {
             double area = 0;
             for (float[] rect : rectangles) area += (rect[2] - rect[0]) * (double) (rect[3] - rect[1]);
+            return area;
+        }
+
+        double geometryArea() {
+            double area = rectangleArea();
+            for (List<float[]> contour : contours) {
+                double signed = 0;
+                for (int i = 0; i < contour.size(); i++) {
+                    float[] a = contour.get(i), b = contour.get((i + 1) % contour.size());
+                    signed += a[0] * (double) b[1] - b[0] * (double) a[1];
+                }
+                area += Math.abs(signed) / 2;
+            }
             return area;
         }
 

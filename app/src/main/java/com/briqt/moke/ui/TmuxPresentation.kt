@@ -9,6 +9,42 @@ import com.briqt.moke.terminal.TmuxUnknownReason
 import com.briqt.moke.terminal.TmuxPhase
 import com.briqt.moke.terminal.selectionFor
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+/** Main-thread, sheet-local feedback follows only the explicit request, never the background read flag. */
+internal class TmuxRefreshFeedback(private val scope: CoroutineScope) {
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    private var waiter: Job? = null
+    private var disposed = false
+
+    fun refresh(request: () -> Job) {
+        if (disposed || _refreshing.value) return
+        _refreshing.value = true
+        waiter = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                ensureActive()
+                // A fast or coalesced request can already be complete. Do not await a future read.
+                request().join()
+            } finally {
+                _refreshing.value = false
+            }
+        }
+    }
+
+    fun dispose() {
+        disposed = true
+        // The view-model request keeps its existing lifetime; only this sheet's waiter is cancelled.
+        waiter?.cancel()
+    }
+}
 
 /** Only an acknowledged success may close a choice/editor; cancellation is not a failed reply. */
 internal suspend fun completeTmuxUiAction(

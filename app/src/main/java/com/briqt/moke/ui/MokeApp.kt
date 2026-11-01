@@ -501,6 +501,15 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                     // One visit-scoped owner for automatic choice and explicit management. A query
                     // only updates tmuxState; it can never open another sheet or restore a dismissal.
                     sheetRequest?.let { request ->
+                        val refreshFeedback = remember(request.serial) { TmuxRefreshFeedback(navigationScope) }
+                        val explicitlyRefreshing by refreshFeedback.refreshing.collectAsState()
+                        DisposableEffect(refreshFeedback) {
+                            onDispose { refreshFeedback.dispose() }
+                        }
+                        // Project only read feedback at the UI boundary. Lists, errors and action
+                        // busy remain the live state; background reads never animate this sheet's button.
+                        val sheetTmuxState = tmuxState.copy(refreshing = explicitlyRefreshing)
+                        val refresh = { refreshFeedback.refresh { vm.refreshTmux(ts) } }
                         val onPresented = remember(request.serial) { { vm.tmuxSheetPresented(request) } }
                         val viaJump = ts.jumpHost?.let { stringResource(R.string.tmux_via_jump, it.displayName) }.orEmpty()
                         val targetLabel = tmuxTargetLabel(ts.host.protocol, ts.host.username, ts.host.host, ts.host.port, viaJump)
@@ -512,21 +521,21 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         }
                         if (request.mode == TmuxSheetMode.SELECT) {
                             TmuxPickerDialog(
-                                state = tmuxState,
+                                state = sheetTmuxState,
                                 targetLabel = targetLabel,
                                 defaultName = Tmux.defaultSessionName(ts.host.displayName),
                                 onPick = pick,
                                 onNew = create,
-                                onRefresh = { vm.refreshTmux(ts) },
+                                onRefresh = refresh,
                                 onPlainShell = { vm.dismissTmuxSheet(request) },
                                 onPresented = onPresented,
                             )
                         } else {
                             TmuxPanel(
-                                state = tmuxState,
+                                state = sheetTmuxState,
                                 targetLabel = targetLabel,
                                 onDismiss = { vm.dismissTmuxSheet(request) },
-                                onRefresh = { vm.refreshTmux(ts) },
+                                onRefresh = refresh,
                                 onAttach = pick,
                                 onTakeOver = { selection ->
                                     requestSession("session:${ts.id}", s) { vm.pickTmuxSession(request, selection, detachOthers = true) }

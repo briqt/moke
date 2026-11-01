@@ -78,6 +78,10 @@ public final class TerminalGraphics implements CellGlyph.Sink {
         smoothPath.quadTo(controlX + offsetX, controlY, x + offsetX, y);
     }
 
+    @Override public void cubicTo(float controlX1, float controlY1, float controlX2, float controlY2, float x, float y) {
+        smoothPath.cubicTo(controlX1 + offsetX, controlY1, controlX2 + offsetX, controlY2, x + offsetX, y);
+    }
+
     @Override public void closePath() {
         smoothPath.close();
     }
