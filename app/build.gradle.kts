@@ -14,8 +14,8 @@ android {
         applicationId = "com.briqt.moke"
         minSdk = 30
         targetSdk = 35
-        versionCode = 64
-        versionName = "0.2.1-rc.3"
+        versionCode = 65
+        versionName = "0.2.1-rc.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
