@@ -23,7 +23,7 @@ class FontRepository(private val context: Context) {
 
     fun fileFor(id: String): File = File(fontsDir, "$id.ttf")
 
-    fun isInstalled(spec: FontSpec): Boolean = spec.bundled || fileFor(spec.id).exists()
+    fun isInstalled(spec: FontSpec): Boolean = spec.bundled || fileFor(spec.id).isFile
 
     fun delete(id: String) {
         fileFor(id).takeIf { it.exists() }?.delete()
@@ -129,9 +129,12 @@ class FontRepository(private val context: Context) {
      * （maple 回退达 20MB），进页/换字体会反复调用，不缓存则造成明显内存抖动。
      */
     fun resolveTypeface(primaryId: String?, fallbackId: String?): Typeface {
-        val cacheKey = "${primaryId.orEmpty()}|${fallbackId.orEmpty()}"
+        val localExists: (String) -> Boolean = { fileFor(it).isFile }
+        val primary = FontCatalog.primaryId(primaryId, localExists)
+        val fallback = FontCatalog.fallbackId(fallbackId, localExists)
+        val cacheKey = "$primary|$fallback"
         typefaceCache[cacheKey]?.let { return it }
-        return resolveTypefaceUncached(primaryId, fallbackId).also { typefaceCache[cacheKey] = it }
+        return resolveTypefaceUncached(primary, fallback).also { typefaceCache[cacheKey] = it }
     }
 
     private fun resolveTypefaceUncached(primaryId: String?, fallbackId: String?): Typeface {
@@ -204,12 +207,6 @@ class FontRepository(private val context: Context) {
     /** 内置字体 id → res/font 资源。 */
     private fun bundledResId(id: String): Int? = when (id) {
         "jetbrains_mono" -> R.font.jetbrains_mono
-        "noto_sans_sc" -> R.font.noto_sans_sc
-        // res/font/maple_mono.ttf 不入库、构建时才可能有（release 必有），故用运行时
-        // getIdentifier（避免编译期引用可能不存在的 R.font.maple_mono），没内置时返回 null。
-        "maple_mono" -> if (com.briqt.moke.BuildConfig.BUNDLE_MAPLE)
-            context.resources.getIdentifier("maple_mono", "font", context.packageName).takeIf { it != 0 }
-        else null
         else -> null
     }
 

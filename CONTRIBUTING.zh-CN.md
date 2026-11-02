@@ -41,19 +41,19 @@ bash scripts/verify-netbridge.sh check
 
 脚本生成 `app/libs/netbridge.aar` 及其内容指纹。已验证且与当前输入一致的产物会直接复用，否则按锁定输入重新构建。Gradle 构建前核对生产 Go 源码、依赖锁、构建参数与 AAR 摘要；产物缺失、陈旧或损坏时，须重新运行构建脚本，Gradle 不会自动重建。不要只复制 AAR 而遗漏生成的指纹，也不要手工修改指纹。
 
-Debug APK 位于 `app/build/outputs/apk/debug/`。Debug 可以不准备 mosh native 与 Maple 字体；此时 mosh 不可用，Maple 可在应用内下载而非内置。
+Debug APK 位于 `app/build/outputs/apk/debug/`。Debug 可以不准备 mosh native，此时 mosh 不可用。主字体与符号兜底资源已入库；中文默认使用系统字体，也可在字体管理中下载或导入其他字体。
 
 ## mosh native 与 Release 构建
 
 ```bash
 bash scripts/build-mosh-native.sh arm64-v8a
-bash scripts/fetch-maple-font.sh
 ./gradlew assembleRelease
+bash scripts/verify-bundled-fonts.sh apk app/build/outputs/apk/release/app-release.apk
 ```
 
 mosh 脚本从仓库的 PTY JNI 构建 `libtermux.so`，从 mosh 1.4.0 源码及锁定的 rjyo/mosh-android 预编译库构建 `libmosh-client.so`，输出到 `app/src/main/jniLibs/arm64-v8a/`。修改 JNI 或 native 构建输入后须重建；二进制不入库。
 
-Release 构建必须先通过字体脚本取得 Maple Mono NF CN。APK 位于 `app/build/outputs/apk/release/`。发布签名通过 `MOKE_KEYSTORE`、`MOKE_KEYSTORE_PASSWORD`、`MOKE_KEY_ALIAS`、`MOKE_KEY_PASSWORD` 配置；本地未配置签名时会使用 debug 密钥，不能替代固定签名的公开发布包。
+APK 字体校验按内容核对随包资源，拒绝缺失、额外或内容不符的字体。Release APK 位于 `app/build/outputs/apk/release/`。发布签名通过 `MOKE_KEYSTORE`、`MOKE_KEYSTORE_PASSWORD`、`MOKE_KEY_ALIAS`、`MOKE_KEY_PASSWORD` 配置；本地未配置签名时会使用 debug 密钥，不能替代固定签名的公开发布包。
 
 分发时须遵守 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中的许可与对应源码义务，包括 native 组件及其链接依赖。
 
@@ -71,7 +71,7 @@ bash scripts/test-verify-netbridge.sh
 (cd netbridge && go test -race -count=1 -tags moshlab ./internal/relay)
 ```
 
-CI 执行 Go race 测试、网络桥接与 Debug 构建、JVM 测试和 Android Lint。发布工作流另行构建 mosh native、取得内置字体、签名，并检查 APK 中的 native 库与字体。
+CI 执行 Go race 测试、网络桥接与 Debug 构建、随包字体校验、JVM 测试和 Android Lint。发布工作流另行构建 mosh native、签名，并检查 APK 中的 native 库与字体。
 
 ## 代码约定
 

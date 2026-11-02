@@ -403,8 +403,8 @@
     <string name="hosts_unreadable_title">无法读取已保存的主机。原数据已保留。</string>
     <string name="ssh_connecting">[moke] 正在连接 %1$s…</string>
     <string name="mosh_bootstrap_unparsed">无法启动 mosh\n%1$s</string>
-    <string name="font_note_jetbrains_mono">内置默认，中文走回退字体</string>
-    <string name="font_note_noto_sans_sc">内置中文回退 · 思源黑体子集（常用汉字）</string>
+    <string name="font_note_jetbrains_mono">内置默认 · 未选回退字体时中文使用系统字体</string>
+    <string name="font_note_noto_sans_sc">本地中文字体 · 常用汉字</string>
     <string name="font_note_fira_code">连字</string>
     <string name="font_note_maple_mono">圆角等宽 · 含中文(2:1)+Nerd图标 · 高分屏 unhinted</string>
     <string name="font_note_hack">编程等宽 · 英文，无连字</string>

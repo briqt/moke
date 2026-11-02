@@ -41,19 +41,19 @@ bash scripts/verify-netbridge.sh check
 
 The builder creates `app/libs/netbridge.aar` and its content fingerprint. It reuses a verified current artifact; otherwise it rebuilds with the locked inputs. Gradle checks production Go sources, dependency locks, build settings and the AAR's digest before building. Missing, stale or damaged artifacts must be rebuilt with the builder; Gradle does not rebuild them automatically. Do not copy an AAR without its generated fingerprint or edit the fingerprint manually.
 
-The debug APK is written to `app/build/outputs/apk/debug/`. Debug builds can omit the mosh native artifacts and Maple font: mosh is then unavailable, and Maple remains downloadable rather than bundled.
+The debug APK is written to `app/build/outputs/apk/debug/`. Debug builds can omit the mosh native artifacts; mosh is then unavailable. The primary font and symbol fallbacks are checked in. CJK uses system fonts by default; other fonts can be downloaded or imported through font management.
 
 ## mosh native and release build
 
 ```bash
 bash scripts/build-mosh-native.sh arm64-v8a
-bash scripts/fetch-maple-font.sh
 ./gradlew assembleRelease
+bash scripts/verify-bundled-fonts.sh apk app/build/outputs/apk/release/app-release.apk
 ```
 
 The mosh script builds `libtermux.so` from this repository's PTY JNI and `libmosh-client.so` from mosh 1.4.0 sources plus the pinned rjyo/mosh-android prebuilt libraries. Outputs are placed in `app/src/main/jniLibs/arm64-v8a/`. Rebuild them after changing the JNI or native build inputs; the binaries are not tracked in Git.
 
-Release builds require the Maple Mono NF CN font fetched by the font script. The APK is written to `app/build/outputs/apk/release/`. Configure `MOKE_KEYSTORE`, `MOKE_KEYSTORE_PASSWORD`, `MOKE_KEY_ALIAS` and `MOKE_KEY_PASSWORD` for release signing. Without signing configuration, a local release build uses the debug key and is not a replacement for the published stable-signature APK.
+The font verifier checks packaged font contents and rejects missing, extra or mismatched resources. The release APK is written to `app/build/outputs/apk/release/`. Configure `MOKE_KEYSTORE`, `MOKE_KEYSTORE_PASSWORD`, `MOKE_KEY_ALIAS` and `MOKE_KEY_PASSWORD` for release signing. Without signing configuration, a local release build uses the debug key and is not a replacement for the published stable-signature APK.
 
 Redistribution must meet the license and corresponding-source obligations in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including those of the native components and linked dependencies.
 
@@ -71,7 +71,7 @@ The unqualified Gradle tasks cover all modules. Go race tests require a host C c
 (cd netbridge && go test -race -count=1 -tags moshlab ./internal/relay)
 ```
 
-CI runs Go race tests, builds the network bridge and debug APK, and runs JVM tests and Android Lint. The release workflow additionally builds mosh native artifacts, fetches the bundled font, signs the APK and checks that the native libraries and font are packaged.
+CI runs Go race tests, builds the network bridge and debug APK, verifies bundled fonts, and runs JVM tests and Android Lint. The release workflow additionally builds mosh native artifacts, signs the APK and verifies packaged native libraries and fonts.
 
 ## Code conventions
 

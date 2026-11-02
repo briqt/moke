@@ -4,8 +4,8 @@ import androidx.annotation.StringRes
 import com.briqt.moke.R
 
 /**
- * 可选终端字体目录。`jetbrains_mono` 打包进 APK（离线兜底），其余按需从各自项目的
- * GitHub Releases 下载（许可 OFL/Apache）。中文等宽字体体积大（含 CJK 字形），故不内置。
+ * 可选终端字体目录。JetBrains Mono 随 APK 分发，其他字体沿用锁定来源按需下载。
+ * 不再随包的旧中文字体仅在本地文件仍存在时展示；符号兜底不作为可选主字体列出。
  *
  * archive=true 表示下载的是 zip，需从中提取 [entryHint] 对应的 Regular 字重 ttf。
  */
@@ -46,7 +46,8 @@ object FontCatalog {
             id = "noto_sans_sc",
             name = "Noto Sans SC",
             nameZh = "思源黑体（Noto Sans SC）",
-            license = "OFL", cjk = true, bundled = true,
+            // 旧本地文件仍可使用；没有下载源时不向未安装用户显示此项。
+            license = "OFL", cjk = true, bundled = false,
             url = null, archive = false, entryHint = "", approxBytes = 0,
             noteRes = R.string.font_note_noto_sans_sc,
         ),
@@ -65,8 +66,7 @@ object FontCatalog {
             id = "maple_mono",
             name = "Maple Mono NF CN",
             nameZh = "Maple Mono · 中英等宽",
-            // 构建时取到字体就内置（res/font/maple_mono.ttf，release 必有）；否则走下载。
-            license = "OFL", cjk = true, bundled = com.briqt.moke.BuildConfig.BUNDLE_MAPLE,
+            license = "OFL", cjk = true, bundled = false,
             // 高分屏用 unhinted 变体（Normal 无花体 + NL 无连字 + NF Nerd 图标 + CN 中文 2:1）
             url = "https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMonoNormalNL-NF-CN-unhinted.zip",
             archive = true, entryHint = "Regular", approxBytes = 155_000_000L,
@@ -177,6 +177,18 @@ object FontCatalog {
     )
 
     fun byId(id: String?): FontSpec = all.firstOrNull { it.id == id } ?: all.first()
+
+    fun isAvailable(id: String, localFileExists: (String) -> Boolean): Boolean =
+        id.isNotBlank() && (all.any { it.id == id && it.bundled } || localFileExists(id))
+
+    fun primaryId(id: String?, localFileExists: (String) -> Boolean): String =
+        id?.takeIf { isAvailable(it, localFileExists) } ?: DEFAULT_ID
+
+    fun fallbackId(id: String?, localFileExists: (String) -> Boolean): String =
+        id?.takeIf { isAvailable(it, localFileExists) }.orEmpty()
+
+    fun visibleFonts(localFileExists: (String) -> Boolean): List<FontSpec> =
+        all.filter { it.bundled || it.url != null || localFileExists(it.id) }
 }
 
 /** 字体安装状态（UI 用）。 */

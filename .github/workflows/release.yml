@@ -64,10 +64,6 @@ jobs:
           bash scripts/build-mosh-native.sh arm64-v8a
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
-      # 内置字体（OFL，不入库）——release 构建缺它会直接失败。
-      - name: Fetch Maple font
-        run: bash scripts/fetch-maple-font.sh
-
       - name: Decode signing keystore
         env:
           KS_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
@@ -88,11 +84,10 @@ jobs:
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libmosh-client.so" || { echo "❌ $APK 缺 libmosh-client.so"; exit 1; }
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libtermux.so" || { echo "❌ $APK 缺 libtermux.so"; exit 1; }
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libgojni.so" || { echo "❌ $APK 缺 libgojni.so"; exit 1; }
-          # release 构建会压缩资源路径（res/font/maple_mono.ttf → res/xx.ttf），故按体积判定：
-          # 内置 Maple 字体约 20MB，是唯一 >15MB 的 ttf。
-          unzip -l "$APK" | awk '/\.ttf$/ && $1+0 > 15000000 {f=1} END{exit !f}' \
-            || { echo "❌ 缺内置 Maple 字体（未见 >15MB 的 ttf）"; exit 1; }
-          echo "✅ native 库与内置字体已打包"
+          echo "✅ native 库已打包"
+
+      - name: Verify bundled fonts
+        run: bash scripts/verify-bundled-fonts.sh apk app/build/outputs/apk/release/app-release.apk
 
       - name: Stage APKs
         run: |

@@ -3,11 +3,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// 只发一个全功能包：内置 Maple Mono NF CN 并作默认中文回退。字体由 scripts/fetch-maple-font.sh
-// 取得（OFL，约 20MB，不入库）；缺字体时 debug 仍可构建（Maple 改为可下载、默认回退思源黑体），
-// release 直接失败，避免发出不完整的包。
-val mapleFont = file("src/main/res/font/maple_mono.ttf")
-
 // 网络（tailnet / 代理 / mosh 中继）的 Go 部分：scripts/build-netbridge.sh 生成，不入库。
 val netbridgeAar = file("libs/netbridge.aar")
 
@@ -25,7 +20,6 @@ android {
         vectorDrawables { useSupportLibrary = true }
         // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
         ndk { abiFilters += "arm64-v8a" }
-        buildConfigField("boolean", "BUNDLE_MAPLE", mapleFont.exists().toString())
     }
 
     signingConfigs {
@@ -134,28 +128,19 @@ dependencies {
 
 tasks.matching { it.name == "preBuild" }.configureEach {
     doFirst {
-        // One Bash implementation owns the input/AAR content hashes. This guard
-        // only verifies; it never invokes Go, downloads tools or rebuilds the AAR.
-        val verifier = rootProject.file("scripts/verify-netbridge.sh")
-        val process = try {
-            ProcessBuilder("bash", verifier.absolutePath, "check")
-                .directory(rootProject.projectDir)
-                .redirectErrorStream(true)
-                .start()
-        } catch (error: java.io.IOException) {
-            throw GradleException(
-                "无法校验 netbridge.aar：需要 Bash 和 GNU coreutils。先运行 bash scripts/build-netbridge.sh",
-                error
-            )
+        // Verification only: never download fonts/tools or rebuild the Go artifact here.
+        for (script in listOf("scripts/verify-netbridge.sh", "scripts/verify-bundled-fonts.sh")) {
+            val process = try {
+                ProcessBuilder("bash", rootProject.file(script).absolutePath, "check")
+                    .directory(rootProject.projectDir)
+                    .redirectErrorStream(true)
+                    .start()
+            } catch (error: java.io.IOException) {
+                throw GradleException("无法运行 $script：需要 Bash 和 GNU coreutils", error)
+            }
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+            check(process.waitFor() == 0) { output }
+            logger.lifecycle(output)
         }
-        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        check(process.waitFor() == 0) { output }
-        logger.lifecycle(output)
-    }
-}
-
-tasks.matching { it.name == "preReleaseBuild" }.configureEach {
-    doFirst {
-        check(mapleFont.exists()) { "release 需要内置字体，先运行 scripts/fetch-maple-font.sh" }
     }
 }

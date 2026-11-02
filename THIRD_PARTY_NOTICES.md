@@ -15,10 +15,8 @@
 | 字体 | 文件 | 许可与修改 |
 |---|---|---|
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | `jetbrains_mono.ttf` | SIL OFL 1.1，未修改 |
-| [Noto Sans SC / 思源黑体](https://github.com/notofonts/noto-cjk) | `noto_sans_sc.otf` | SIL OFL 1.1；子集化为 GB2312 汉字与常用标点，非完整字符集 |
 | [Noto Sans Symbols 2](https://github.com/notofonts/symbols) | `noto_sans_symbols2.ttf` | SIL OFL 1.1，未修改；符号回退 |
 | [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) | `symbols_nerd_font.ttf` | nerd-fonts 项目为 MIT，所含图标集另有各自许可；取官方 v3.4.0 Regular，未修改 |
-| [Maple Mono NF CN](https://github.com/subframe7536/maple-font) | `maple_mono.ttf` | SIL OFL 1.1；官方 v7.9 NormalNL-NF-CN unhinted Regular，未修改；发布包内置，Debug 未准备时可下载 |
 
 含 Nerd 图标的字体还须遵守上游列明的图标集许可，见 [nerd-fonts LICENSE](https://github.com/ryanoasis/nerd-fonts/blob/master/LICENSE)。
 
@@ -28,6 +26,7 @@
 
 | 字体 | 许可 | 获取来源 |
 |---|---|---|
+| [Maple Mono NF CN](https://github.com/subframe7536/maple-font) | SIL OFL 1.1；图标集许可另见上游 | 官方 Release |
 | [Fira Code](https://github.com/tonsky/FiraCode) | SIL OFL 1.1 | 官方 Release |
 | [Hack](https://github.com/source-foundry/Hack) | MIT-derived（Hack Open Font License） | 官方 Release |
 | [IBM Plex Mono](https://github.com/IBM/plex) | SIL OFL 1.1 | google/fonts |

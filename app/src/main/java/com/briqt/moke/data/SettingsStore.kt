@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "moke_settings")
 
@@ -22,7 +23,10 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 data class UserFont(val id: String, val name: String)
 
 /** 应用设置持久化：配色方案 + 终端主字体/回退字体。 */
-class SettingsStore(private val context: Context) {
+class SettingsStore(
+    private val context: Context,
+    private val preferencesStore: DataStore<Preferences> = context.settingsDataStore,
+) {
 
     private val colorSchemeKey = stringPreferencesKey("color_scheme_id")
     // 配色随明暗联动：开关 + 浅色模式专用方案（深色模式沿用 colorSchemeKey，保持老数据语义不变）。
@@ -85,10 +89,8 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_SPACING = 1.0f
         const val MIN_SPACING = 0.7f
         const val MAX_SPACING = 1.3f
-        // 默认字体（"恢复默认"目标；与 FontCatalog 保持一致）。
-        // 内置了 Maple Mono NF CN（release 必有）就用它作默认中文回退，否则用内置思源黑体子集。
-        val DEFAULT_FALLBACK_FONT_ID: String =
-            if (com.briqt.moke.BuildConfig.BUNDLE_MAPLE) "maple_mono" else "noto_sans_sc"
+        // 空回退沿用系统字体；主字体默认值由 FontCatalog.DEFAULT_ID 定义。
+        const val DEFAULT_FALLBACK_FONT_ID = ""
 
         /** 把任意字号规整到 0.5 网格并夹到范围内（避免浮点漂移）。 */
         fun snapFontSize(v: Float): Float =
@@ -100,88 +102,102 @@ class SettingsStore(private val context: Context) {
     }
 
     /** 终端配色（关闭联动时的唯一选择；开启联动后作为「深色模式用」那一套）。 */
-    val colorSchemeId: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val colorSchemeId: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[colorSchemeKey] ?: TerminalThemes.DEFAULT_ID
     }
 
     /** 浅色模式专用终端配色（仅在联动开启时生效）。 */
-    val lightColorSchemeId: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val lightColorSchemeId: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[lightColorSchemeKey] ?: TerminalThemes.DEFAULT_LIGHT_ID
     }
 
     /** 终端配色是否随应用明暗自动切换（默认关，老用户行为不变）。 */
-    val schemeFollowsTheme: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val schemeFollowsTheme: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[schemeFollowsThemeKey] ?: false
     }
 
-    /** 主字体 id（默认内置 JetBrains Mono）。 */
-    val primaryFontId: Flow<String> = context.settingsDataStore.data.map { prefs ->
-        prefs[primaryFontKey] ?: FontCatalog.DEFAULT_ID
+    private fun localFontExists(id: String): Boolean = File(context.filesDir, "fonts/$id.ttf").isFile
+
+    /** 主字体 id；失效旧选择在迁移完成前也只暴露应用默认值。 */
+    val primaryFontId: Flow<String> = preferencesStore.data.map { prefs ->
+        FontCatalog.primaryId(prefs[primaryFontKey], ::localFontExists)
     }
 
-    /** 回退字体 id（默认内置思源黑体子集，中文开箱好看；空串 = 走系统）。 */
-    val fallbackFontId: Flow<String> = context.settingsDataStore.data.map { prefs ->
-        prefs[fallbackFontKey] ?: DEFAULT_FALLBACK_FONT_ID
+    /** 空串表示系统回退；不存在的旧字体不能继续显示为有效选择。 */
+    val fallbackFontId: Flow<String> = preferencesStore.data.map { prefs ->
+        FontCatalog.fallbackId(prefs[fallbackFontKey], ::localFontExists)
+    }
+
+    /** 只修正失效的显式字体选择，不触碰本地文件、其他偏好或尚未设置的默认键。 */
+    suspend fun repairUnavailableFontSelections(): Preferences = preferencesStore.edit { prefs ->
+        prefs[primaryFontKey]?.let { stored ->
+            val effective = FontCatalog.primaryId(stored, ::localFontExists)
+            if (stored != effective) prefs[primaryFontKey] = effective
+        }
+        prefs[fallbackFontKey]?.let { stored ->
+            val effective = FontCatalog.fallbackId(stored, ::localFontExists)
+            if (stored != effective) prefs[fallbackFontKey] = effective
+        }
     }
 
     /** 终端字号（sp，Float 支持 0.5 步进）。新键缺失时迁移旧 Int 键。 */
-    val fontSizeSp: Flow<Float> = context.settingsDataStore.data.map { prefs ->
+    val fontSizeSp: Flow<Float> = preferencesStore.data.map { prefs ->
         val v = prefs[fontSizeKey] ?: prefs[fontSizeKeyInt]?.toFloat() ?: DEFAULT_FONT_SIZE_SP
         snapFontSize(v)
     }
 
     /** 光标样式：0=方块 1=下划线 2=竖线。 */
-    val cursorStyle: Flow<Int> = context.settingsDataStore.data.map { prefs ->
+    val cursorStyle: Flow<Int> = preferencesStore.data.map { prefs ->
         (prefs[cursorStyleKey] ?: 0).coerceIn(0, 2)
     }
 
     /** 光标是否闪烁。 */
-    val cursorBlink: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val cursorBlink: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[cursorBlinkKey] ?: true
     }
 
     /** 终端底部附加键是否显示（默认显示）。 */
-    val extraKeysVisible: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val extraKeysVisible: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[extraKeysVisibleKey] ?: true
     }
 
     /** 底部快捷键布局。空字符串表示默认两排。 */
-    val extraKeysLayout: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val extraKeysLayout: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[extraKeysLayoutKey] ?: ""
     }
 
     /** 应用明暗主题（默认跟随系统）。 */
-    val themeMode: Flow<ThemeMode> = context.settingsDataStore.data.map { prefs ->
+    val themeMode: Flow<ThemeMode> = preferencesStore.data.map { prefs ->
         ThemeMode.fromName(prefs[themeModeKey], ThemeMode.SYSTEM)
     }
 
     /** 是否使用系统壁纸动态取色（Android 12+ 才生效；默认关，保留墨客品牌色）。 */
-    val dynamicColor: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val dynamicColor: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[dynamicColorKey] ?: false
     }
 
     /** 终端软键盘模式（默认字符模式，与历史行为一致）。 */
-    val keyboardMode: Flow<KeyboardMode> = context.settingsDataStore.data.map { prefs ->
+    val keyboardMode: Flow<KeyboardMode> = preferencesStore.data.map { prefs ->
         KeyboardMode.fromName(prefs[keyboardModeKey], KeyboardMode.SECURE)
     }
 
     /** 旧记录的读取兼容，不作为当前连接的滑动设置。 */
-    val scrollMode: Flow<ScrollMode> = context.settingsDataStore.data.map { prefs ->
+    val scrollMode: Flow<ScrollMode> = preferencesStore.data.map { prefs ->
         ScrollMode.fromName(prefs[scrollModeKey], ScrollMode.SMART)
     }
 
     /** 附加 tmux 后是否下发滚动绑定（默认开；关掉则完全不动远端 tmux 配置）。 */
-    val tmuxScrollSetup: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val tmuxScrollSetup: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[tmuxScrollSetupKey] ?: true
     }
 
     /** 关闭会话前是否二次确认（默认开）。 */
-    val confirmCloseSession: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val confirmCloseSession: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[confirmCloseKey] ?: true
     }
 
     /** 终端页保持屏幕常亮（默认开——与历史行为一致；关掉更省电）。 */
-    val keepScreenOn: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val keepScreenOn: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[keepScreenOnKey] ?: true
     }
 
@@ -192,186 +208,186 @@ class SettingsStore(private val context: Context) {
      * 后面每次校验都只会确认那把假密钥。所以默认要让用户看一眼指纹再点信任；打开这个开关
      * 就回到静默记录（省事，但首连被劫持不会有任何提示）。
      */
-    val autoTrustNewHostKey: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val autoTrustNewHostKey: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[autoTrustNewHostKeyKey] ?: false
     }
 
     /** 上次静默检查更新的时间（毫秒；0=从未）。 */
-    val lastUpdateCheckAt: Flow<Long> = context.settingsDataStore.data.map { prefs ->
+    val lastUpdateCheckAt: Flow<Long> = preferencesStore.data.map { prefs ->
         prefs[lastUpdateCheckKey] ?: 0L
     }
 
     /** 静默检查发现的最新版本 tag（空=无新版；跨启动保留，用于小圆点）。 */
-    val latestSeenTag: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val latestSeenTag: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[latestSeenTagKey] ?: ""
     }
 
     /** 与 latestSeenTag 配对的发布页地址（rc 指向 rc 页，正式版指向正式版页；空=无记录）。 */
-    val latestSeenUrl: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val latestSeenUrl: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[latestSeenUrlKey] ?: ""
     }
 
     /** 是否把预发布版算进"有更新"（默认关：正式用户不该被 rc 打扰）。 */
-    val includePrerelease: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val includePrerelease: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[includePrereleaseKey] ?: false
     }
 
     /** 下载目录（SAF 目录树 URI 字符串；空=未选）。 */
-    val downloadTreeUri: Flow<String> = context.settingsDataStore.data.map { prefs ->
+    val downloadTreeUri: Flow<String> = preferencesStore.data.map { prefs ->
         prefs[downloadTreeKey] ?: ""
     }
 
-    val filesShowHidden: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val filesShowHidden: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[filesShowHiddenKey] ?: false
     }
 
     /** 存量失效跳板引用是否已一次性清理（见 `clearDanglingJumps`）。 */
-    val danglingJumpsCleared: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+    val danglingJumpsCleared: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[danglingJumpsClearedKey] ?: false
     }
 
     suspend fun setDanglingJumpsCleared() {
-        context.settingsDataStore.edit { it[danglingJumpsClearedKey] = true }
+        preferencesStore.edit { it[danglingJumpsClearedKey] = true }
     }
 
-    val filesSort: Flow<FilesSort> = context.settingsDataStore.data.map { prefs ->
+    val filesSort: Flow<FilesSort> = preferencesStore.data.map { prefs ->
         runCatching { FilesSort.valueOf(prefs[filesSortKey] ?: FilesSort.NAME.name) }
             .getOrDefault(FilesSort.NAME)
     }
 
     suspend fun setDownloadTreeUri(uri: String) {
-        context.settingsDataStore.edit { it[downloadTreeKey] = uri }
+        preferencesStore.edit { it[downloadTreeKey] = uri }
     }
 
     suspend fun setFilesShowHidden(on: Boolean) {
-        context.settingsDataStore.edit { it[filesShowHiddenKey] = on }
+        preferencesStore.edit { it[filesShowHiddenKey] = on }
     }
 
     suspend fun setFilesSort(s: FilesSort) {
-        context.settingsDataStore.edit { it[filesSortKey] = s.name }
+        preferencesStore.edit { it[filesSortKey] = s.name }
     }
 
     /** 连接页分组显示顺序（组名列表；空=按主机首次出现序）。 */
-    val hostGroupOrder: Flow<List<String>> = context.settingsDataStore.data.map { prefs ->
+    val hostGroupOrder: Flow<List<String>> = preferencesStore.data.map { prefs ->
         decodeStringList(prefs[hostGroupOrderKey])
     }
     /** 连接页已折叠的分组（组名集合）。 */
-    val hostCollapsedGroups: Flow<Set<String>> = context.settingsDataStore.data.map { prefs ->
+    val hostCollapsedGroups: Flow<Set<String>> = preferencesStore.data.map { prefs ->
         decodeStringList(prefs[hostCollapsedGroupsKey]).toSet()
     }
     /** 会话页分组维度（默认按项目）。 */
-    val sessionGroupBy: Flow<GroupBy> = context.settingsDataStore.data.map { prefs ->
+    val sessionGroupBy: Flow<GroupBy> = preferencesStore.data.map { prefs ->
         GroupBy.fromName(prefs[sessionGroupByKey], GroupBy.PROJECT)
     }
     /** 会话页排序维度（默认按创建时间）。 */
-    val sessionSortBy: Flow<SortBy> = context.settingsDataStore.data.map { prefs ->
+    val sessionSortBy: Flow<SortBy> = preferencesStore.data.map { prefs ->
         SortBy.fromName(prefs[sessionSortByKey], SortBy.CREATED)
     }
 
     /** 行距倍数（1.0=字体自然行距）。 */
-    val lineSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
+    val lineSpacing: Flow<Float> = preferencesStore.data.map { prefs ->
         sanitizeSpacing(prefs[lineSpacingKey])
     }
 
     /** 字间距倍数（1.0=正常）。 */
-    val letterSpacing: Flow<Float> = context.settingsDataStore.data.map { prefs ->
+    val letterSpacing: Flow<Float> = preferencesStore.data.map { prefs ->
         sanitizeSpacing(prefs[letterSpacingKey])
     }
 
     suspend fun setColorScheme(id: String) {
-        context.settingsDataStore.edit { it[colorSchemeKey] = id }
+        preferencesStore.edit { it[colorSchemeKey] = id }
     }
 
     suspend fun setLightColorScheme(id: String) {
-        context.settingsDataStore.edit { it[lightColorSchemeKey] = id }
+        preferencesStore.edit { it[lightColorSchemeKey] = id }
     }
 
     suspend fun setSchemeFollowsTheme(on: Boolean) {
-        context.settingsDataStore.edit { it[schemeFollowsThemeKey] = on }
+        preferencesStore.edit { it[schemeFollowsThemeKey] = on }
     }
 
     suspend fun setPrimaryFont(id: String) {
-        context.settingsDataStore.edit { it[primaryFontKey] = id }
+        preferencesStore.edit { it[primaryFontKey] = id }
     }
 
     suspend fun setFallbackFont(id: String) {
-        context.settingsDataStore.edit { it[fallbackFontKey] = id }
+        preferencesStore.edit { it[fallbackFontKey] = id }
     }
 
     suspend fun setFontSize(sp: Float) {
-        context.settingsDataStore.edit { it[fontSizeKey] = snapFontSize(sp) }
+        preferencesStore.edit { it[fontSizeKey] = snapFontSize(sp) }
     }
 
     suspend fun setCursorStyle(style: Int) {
-        context.settingsDataStore.edit { it[cursorStyleKey] = style.coerceIn(0, 2) }
+        preferencesStore.edit { it[cursorStyleKey] = style.coerceIn(0, 2) }
     }
 
     suspend fun setCursorBlink(blink: Boolean) {
-        context.settingsDataStore.edit { it[cursorBlinkKey] = blink }
+        preferencesStore.edit { it[cursorBlinkKey] = blink }
     }
 
     suspend fun setHostGroupOrder(order: List<String>) {
-        context.settingsDataStore.edit { it[hostGroupOrderKey] = encodeStringList(order) }
+        preferencesStore.edit { it[hostGroupOrderKey] = encodeStringList(order) }
     }
     suspend fun setHostCollapsedGroups(collapsed: Set<String>) {
-        context.settingsDataStore.edit { it[hostCollapsedGroupsKey] = encodeStringList(collapsed.toList()) }
+        preferencesStore.edit { it[hostCollapsedGroupsKey] = encodeStringList(collapsed.toList()) }
     }
     suspend fun setSessionGroupBy(g: GroupBy) {
-        context.settingsDataStore.edit { it[sessionGroupByKey] = g.name }
+        preferencesStore.edit { it[sessionGroupByKey] = g.name }
     }
     suspend fun setSessionSortBy(s: SortBy) {
-        context.settingsDataStore.edit { it[sessionSortByKey] = s.name }
+        preferencesStore.edit { it[sessionSortByKey] = s.name }
     }
 
     suspend fun setLineSpacing(v: Float) {
-        context.settingsDataStore.edit { it[lineSpacingKey] = v.coerceIn(MIN_SPACING, MAX_SPACING) }
+        preferencesStore.edit { it[lineSpacingKey] = v.coerceIn(MIN_SPACING, MAX_SPACING) }
     }
 
     suspend fun setLetterSpacing(v: Float) {
-        context.settingsDataStore.edit { it[letterSpacingKey] = v.coerceIn(MIN_SPACING, MAX_SPACING) }
+        preferencesStore.edit { it[letterSpacingKey] = v.coerceIn(MIN_SPACING, MAX_SPACING) }
     }
 
     suspend fun setExtraKeysVisible(visible: Boolean) {
-        context.settingsDataStore.edit { it[extraKeysVisibleKey] = visible }
+        preferencesStore.edit { it[extraKeysVisibleKey] = visible }
     }
 
     suspend fun setExtraKeysLayout(layout: String) {
-        context.settingsDataStore.edit { it[extraKeysLayoutKey] = layout }
+        preferencesStore.edit { it[extraKeysLayoutKey] = layout }
     }
 
     suspend fun setThemeMode(m: ThemeMode) {
-        context.settingsDataStore.edit { it[themeModeKey] = m.name }
+        preferencesStore.edit { it[themeModeKey] = m.name }
     }
 
     suspend fun setDynamicColor(on: Boolean) {
-        context.settingsDataStore.edit { it[dynamicColorKey] = on }
+        preferencesStore.edit { it[dynamicColorKey] = on }
     }
 
     suspend fun setKeyboardMode(m: KeyboardMode) {
-        context.settingsDataStore.edit { it[keyboardModeKey] = m.name }
+        preferencesStore.edit { it[keyboardModeKey] = m.name }
     }
 
     suspend fun setTmuxScrollSetup(on: Boolean) {
-        context.settingsDataStore.edit { it[tmuxScrollSetupKey] = on }
+        preferencesStore.edit { it[tmuxScrollSetupKey] = on }
     }
 
     suspend fun setConfirmCloseSession(on: Boolean) {
-        context.settingsDataStore.edit { it[confirmCloseKey] = on }
+        preferencesStore.edit { it[confirmCloseKey] = on }
     }
 
     suspend fun setKeepScreenOn(on: Boolean) {
-        context.settingsDataStore.edit { it[keepScreenOnKey] = on }
+        preferencesStore.edit { it[keepScreenOnKey] = on }
     }
 
     suspend fun setAutoTrustNewHostKey(on: Boolean) {
-        context.settingsDataStore.edit { it[autoTrustNewHostKeyKey] = on }
+        preferencesStore.edit { it[autoTrustNewHostKeyKey] = on }
     }
 
     /** 响铃与通知提醒：默认关闭（通用终端能力，按需开启）。 */
-    val terminalAlerts: Flow<Boolean> = context.settingsDataStore.data.map { prefs -> prefs[terminalAlertsKey] ?: false }
+    val terminalAlerts: Flow<Boolean> = preferencesStore.data.map { prefs -> prefs[terminalAlertsKey] ?: false }
 
     suspend fun setTerminalAlerts(on: Boolean) {
-        context.settingsDataStore.edit { it[terminalAlertsKey] = on }
+        preferencesStore.edit { it[terminalAlertsKey] = on }
     }
 
     /** 记录一次静默检查的结果（[tag] 为空表示已是最新）。 */
@@ -380,7 +396,7 @@ class SettingsStore(private val context: Context) {
      * 替一个用户已经不想要的 rc 版本亮着，而 6 小时节流内又不会重查来纠正它。
      */
     suspend fun setIncludePrerelease(enabled: Boolean) {
-        context.settingsDataStore.edit {
+        preferencesStore.edit {
             it[includePrereleaseKey] = enabled
             it[latestSeenTagKey] = ""
             it[latestSeenUrlKey] = ""
@@ -389,7 +405,7 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun recordUpdateCheck(at: Long, tag: String, url: String = "") {
-        context.settingsDataStore.edit {
+        preferencesStore.edit {
             it[lastUpdateCheckKey] = at
             it[latestSeenTagKey] = tag
             it[latestSeenUrlKey] = url
@@ -398,7 +414,7 @@ class SettingsStore(private val context: Context) {
 
     /** 恢复外观默认：配色 / 主字体 / 回退字体 / 字号 / 行距 / 字间距 / 光标（单次事务）。 */
     suspend fun resetAppearanceDefaults() {
-        context.settingsDataStore.edit { prefs ->
+        preferencesStore.edit { prefs ->
             prefs[colorSchemeKey] = TerminalThemes.DEFAULT_ID
             prefs[lightColorSchemeKey] = TerminalThemes.DEFAULT_LIGHT_ID
             prefs[schemeFollowsThemeKey] = false
@@ -413,12 +429,12 @@ class SettingsStore(private val context: Context) {
     }
 
     /** 用户上传字体清单。 */
-    val userFonts: Flow<List<UserFont>> = context.settingsDataStore.data.map { prefs ->
+    val userFonts: Flow<List<UserFont>> = preferencesStore.data.map { prefs ->
         parseUserFonts(prefs[userFontsKey])
     }
 
     suspend fun addUserFont(font: UserFont) {
-        context.settingsDataStore.edit { prefs ->
+        preferencesStore.edit { prefs ->
             val list = parseUserFonts(prefs[userFontsKey]).toMutableList()
             if (list.none { it.id == font.id }) list.add(font)
             prefs[userFontsKey] = encodeUserFonts(list)
@@ -426,7 +442,7 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun removeUserFont(id: String) {
-        context.settingsDataStore.edit { prefs ->
+        preferencesStore.edit { prefs ->
             prefs[userFontsKey] = encodeUserFonts(parseUserFonts(prefs[userFontsKey]).filterNot { it.id == id })
         }
     }

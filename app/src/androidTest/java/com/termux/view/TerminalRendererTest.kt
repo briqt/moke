@@ -9,7 +9,6 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.briqt.moke.BuildConfig
 import com.briqt.moke.terminal.FontRepository
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalOutput
@@ -45,17 +44,14 @@ class TerminalRendererTest {
     }
 
     @Test
-    fun fullBlocksFillTheGridForBothBundledPrimaryFonts() {
+    fun fullBlocksFillTheGridForTheBundledPrimaryAndSystemCjkFallback() {
         checkFullBlocks(faces(null), listOf(1f), listOf(0f), listOf(13, 37, 57))
     }
 
     @Test
     fun fullBlocksFillTheGridWithAnAlreadyInstalledMapleFallback() {
-        val bundled = BuildConfig.BUNDLE_MAPLE && context.resources.getIdentifier(
-            "maple_mono", "font", context.packageName,
-        ) != 0
-        assumeTrue("Maple is neither bundled nor already installed; no download is allowed",
-            bundled || fonts.fileFor("maple_mono").isFile)
+        assumeTrue("Maple is not already installed; no download is allowed",
+            fonts.fileFor("maple_mono").isFile)
         checkFullBlocks(faces("maple_mono"), listOf(0.7f, 1f, 1.3f),
             listOf(-0.15f, 0.0375f, 0.15f), listOf(31))
     }
@@ -667,9 +663,7 @@ class TerminalRendererTest {
     }
 
     private fun faces(fallback: String?): List<Pair<String, Typeface>> =
-        listOf("jetbrains_mono", "noto_sans_sc").map {
-            "$it/${fallback ?: "none"}" to fonts.resolveTypeface(it, fallback)
-        }
+        listOf("jetbrains_mono/${fallback ?: "system"}" to fonts.resolveTypeface("jetbrains_mono", fallback))
 
     private fun iconFixture(face: Typeface) = Fixture(face, size = 53, letter = -0.15f, columns = 8)
 

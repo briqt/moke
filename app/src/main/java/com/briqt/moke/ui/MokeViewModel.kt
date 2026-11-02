@@ -299,7 +299,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 内置目录 + 用户上传字体的合并列表（供外观/字体页展示与选择）。 */
     val fontCatalog: StateFlow<List<FontSpec>> = settings.userFonts
         .map { users ->
-            FontCatalog.all + users.map { uf ->
+            FontCatalog.visibleFonts { fonts.fileFor(it).isFile } + users.map { uf ->
                 FontSpec(
                     id = uf.id, name = uf.name, nameZh = uf.name, license = str(R.string.license_local),
                     cjk = false, bundled = false, url = null, archive = false,
@@ -307,7 +307,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, FontCatalog.all)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, FontCatalog.visibleFonts { fonts.fileFor(it).isFile })
 
     /** 仅承载「下载中 / 失败」这类瞬时状态；已装/未装由字体文件是否存在推导。 */
     private val _downloadStates = MutableStateFlow<Map<String, FontInstallState>>(emptyMap())
@@ -1284,6 +1284,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
     init {
+        viewModelScope.launch { settings.repairUnavailableFontSelections() }
         sessions.sessions.onEach { current ->
             val ids = current.map { it.id }.toSet()
             tmuxTracking.keys.filterNot { it in ids }.toList().forEach { tmuxTracking.remove(it)?.cancel() }
