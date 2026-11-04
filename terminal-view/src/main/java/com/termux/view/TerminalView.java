@@ -29,7 +29,6 @@ import android.view.ViewTreeObserver;
 import android.view.accessibility.AccessibilityManager;
 import android.view.autofill.AutofillManager;
 import android.view.autofill.AutofillValue;
-import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import java.io.ByteArrayOutputStream;
@@ -52,6 +51,8 @@ public final class TerminalView extends View {
 
     /** Log terminal view key and IME events. */
     private static boolean TERMINAL_VIEW_KEY_LOGGING_ENABLED = false;
+
+    TerminalInputConnection mCurrentInputConnection;
 
     /** The currently displayed terminal session, whose emulator is {@link #mEmulator}. */
     public TerminalSession mTermSession;
@@ -345,42 +346,57 @@ public final class TerminalView extends View {
         // keyboard on Android TV (see https://github.com/termux/termux-app/issues/221).
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
 
-        return new BaseInputConnection(this, true) {
+        TerminalInputConnection connection = new TerminalInputConnection(this) {
 
             @Override
             public boolean finishComposingText() {
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
-                super.finishComposingText();
+                beginBatchEdit();
+                try {
+                    if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
+                    super.finishComposingText();
 
-                sendTextToTerminal(getEditable());
-                getEditable().clear();
-                return true;
+                    sendTextToTerminal(getEditable());
+                    getEditable().clear();
+                    return true;
+                } finally {
+                    endBatchEdit();
+                }
             }
 
             @Override
             public boolean commitText(CharSequence text, int newCursorPosition) {
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
-                    mClient.logInfo(LOG_TAG, "IME: commitText(\"" + text + "\", " + newCursorPosition + ")");
+                beginBatchEdit();
+                try {
+                    if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
+                        mClient.logInfo(LOG_TAG, "IME: commitText(\"" + text + "\", " + newCursorPosition + ")");
+                    }
+                    super.commitText(text, newCursorPosition);
+
+                    if (mEmulator == null) return true;
+
+                    Editable content = getEditable();
+                    sendTextToTerminal(content);
+                    content.clear();
+                    return true;
+                } finally {
+                    endBatchEdit();
                 }
-                super.commitText(text, newCursorPosition);
-
-                if (mEmulator == null) return true;
-
-                Editable content = getEditable();
-                sendTextToTerminal(content);
-                content.clear();
-                return true;
             }
 
             @Override
             public boolean deleteSurroundingText(int leftLength, int rightLength) {
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
-                    mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
+                beginBatchEdit();
+                try {
+                    if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
+                        mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
+                    }
+                    // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
+                    KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
+                    for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
+                    return super.deleteSurroundingText(leftLength, rightLength);
+                } finally {
+                    endBatchEdit();
                 }
-                // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
-                KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
-                for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
-                return super.deleteSurroundingText(leftLength, rightLength);
             }
 
             void sendTextToTerminal(CharSequence text) {
@@ -447,6 +463,9 @@ public final class TerminalView extends View {
             }
 
         };
+        mCurrentInputConnection = connection;
+        connection.initializeEditorInfo(outAttrs);
+        return connection;
     }
 
     @Override
