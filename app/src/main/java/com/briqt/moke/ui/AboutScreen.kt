@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,14 +17,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.outlined.RateReview
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -35,13 +44,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.MokeShapes
 import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateInfo
 import com.briqt.moke.update.UpdateStatus
@@ -159,8 +171,87 @@ fun AboutScreen(
                     }
                 },
             )
+
+            val shareText = stringResource(R.string.about_share_text, UpdateChecker.REPO_URL)
+            val shareChooser = stringResource(R.string.about_share_chooser)
+            PitchCard(
+                onFeedback = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FEEDBACK_URL)))
+                    }
+                },
+                onShare = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                    }
+                    runCatching {
+                        context.startActivity(Intent.createChooser(send, shareChooser))
+                    }
+                },
+                modifier = Modifier.padding(top = 10.dp),
+            )
         }
     }
+}
+
+/** 反馈落到 GitHub 的新建 issue 页，由仓库已有的 issue 模板引导填写。 */
+private val FEEDBACK_URL = "${UpdateChecker.REPO_URL}/issues/new/choose"
+
+/**
+ * 寄语卡片：项目目标 + 欢迎反馈 + 欢迎分享。用浅主题色底与上方的设置/入口行区分开，
+ * 表明这是项目想对用户说的话；两个动作就近放在文字下方，各一步可达。
+ */
+@Composable
+private fun PitchCard(onFeedback: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        shape = MokeShapes.card,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Favorite,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    stringResource(R.string.about_pitch_title),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            Text(
+                stringResource(R.string.about_pitch_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            ) {
+                FilledTonalButton(onClick = onFeedback, modifier = Modifier.weight(1f)) {
+                    ButtonLabel(Icons.Outlined.RateReview, stringResource(R.string.about_feedback))
+                }
+                OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) {
+                    ButtonLabel(Icons.Outlined.Share, stringResource(R.string.about_share))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ButtonLabel(icon: ImageVector, text: String) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+    Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** 仓库地址的展示形态（去掉协议前缀，副标题里更干净）。 */

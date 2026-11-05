@@ -254,6 +254,12 @@
     <string name="up_to_date">Up to date</string>
     <string name="new_version">Update to %1$s</string>
     <string name="retry_with_msg">Retry (%1$s)</string>
+    <string name="about_pitch_title">Help make it better</string>
+    <string name="about_pitch_body">Moke is open source, and our goal is to make it the best SSH client on Android. If something feels awkward or is missing, let us know. If it helps you, please share it with people who might need it.</string>
+    <string name="about_feedback">Feedback</string>
+    <string name="about_share">Share</string>
+    <string name="about_share_chooser">Share Moke</string>
+    <string name="about_share_text">Moke · 墨客, an open-source SSH / mosh terminal for Android\n%1$s</string>
     <string name="licenses_header">Open source &amp; licenses</string>
     <string name="licenses_body">Moke is built on several open-source projects; see the project THIRD_PARTY_NOTICES for the full license list.</string>
 

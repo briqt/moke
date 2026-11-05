@@ -248,6 +248,12 @@
     <string name="up_to_date">已是最新</string>
     <string name="new_version">新版 %1$s</string>
     <string name="retry_with_msg">重试（%1$s）</string>
+    <string name="about_pitch_title">一起把它做好</string>
+    <string name="about_pitch_body">墨客是一个开源项目，目标是成为 Android 上最好用的 SSH 客户端。哪里用着不顺手、还缺什么，都欢迎告诉我们；如果它帮到了你，也请分享给身边需要的人。</string>
+    <string name="about_feedback">反馈意见</string>
+    <string name="about_share">分享给朋友</string>
+    <string name="about_share_chooser">分享墨客</string>
+    <string name="about_share_text">推荐一个开源的 Android SSH / mosh 终端：Moke · 墨客\n%1$s</string>
     <string name="licenses_header">开源与许可</string>
     <string name="licenses_body">本应用基于多个开源项目构建，完整许可清单见项目 THIRD_PARTY_NOTICES。</string>
 
