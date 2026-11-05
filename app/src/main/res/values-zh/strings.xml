@@ -249,7 +249,7 @@
     <string name="new_version">新版 %1$s</string>
     <string name="retry_with_msg">重试（%1$s）</string>
     <string name="about_pitch_title">一起把它做好</string>
-    <string name="about_pitch_body">墨客是一个开源项目，目标是成为 Android 上最好用的 SSH 客户端。哪里用着不顺手、还缺什么，都欢迎告诉我们；如果它帮到了你，也请分享给身边需要的人。</string>
+    <string name="about_pitch_body">墨客是一个开源项目，目标是做 Android 上最好用的 SSH 客户端。遇到问题或有什么建议，欢迎随时反馈；觉得好用的话，不妨分享给身边的朋友。</string>
     <string name="about_feedback">反馈意见</string>
     <string name="about_share">分享给朋友</string>
     <string name="about_share_chooser">分享墨客</string>
