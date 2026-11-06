@@ -133,4 +133,22 @@ printf 'PASS: rebuilt AAR/stamp generation is reusable\n'
 resolved="$(readlink -f "$AAR")"
 [ -s "$resolved.fingerprint" ] || fail 'published generation lacks its stamp'
 [ "$(find "$FIXTURE/app/libs/netbridge-artifacts" -name '*.aar' | wc -l)" -eq 1 ] || fail 'partial build generation leaked'
+# Go 会省略与 go 行相同的冗余 toolchain 行；缺省形式仍必须精确锁定编译器。
+printf 'module fixture\n\ngo 1.27.2\n' > "$FIXTURE/netbridge/go.mod"
+bash "$BUILD" > "$FIXTURE/canonical.log" 2>&1 || fail 'canonical go-only version lock could not build'
+current
+printf 'PASS: canonical go-only version lock builds\n'
+cp "$AAR" "$FIXTURE/canonical.aar"
+before="$(wc -l < "$TEST_BIND_LOG")"
+printf 'module fixture\n\ngo 1.27.3\n' > "$FIXTURE/netbridge/go.mod"
+if bash "$BUILD" > "$FIXTURE/version.log" 2>&1; then fail 'mismatched Go compiler was accepted'; fi
+grep -q '需要 go1.27.3，当前为 go1.27.2' "$FIXTURE/version.log" || fail 'missing exact compiler mismatch guidance'
+cmp -s "$AAR" "$FIXTURE/canonical.aar" || fail 'compiler mismatch changed the previous AAR'
+[ "$(wc -l < "$TEST_BIND_LOG")" = "$before" ] || fail 'compiler mismatch invoked gomobile'
+printf 'PASS: canonical version lock rejects a different compiler without binding\n'
+printf 'module fixture\n' > "$FIXTURE/netbridge/go.mod"
+if bash "$BUILD" > "$FIXTURE/version.log" 2>&1; then fail 'missing Go version lock was accepted'; fi
+cmp -s "$AAR" "$FIXTURE/canonical.aar" || fail 'missing version lock changed the previous AAR'
+[ "$(wc -l < "$TEST_BIND_LOG")" = "$before" ] || fail 'missing version lock invoked gomobile'
+printf 'PASS: missing version lock is rejected without replacing the previous AAR\n'
 printf 'PASS: all isolated freshness and publication regressions\n'

@@ -44,7 +44,7 @@ jobs:
       - name: Install NDK r30
         run: sdkmanager --install "ndk;30.0.16248370"
 
-      # netbridge（Go）：版本取 netbridge/go.mod 的 toolchain 行；gomobile 由 go.mod 的 tool 依赖锁定。
+      # netbridge（Go）：版本取 netbridge/go.mod（优先 toolchain，否则 go 行）；gomobile 由 go.mod 的 tool 依赖锁定。
       - name: Set up Go
         uses: actions/setup-go@v7
         with:

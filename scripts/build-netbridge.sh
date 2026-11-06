@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建 netbridge（Go：tailnet 节点、代理与 mosh 中继）的 Android AAR → app/libs/netbridge.aar（不入库）。
 #
-# 版本全部锁定：Go 取 netbridge/go.mod 的 toolchain 行（本机版本不符即失败，不自动下载），
+# 版本全部锁定：Go 优先取 go.mod 的 toolchain，缺省时取 go 行（本机版本不符即失败，不自动下载），
 # gomobile/gobind 取 go.mod 的 tool 依赖；-trimpath 与空 buildid 使产物可复现。
 # 依赖：上述 Go、Android NDK r30、Android SDK（ANDROID_HOME）、Bash、GNU coreutils。
 # 用法：ANDROID_NDK_HOME=/path/to/ndk bash scripts/build-netbridge.sh
@@ -21,6 +21,11 @@ if bash "$VERIFY" check >/dev/null 2>&1; then
 fi
 inputs="$(bash "$VERIFY" fingerprint)"
 want="$(sed -n 's/^toolchain //p' "$MODULE/go.mod")"
+# Go 规范化会省略冗余 toolchain；此时 go 行是隐式建议，本脚本仍要求精确版本。
+if [ -z "$want" ]; then
+  version="$(sed -n 's/^go //p' "$MODULE/go.mod")"
+  [ -z "$version" ] || want="go$version"
+fi
 have="$(GOTOOLCHAIN=local go env GOVERSION 2>/dev/null || true)"
 [ -n "$want" ] && [ "$have" = "$want" ] || { echo "需要 $want，当前为 ${have:-未安装}"; exit 1; }
 

@@ -17,7 +17,7 @@ Run the commands below from the repository root in a Bash environment with GNU c
 
 - **JDK 25**, matching CI; use the checked-in Gradle wrapper. Gradle, Android Gradle Plugin and Kotlin versions are locked in `gradle/wrapper/gradle-wrapper.properties` and `gradle/libs.versions.toml`.
 - **Android SDK platform 37**, with the Build-Tools required by the locked Android Gradle Plugin, and **NDK r30 (`30.0.16248370`)**. The app requires Android 11 or newer and packages only `arm64-v8a`.
-- **Go**: install the exact `toolchain` version in `netbridge/go.mod`. The network builder rejects a different local version rather than downloading a toolchain. Go dependencies and gomobile/gobind are locked in `netbridge/go.mod` and `netbridge/go.sum`.
+- **Go**: install the exact version selected from `netbridge/go.mod` (`toolchain`, or `go` when omitted). The network builder rejects a different local version rather than downloading a toolchain. Go dependencies and gomobile/gobind are locked in `netbridge/go.mod` and `netbridge/go.sum`.
 
 Set the SDK and NDK paths, and create `local.properties` if it does not exist:
 

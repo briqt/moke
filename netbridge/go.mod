@@ -1,13 +1,11 @@
 module github.com/briqt/moke/netbridge
 
-go 1.27.1
-
-toolchain go1.27.2
+go 1.27.3
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1
 	golang.org/x/net v0.61.0
-	tailscale.com v1.104.1
+	tailscale.com v1.104.5
 )
 
 require (

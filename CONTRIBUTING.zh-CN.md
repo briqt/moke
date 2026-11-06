@@ -17,7 +17,7 @@
 
 - **JDK 25**，与 CI 一致；使用仓库自带的 Gradle wrapper。Gradle、Android Gradle Plugin 与 Kotlin 版本锁定在 `gradle/wrapper/gradle-wrapper.properties` 和 `gradle/libs.versions.toml`。
 - **Android SDK 平台 37**、锁定的 Android Gradle Plugin 所需的 Build-Tools，以及 **NDK r30（`30.0.16248370`）**。应用支持 Android 11 及以上，仅打包 `arm64-v8a`。
-- **Go**：安装 `netbridge/go.mod` 中 `toolchain` 指定的准确版本。网络构建脚本发现本机版本不符会报错，不会自动下载工具链。Go 依赖与 gomobile/gobind 由 `netbridge/go.mod`、`netbridge/go.sum` 锁定。
+- **Go**：安装 `netbridge/go.mod` 指定的准确版本：优先 `toolchain`，未声明时使用 `go` 行。网络构建脚本发现本机版本不符会报错，不会自动下载工具链。Go 依赖与 gomobile/gobind 由 `netbridge/go.mod`、`netbridge/go.sum` 锁定。
 
 设置 SDK、NDK 路径；若尚无 `local.properties`，创建并填写 SDK 路径：
 
