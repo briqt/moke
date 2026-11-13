@@ -34,13 +34,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -71,6 +70,7 @@ import com.briqt.moke.net.NetworkManager
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
+import com.briqt.moke.ui.theme.extra
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
@@ -113,9 +113,10 @@ fun tailnetPhaseLabel(p: TailnetPhase, leases: Int = 0): String {
 @Composable
 fun tailnetPhaseColor(p: TailnetPhase): Color = when (p) {
     TailnetPhase.EXPIRED -> MaterialTheme.colorScheme.error
-    TailnetPhase.CONNECTING, TailnetPhase.WAITING_BROWSER, TailnetPhase.WAITING_APPROVAL -> MaterialTheme.colorScheme.tertiary
+    // 进行中不新增颜色：正文墨色，配合转圈表达。
+    TailnetPhase.CONNECTING, TailnetPhase.WAITING_BROWSER, TailnetPhase.WAITING_APPROVAL -> MaterialTheme.colorScheme.onSurface
     TailnetPhase.NOT_LOGGED_IN, TailnetPhase.CHECKING, TailnetPhase.LOGGED_IN -> MaterialTheme.colorScheme.onSurfaceVariant
-    TailnetPhase.ACTIVE -> MaterialTheme.colorScheme.primary
+    TailnetPhase.ACTIVE -> MaterialTheme.extra.ok
 }
 
 @Composable
@@ -155,8 +156,7 @@ private fun SubPageTopBar(title: String, onBack: () -> Unit) {
         title = { Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
         navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back)) } },
         expandedHeight = MokeDimens.topBarHeight,
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface, navigationIconContentColor = MaterialTheme.colorScheme.onSurface),
+        colors = mokeTopBarColors(),
     )
 }
 
@@ -198,7 +198,7 @@ fun NetworksScreen(
                     if (proxies.isEmpty()) EmptyHint(stringResource(R.string.proxy_empty))
                     proxies.forEach { e ->
                         val leases = live.leases[e.id] ?: 0
-                        NetworkCard(e, if (leases > 0) activeLabel(leases) else null, MaterialTheme.colorScheme.primary) { onOpen(e) }
+                        NetworkCard(e, if (leases > 0) activeLabel(leases) else null, MaterialTheme.extra.ok) { onOpen(e) }
                     }
                 }
             }
@@ -209,8 +209,8 @@ fun NetworksScreen(
 @Composable
 private fun NetworkSectionHeader(title: String, addText: String, onAdd: () -> Unit, enabled: Boolean = true) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).padding(start = 4.dp))
+        Text(title, style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 4.dp))
         TextButton(onClick = onAdd, enabled = enabled, contentPadding = PaddingValues(horizontal = 8.dp),
             modifier = Modifier.weight(1f, fill = false).sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -231,7 +231,7 @@ private fun EmptyHint(text: String) {
 @Composable
 private fun NetworkCard(e: NetworkEntry, status: String?, statusColor: Color, onClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), shape = MokeShapes.card,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = cardBorder()) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(e.name, fontWeight = FontWeight.SemiBold)
@@ -506,12 +506,12 @@ private fun TailnetLoginPanel(
     onCancel: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MokeShapes.card, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MokeShapes.card, border = cardBorder(), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (phase == TailnetPhase.CONNECTING || phase == TailnetPhase.CHECKING) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp,
-                        color = if (phase == TailnetPhase.CHECKING) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                        color = if (phase == TailnetPhase.CHECKING) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
                 }
                 Text(tailnetPhaseLabel(phase, leases), fontWeight = FontWeight.SemiBold, color = tailnetPhaseColor(phase))
             }
@@ -545,7 +545,7 @@ private fun TailnetLoginPanel(
                 }
                 TailnetPhase.WAITING_BROWSER -> {
                     InfoNote(stringResource(R.string.net_return_after_login))
-                    OutlinedButton(onClick = onReopen, enabled = enabled) { Text(stringResource(R.string.action_reopen_login)) }
+                    FilledTonalButton(onClick = onReopen, enabled = enabled) { Text(stringResource(R.string.action_reopen_login)) }
                     TextButton(onClick = onCancel, enabled = enabled) { Text(stringResource(R.string.action_cancel_login)) }
                 }
                 TailnetPhase.LOGGED_IN, TailnetPhase.ACTIVE -> {

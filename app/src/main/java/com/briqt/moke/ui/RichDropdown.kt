@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.MaterialTheme
+import com.briqt.moke.ui.theme.mokeTextFieldColors
 
 /** 富下拉项：不止 name，还带副标题 / 标签 / 状态 / 前导（色块或图标）。 */
 data class DropdownOption(
@@ -65,6 +66,7 @@ fun RichDropdown(
         modifier = modifier,
     ) {
         OutlinedTextField(
+            colors = mokeTextFieldColors(),
             value = selected?.title ?: missingTitle,
             onValueChange = {},
             readOnly = true,
@@ -123,6 +125,7 @@ fun EditableDropdownField(
         modifier = modifier,
     ) {
         OutlinedTextField(
+            colors = mokeTextFieldColors(),
             value = value,
             onValueChange = { onValueChange(it); expanded = true },
             singleLine = true,
@@ -171,7 +174,7 @@ private fun OptionRow(opt: DropdownOption) {
             }
         }
         if (opt.status != null) {
-            Text(opt.status, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            Text(opt.status, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

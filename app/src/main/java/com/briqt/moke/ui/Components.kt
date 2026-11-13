@@ -1,12 +1,19 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TopAppBarColors
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import com.briqt.moke.ui.theme.MokeMono
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -15,8 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
@@ -49,6 +56,12 @@ import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeShapes
+import com.briqt.moke.ui.theme.extra
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 
 /** 徽标 / 能力标签规格：文案 + 强调色（背景取该色的淡版）。 */
 data class BadgeSpec(val text: String, val color: Color)
@@ -97,9 +110,68 @@ fun fontCapabilityBadges(
 }
 
 /**
+ * 设置分组：把相邻的 [NavRow] / [SwitchRow] 收进一张卡片，行与行之间是 1dp 细线。
+ * 实现上分组底色取细线色、每行铺卡片色、行间留 1dp 缝，缝就是分隔线——行不必知道自己是不是第一行。
+ */
+@Composable
+fun SettingsGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MokeShapes.card,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.outlineVariant),
+        border = cardBorder(),
+    ) {
+        CompositionLocalProvider(LocalInSettingsGroup provides true) {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp), content = content)
+        }
+    }
+}
+
+private val LocalInSettingsGroup = staticCompositionLocalOf { false }
+
+/** 设置行外壳：在 [SettingsGroup] 里是一条平铺的行，单独使用时自带卡片。两种情况行高、内边距一致。 */
+@Composable
+private fun SettingsRowShell(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 56.dp)
+        .clickable(onClick = onClick)
+        .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+    if (LocalInSettingsGroup.current) {
+        Row(
+            modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).then(rowModifier),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    } else {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            shape = MokeShapes.card,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = cardBorder(),
+        ) {
+            Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically, content = content)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.SettingsRowText(title: String, subtitle: String) {
+    Column(modifier = Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+        if (subtitle.isNotEmpty()) {
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
  * 统一「设置入口行」：图标 + 标题 + 副标题 + 右向箭头，整行可点。
- * 收敛此前 MenuCard(Card) 与 FontManageEntry(Surface) 两套实现，统一为浮起卡片；
- * 箭头用 auto-mirror 图标（取代字面 "›"，可随 RTL 镜像、粗细可控）。
+ * 箭头用 auto-mirror 图标（可随 RTL 镜像）。放进 [SettingsGroup] 时与相邻行共用一张卡片。
  */
 @Composable
 fun NavRow(
@@ -108,32 +180,18 @@ fun NavRow(
     subtitle: String = "",
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    /** 右侧箭头前点一个主题色小圆点（用于"远端有更新"这类无打扰提示）。 */
+    /** 右侧箭头前点一方朱砂小印（用于"远端有更新"这类无打扰提示）。 */
     showDot: Boolean = false,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MokeShapes.card,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                if (subtitle.isNotEmpty()) {
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (showDot) Dot(modifier = Modifier.padding(end = 6.dp))
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    SettingsRowShell(onClick = onClick, modifier = modifier) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsRowText(title, subtitle)
+        if (showDot) Dot(modifier = Modifier.padding(end = 6.dp))
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -254,7 +312,7 @@ fun ConfirmDialog(
         text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
@@ -300,7 +358,7 @@ fun ThemeModeDialog(current: ThemeMode, onPick: (ThemeMode) -> Unit, onDismiss: 
     )
 }
 
-/** 开关行：与 [NavRow] 同款卡片，右侧是 Switch（整行可点即切换）。 */
+/** 开关行：与 [NavRow] 同款外壳，右侧是 Switch（整行可点即切换）。 */
 @Composable
 fun SwitchRow(
     icon: ImageVector,
@@ -309,22 +367,11 @@ fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) },
-        shape = MokeShapes.card,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                if (subtitle.isNotEmpty()) {
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+    SettingsRowShell(onClick = { onCheckedChange(!checked) }) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsRowText(title, subtitle)
+        // 整行就是触控区，Switch 不再另撑 48dp 最小触控高度——否则开关行比箭头行高一截。
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
@@ -339,7 +386,7 @@ fun InfoNote(text: String, modifier: Modifier = Modifier, error: Boolean = false
     val color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     Row(modifier = modifier.semantics { if (error) liveRegion = LiveRegionMode.Polite }, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
         Icon(
-            if (error) Icons.Outlined.ErrorOutline else Icons.Outlined.Info,
+            if (error) Icons.Filled.Error else Icons.Filled.Info,
             contentDescription = null,
             modifier = Modifier.padding(top = 1.dp).size(16.dp),
             tint = color,
@@ -348,12 +395,69 @@ fun InfoNote(text: String, modifier: Modifier = Modifier, error: Boolean = false
     }
 }
 
-/** 主题色小圆点：静默提示"有新内容"（当前用于新版本），不占位、不打扰。 */
+/** 朱砂小印：静默提示"有新内容"（当前用于新版本），不占位、不打扰。与启动图标的印同形：实心方块、小圆角。 */
 @Composable
 fun Dot(modifier: Modifier = Modifier, size: Dp = 8.dp) {
     Box(
         modifier = modifier
             .size(size)
-            .background(MaterialTheme.colorScheme.primary, CircleShape)
+            .background(MaterialTheme.extra.sealFill, MokeShapes.seal)
     )
+}
+
+/** 卡片细线：页面底与卡片只差一档墨色，不用阴影，靠 1px 细线分层。 */
+@Composable
+fun cardBorder(): BorderStroke = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+
+/**
+ * 计数角标（会话数、转发数、tmux 会话数）：与印同形的小方块，但用中性的浮起控件底——
+ * 计数只是「这里有几个」，不是要你注意的事；朱砂只留给 [Dot] 那类提示。
+ */
+@Composable
+fun CountBadge(text: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .heightIn(min = 16.dp)
+            .widthIn(min = 16.dp)
+            .background(MaterialTheme.colorScheme.secondaryContainer, MokeShapes.seal)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = MokeMono,
+        )
+    }
+}
+
+/** 各页顶栏统一配色：与页面同底，滚动后浮起到栏色。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun mokeTopBarColors(): TopAppBarColors = TopAppBarDefaults.topAppBarColors(
+    containerColor = MaterialTheme.colorScheme.background,
+    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+    titleContentColor = MaterialTheme.colorScheme.onSurface,
+    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)
+
+/** 上沿 1px 细线（底栏、底部操作区与内容分界，代替阴影）。 */
+@Composable
+fun Modifier.topHairline(): Modifier {
+    val color = MaterialTheme.colorScheme.outlineVariant
+    return drawBehind { drawLine(color, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx()) }
+}
+
+/** 下沿 1px 细线（顶栏与内容分界）。 */
+@Composable
+fun Modifier.bottomHairline(): Modifier {
+    val color = MaterialTheme.colorScheme.outlineVariant
+    return drawBehind {
+        val y = size.height - 0.5.dp.toPx()
+        drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    }
 }

@@ -23,7 +23,7 @@
     <!-- 连接 / 主机列表 -->
     <string name="add_host">Add host</string>
     <string name="empty_hosts_title">No hosts yet</string>
-    <string name="empty_hosts_hint">Tap + to add a host</string>
+    <string name="empty_hosts_hint">Tap + to add your first host</string>
     <string name="sort_label">Sort</string>
     <string name="ungrouped">Ungrouped</string>
     <string name="drag_to_reorder">Drag to reorder</string>
@@ -107,8 +107,8 @@
     <string name="host_copied">Copied: %1$s</string>
 
     <!-- 会话 -->
-    <string name="empty_sessions_title">No sessions</string>
-    <string name="empty_sessions_hint">Pick a host to start</string>
+    <string name="empty_sessions_title">No open sessions</string>
+    <string name="empty_sessions_hint">Tap a host on the Hosts tab to connect</string>
     <string name="sessions_clear_ended">Clear ended (%1$d)</string>
     <string name="session_ended_short">ended</string>
     <string name="close_session">Close session</string>
@@ -445,8 +445,7 @@
     <string name="font_invalid">Not a valid font file (TTF / OTF required)</string>
     <!-- Confirmations for destructive actions -->
     <string name="host_delete_title">Delete host</string>
-    <string name="host_delete_confirm">Delete “%1$s”?
-Its saved password / private key and host fingerprint are removed too. This can\'t be undone.</string>
+    <string name="host_delete_confirm">Delete “%1$s”?\nIts saved password / private key and host fingerprint are removed too. This can\'t be undone.</string>
     <string name="sessions_clear_ended_title">Clear ended sessions</string>
     <string name="sessions_clear_ended_confirm">Clear %1$d ended sessions? Their terminal output is discarded.</string>
     <string name="action_clear">Clear</string>
@@ -652,7 +651,7 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="network_edit_proxy">Edit proxy</string>
     <string name="proxy_socks5_udp_note">mosh also requires the SOCKS5 server to support UDP forwarding.</string>
     <string name="net_waiting_approval_hint">An administrator must approve this device before it can connect.</string>
-    <string name="net_return_after_login">Complete authorization in the browser, then return to moke.</string>
+    <string name="net_return_after_login">Complete authorization in the browser, then return to Moke.</string>
     <string name="net_logged_in_hint">Select this network under Network when editing a host.</string>
     <plurals name="private_key_summary">
         <item quantity="one">•••••••• %1$s · %2$d character</item>

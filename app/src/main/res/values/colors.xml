@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="moke_bg">#0E1116</color>
-    <color name="moke_ink">#E6EDF3</color>
-    <color name="moke_jade">#7FE3C4</color>
+    <!-- 窗口底色（Compose 首帧前与系统栏背后）：浅色走纸，深色见 values-night。与 ui/theme/Color.kt 页面底一致。 -->
+    <color name="moke_window_bg">#F2F1EC</color>
+    <!-- 启动图标：纸底与朱砂印。 -->
+    <color name="moke_icon_paper">#EEECE6</color>
 </resources>

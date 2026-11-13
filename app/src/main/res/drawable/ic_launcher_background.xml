@@ -1,25 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Moke 图标背景：墨底 + 一团柔和化开的墨玉水墨晕（径向渐变、无硬边）。viewport 1024。 -->
+<!-- 墨客启动图标背景：宣纸。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="1024"
-    android:viewportHeight="1024">
-    <!-- 墨底 -->
-    <path
-        android:fillColor="#0E1116"
-        android:pathData="M0,0 L1024,0 L1024,1024 L0,1024 Z" />
-    <!-- 水墨晕：墨玉→透明 的柔和径向，偏左上，模拟墨在纸上化开 -->
-    <path android:pathData="M0,0 L1024,0 L1024,1024 L0,1024 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="446"
-                android:centerY="452"
-                android:gradientRadius="480"
-                android:startColor="#551F8A63"
-                android:endColor="#001F8A63" />
-        </aapt:attr>
-    </path>
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="@color/moke_icon_paper" android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 </vector>

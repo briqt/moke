@@ -184,7 +184,7 @@ class TmuxRefreshFeedbackTest {
         assertFalse(topBar.contains("CircularProgressIndicator"))
         assertTrue(topBar.contains("IconButton(onClick = onOpenTmux)"))
         assertTrue(topBar.contains("if (tmuxCount > 0)"))
-        assertTrue(topBar.contains("Text(tmuxCount.toString())"))
+        assertTrue(topBar.contains("CountBadge(tmuxCount.toString())"))
         assertTrue(source.contains("tmuxCount = tmuxState.sessions.size"))
         // The existing ordinary-SSH policy and five-second loop must not be used to hide animation.
         assertTrue(source.contains("dataReady && shouldPollTmux(observeCurrent, showTmux, closeTarget)"))

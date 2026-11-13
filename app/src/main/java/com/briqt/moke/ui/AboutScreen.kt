@@ -18,8 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Science
-import androidx.compose.material.icons.outlined.RateReview
-import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.filled.RateReview
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -30,12 +30,10 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +56,12 @@ import com.briqt.moke.update.UpdateChecker
 import com.briqt.moke.update.UpdateInfo
 import com.briqt.moke.update.UpdateStatus
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,11 +103,7 @@ fun AboutScreen(
                     }
                 },
                 expandedHeight = MokeDimens.topBarHeight,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors = mokeTopBarColors(),
             )
         },
     ) { padding ->
@@ -116,14 +116,17 @@ fun AboutScreen(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 头部：名称 + 定位
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(
-                    stringResource(R.string.app_tagline),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            // 头部：图标落款 + 名称 + 定位
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                AppMark(56.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        stringResource(R.string.app_tagline),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             // 版本 + 检查更新：固定最小行高（=按钮触控高度），避免"检查更新→进度→结果"三态控件高度不同导致整行重排、文字跳动。
@@ -150,27 +153,29 @@ fun AboutScreen(
                 }
             }
 
-            SwitchRow(
-                icon = Icons.Filled.Science,
-                title = stringResource(R.string.include_prerelease),
-                checked = includePrerelease,
-                onCheckedChange = {
-                    onIncludePrerelease(it)
-                    // 口径变了，界面上已有的结论就不再成立——回到未检查态，别让旧结果留着骗人。
-                    update = UpdateStatus.Idle
-                },
-            )
+            SettingsGroup {
+                SwitchRow(
+                    icon = Icons.Filled.Science,
+                    title = stringResource(R.string.include_prerelease),
+                    checked = includePrerelease,
+                    onCheckedChange = {
+                        onIncludePrerelease(it)
+                        // 口径变了，界面上已有的结论就不再成立——回到未检查态，别让旧结果留着骗人。
+                        update = UpdateStatus.Idle
+                    },
+                )
 
-            NavRow(
-                Icons.Filled.Code,
-                stringResource(R.string.github_repo),
-                REPO_LABEL,
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
-                    }
-                },
-            )
+                NavRow(
+                    Icons.Filled.Code,
+                    stringResource(R.string.github_repo),
+                    REPO_LABEL,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
+                        }
+                    },
+                )
+            }
 
             val shareText = stringResource(R.string.about_share_text, UpdateChecker.REPO_URL)
             val shareChooser = stringResource(R.string.about_share_chooser)
@@ -207,6 +212,7 @@ private fun PitchCard(onFeedback: () -> Unit, onShare: () -> Unit, modifier: Mod
     Card(
         shape = MokeShapes.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = cardBorder(),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
@@ -228,10 +234,10 @@ private fun PitchCard(onFeedback: () -> Unit, onShare: () -> Unit, modifier: Mod
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             ) {
                 FilledTonalButton(onClick = onFeedback, modifier = Modifier.weight(1f)) {
-                    ButtonLabel(Icons.Outlined.RateReview, stringResource(R.string.about_feedback))
+                    ButtonLabel(Icons.Filled.RateReview, stringResource(R.string.about_feedback))
                 }
-                OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) {
-                    ButtonLabel(Icons.Outlined.Share, stringResource(R.string.about_share))
+                FilledTonalButton(onClick = onShare, modifier = Modifier.weight(1f)) {
+                    ButtonLabel(Icons.Filled.Share, stringResource(R.string.about_share))
                 }
             }
         }
@@ -256,4 +262,23 @@ private fun InfoLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.width(72.dp),
     )
+}
+
+/** 应用图标落款：宣纸方块里是启动图标的笔形与印（与桌面图标同一份矢量）。 */
+@Composable
+private fun AppMark(size: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(MokeShapes.card)
+            .background(androidx.compose.ui.graphics.Color(0xFFEEECE6)),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 前景层 108 单位里可见区是中心 72：放大 1.5 倍，让笔形填满方块的安全区。
+        Image(
+            painterResource(R.drawable.ic_launcher_foreground),
+            contentDescription = null,
+            modifier = Modifier.requiredSize(size * 1.5f),
+        )
+    }
 }

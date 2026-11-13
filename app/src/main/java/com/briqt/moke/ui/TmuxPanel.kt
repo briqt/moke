@@ -68,6 +68,7 @@ import com.briqt.moke.terminal.TmuxSession
 import com.briqt.moke.terminal.TmuxUiState
 import com.briqt.moke.terminal.selectionFor
 import kotlinx.coroutines.launch
+import com.briqt.moke.ui.theme.extra
 
 @Composable
 fun TmuxPanel(
@@ -364,7 +365,7 @@ private fun TmuxSessionRow(
                 modifier = Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = session.name },
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (current) Text(stringResource(R.string.tmux_current), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                if (current) Text(stringResource(R.string.tmux_current), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.extra.ok)
                 Text(pluralStringResource(R.plurals.tmux_windows, session.windows, session.windows),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(pluralStringResource(R.plurals.tmux_clients, session.clients, session.clients),
@@ -523,7 +524,7 @@ private fun AsyncTmuxConfirmDialog(
                 }
             }) {
                 Text(if (submitting) stringResource(R.string.action_working) else confirmLabel,
-                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             }
         },
         dismissButton = {

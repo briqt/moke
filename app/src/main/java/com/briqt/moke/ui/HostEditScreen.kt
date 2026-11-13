@@ -62,6 +62,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import com.briqt.moke.ui.theme.mokeTextFieldColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -276,6 +277,7 @@ fun HostEditScreen(
             } else if (authType == AuthType.KEY) {
                 if (!showPrivateKey && privateKey.isNotBlank()) {
                     androidx.compose.material3.OutlinedTextField(
+                        colors = mokeTextFieldColors(),
                         value = keySummary(privateKey), onValueChange = {}, readOnly = true, singleLine = true,
                         label = { Text(stringResource(R.string.field_private_key)) }, modifier = Modifier.fillMaxWidth(),
                         trailingIcon = { RevealToggle(false) { showPrivateKey = true } },

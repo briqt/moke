@@ -40,7 +40,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -75,6 +74,7 @@ import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
+import androidx.compose.material3.SliderDefaults
 
 private fun hex(s: String): Color = Color(android.graphics.Color.parseColor(s))
 
@@ -123,9 +123,10 @@ fun AppearanceScreen(
     val tagLigature = stringResource(R.string.tag_ligature)
     val tagLight = stringResource(R.string.tag_light_scheme)
     // 标签配色在 @Composable 作用域先取好（下方 capTags 等在普通 map 中构造 BadgeSpec）。
-    val cTertiary = MaterialTheme.colorScheme.tertiary
-    val cPrimary = MaterialTheme.colorScheme.primary
-    val cSecondary = MaterialTheme.colorScheme.secondary
+    // 能力标签一律中性：标签只说明事实，不抢可点元素的注意力。
+    val cTertiary = MaterialTheme.colorScheme.onSurfaceVariant
+    val cPrimary = MaterialTheme.colorScheme.onSurfaceVariant
+    val cSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     fun installed(id: String) = fontStates[id] is FontInstallState.Installed
     // 走共享 fontCapabilityBadges：与字体管理卡片里的同批标签文案/配色完全一致。
@@ -216,12 +217,7 @@ fun AppearanceScreen(
                     }
                 },
                 expandedHeight = MokeDimens.topBarHeight,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors = mokeTopBarColors(),
             )
         },
     ) { padding ->
@@ -262,19 +258,21 @@ fun AppearanceScreen(
                 // 「界面」= 应用自身的明暗与取色；与下方「配色」（终端调色板）分成两个分区，避免混淆。
                 SectionHeader(stringResource(R.string.section_ui))
                 var themeDialog by remember { mutableStateOf(false) }
-                NavRow(
-                    Icons.Filled.Contrast,
-                    stringResource(R.string.menu_theme),
-                    stringResource(themeModeLabel(themeMode)),
-                    onClick = { themeDialog = true },
-                )
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    SwitchRow(
-                        icon = Icons.Filled.Colorize,
-                        title = stringResource(R.string.menu_dynamic_color),
-                        checked = dynamicColor,
-                        onCheckedChange = onDynamicColor,
+                SettingsGroup {
+                    NavRow(
+                        Icons.Filled.Contrast,
+                        stringResource(R.string.menu_theme),
+                        stringResource(themeModeLabel(themeMode)),
+                        onClick = { themeDialog = true },
                     )
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        SwitchRow(
+                            icon = Icons.Filled.Colorize,
+                            title = stringResource(R.string.menu_dynamic_color),
+                            checked = dynamicColor,
+                            onCheckedChange = onDynamicColor,
+                        )
+                    }
                 }
                 if (themeDialog) {
                     ThemeModeDialog(
@@ -396,8 +394,7 @@ private fun SectionHeader(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
     )
 }
@@ -429,17 +426,25 @@ private fun SliderRow(
         // 压扁滑块行：± 按钮 34dp、图标 18dp，滑块限高 36dp——不再"超级大"，与页面其它控件协调。
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onMinus, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
             }
             Slider(
                 value = value.coerceIn(valueRange.start, valueRange.endInclusive),
                 onValueChange = onValue,
                 valueRange = valueRange,
                 steps = steps,
+                // 墨色滑块：滑钮是正文墨，已走过的轨道退一档到说明字色，刻度点不画（字号有 20 多档，点会连成一串）。
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.onSurface,
+                    activeTrackColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent,
+                ),
                 modifier = Modifier.weight(1f).height(36.dp),
             )
             IconButton(onClick = onPlus, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
             }
         }
     }

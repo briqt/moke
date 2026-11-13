@@ -26,6 +26,9 @@ object MokeShapes {
     /** 卡片 / 设置入口行 / 预览框。 */
     val card = RoundedCornerShape(12.dp)
 
+    /** 朱砂小印（角标、更新提示）：实心方块，圆角很小，与启动图标的印同形。 */
+    val seal = RoundedCornerShape(2.dp)
+
     /** 浮层胶囊（如缩放提示）。 */
     val floating = RoundedCornerShape(20.dp)
 }

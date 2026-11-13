@@ -23,7 +23,7 @@
     <!-- 连接 / 主机列表 -->
     <string name="add_host">添加主机</string>
     <string name="empty_hosts_title">还没有主机</string>
-    <string name="empty_hosts_hint">点 + 添加主机</string>
+    <string name="empty_hosts_hint">点右下角的 + 添加第一台主机</string>
     <string name="sort_label">排序</string>
     <string name="ungrouped">未分组</string>
     <string name="drag_to_reorder">拖动排序</string>
@@ -60,18 +60,18 @@
     <string name="tmux_via_jump">经 %1$s</string>
     <string name="tmux_take_over_confirm_title">接管 tmux 会话？</string>
     <plurals name="tmux_take_over_confirm_message">
-        <item quantity="other">将断开“%2$s”现有的 %1$d 个客户端，再由当前设备附加。会话中的程序不会终止。</item>
+        <item quantity="other">将断开「%2$s」现有的 %1$d 个客户端，再由当前设备附加。会话中的程序不会终止。</item>
     </plurals>
     <string name="close_tmux_connection_confirm">断开「%1$s」的当前客户端？tmux 会话及其中程序会继续在服务器运行。</string>
     <string name="tmux_detach_confirm_title">断开 tmux 客户端？</string>
     <plurals name="tmux_detach_confirm_message">
-        <item quantity="other">将断开当前附加到“%2$s”的 %1$d 个客户端，但不会终止其中的程序。</item>
+        <item quantity="other">将断开当前附加到「%2$s」的 %1$d 个客户端，但不会终止其中的程序。</item>
     </plurals>
     <string name="tmux_kill_confirm_title">结束 tmux 会话？</string>
-    <string name="tmux_kill_confirm_message">“%1$s”中的程序将被终止，此操作无法撤销。</string>
+    <string name="tmux_kill_confirm_message">「%1$s」中的程序将被终止，此操作无法撤销。</string>
     <string name="tmux_plain_shell">使用普通 shell</string>
     <string name="tmux_create_open">新建并打开</string>
-    <string name="tmux_more_for">“%1$s”的操作</string>
+    <string name="tmux_more_for">「%1$s」的操作</string>
     <string name="tmux_current_unknown">无法确认当前会话。</string>
     <string name="tmux_detection_unsupported">当前主机不支持 tmux 状态识别。</string>
     <string name="tmux_owner_unavailable">无法初始化 tmux 状态识别，请重新连接。</string>
@@ -101,8 +101,8 @@
     <string name="host_copied">已复制：%1$s</string>
 
     <!-- 会话 -->
-    <string name="empty_sessions_title">暂无会话</string>
-    <string name="empty_sessions_hint">选一台主机开始</string>
+    <string name="empty_sessions_title">没有打开的会话</string>
+    <string name="empty_sessions_hint">在「主机」页点一台即可连接</string>
     <string name="sessions_clear_ended">清理已结束 (%1$d)</string>
     <string name="session_ended_short">已结束</string>
     <string name="close_session">关闭会话</string>
@@ -412,7 +412,7 @@
     <string name="font_note_jetbrains_mono">内置默认 · 未选回退字体时中文使用系统字体</string>
     <string name="font_note_noto_sans_sc">本地中文字体 · 常用汉字</string>
     <string name="font_note_fira_code">连字</string>
-    <string name="font_note_maple_mono">圆角等宽 · 含中文(2:1)+Nerd图标 · 高分屏 unhinted</string>
+    <string name="font_note_maple_mono">圆角等宽 · 含中文（2:1）+ Nerd 图标 · 高分屏 unhinted</string>
     <string name="font_note_hack">编程等宽 · 英文，无连字</string>
     <string name="font_note_ibm_plex_mono">IBM 出品</string>
     <string name="font_note_source_code_pro">Adobe 编程等宽</string>
@@ -439,8 +439,7 @@
     <string name="font_invalid">不是有效的字体文件（需 TTF / OTF）</string>
     <!-- 危险操作的二次确认 -->
     <string name="host_delete_title">删除主机</string>
-    <string name="host_delete_confirm">删除「%1$s」？
-保存的密码 / 私钥和主机指纹会一并删除，无法恢复。</string>
+    <string name="host_delete_confirm">删除「%1$s」？\n保存的密码 / 私钥和主机指纹会一并删除，无法恢复。</string>
     <string name="sessions_clear_ended_title">清理已结束会话</string>
     <string name="sessions_clear_ended_confirm">清理 %1$d 个已结束的会话？它们的终端输出会一并丢弃。</string>
     <string name="action_clear">清理</string>
@@ -503,7 +502,7 @@
     <!-- 网络（tailnet / 代理）：设置入口、网络页、表单、主机编辑、连接前检查 -->
     <string name="menu_network">网络</string>
     <string name="menu_network_empty">代理与 Tailscale</string>
-    <string name="network_usage_hint">添加后，在主机编辑页的“网络”中选择。</string>
+    <string name="network_usage_hint">添加后，在主机编辑页的「网络」中选择。</string>
     <string name="menu_network_summary">Tailscale %1$d 个 · 代理 %2$d 个</string>
     <string name="menu_network_needs_login">「%1$s」需要登录</string>
     <string name="section_tailscale">Tailscale</string>
@@ -641,8 +640,8 @@
     <string name="network_edit_proxy">编辑代理</string>
     <string name="proxy_socks5_udp_note">使用 mosh 还需要 SOCKS5 服务端支持 UDP 转发。</string>
     <string name="net_waiting_approval_hint">管理员批准本设备后才能连接。</string>
-    <string name="net_return_after_login">在浏览器完成授权后返回 moke。</string>
-    <string name="net_logged_in_hint">在主机编辑页的“网络”中选择此网络。</string>
+    <string name="net_return_after_login">在浏览器完成授权后返回墨客。</string>
+    <string name="net_logged_in_hint">在主机编辑页的「网络」中选择此网络。</string>
     <plurals name="private_key_summary">
         <item quantity="other">•••••••• %1$s · %2$d 个字符</item>
     </plurals>

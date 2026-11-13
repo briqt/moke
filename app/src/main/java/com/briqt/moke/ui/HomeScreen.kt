@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,6 +64,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -286,29 +288,32 @@ fun HomeScreen(
                 },
                 // 略压高度（默认 64 → 49，较原 56 再收约 1/8）扩大可见区；标题在栏内垂直居中，收窄自然把上/下间距平分。
                 expandedHeight = MokeDimens.topBarHeight,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors = mokeTopBarColors(),
             )
         },
         bottomBar = {
             // 标准 M3 NavigationBar：默认高度 + 官方 label 槽 + 选中态药丸指示器（此前自绘的紧凑样式
             // 被反馈"不像 Material"）。仅保留 surface 底色以贴合墨客表面阶梯。
             NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.topHairline(),
+                containerColor = MaterialTheme.colorScheme.background,
+                tonalElevation = 0.dp,
             ) {
                 NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, onTab)
                 NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, onTab)
-                // 有新版时给「设置」tab 点一个主题色小圆点（顺着分组一路指到「关于」）。
+                // 有新版时给「设置」tab 点一方朱砂小印（顺着分组一路指到「关于」）。
                 NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab, dot = updateInfo != null)
             }
         },
         floatingActionButton = {
             if (showAddHostFab) {
+                // 一屏唯一的实心按钮：墨色反白，不用阴影。
                 FloatingActionButton(
                     onClick = onAddHost,
                     modifier = Modifier.onGloballyPositioned { addHostFabTop = it.boundsInRoot().top },
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_host))
                 }
@@ -395,12 +400,11 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
         onClick = { onTab(target) },
         icon = {
             when {
-                count != null -> BadgedBox(badge = { Badge { Text(count.toString()) } }) {
+                // 计数用中性小方块；「有新版」用朱砂小印（M3 Badge 默认是 error 色，那语义是"出错/警告"）。
+                count != null -> BadgedBox(badge = { CountBadge(count.toString()) }) {
                     Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
                 }
-                // 无数字的纯圆点，显式给主题色——M3 Badge 默认是 error 红，那语义是"出错/警告"，
-                // 而这里表达的是"有新东西可看"。
-                dot -> BadgedBox(badge = { Badge(containerColor = MaterialTheme.colorScheme.primary) }) {
+                dot -> BadgedBox(badge = { Dot(size = 7.dp) }) {
                     Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
                 }
                 else -> Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
@@ -669,7 +673,7 @@ internal fun GroupHeaderRow(
             Icon(
                 if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
                 contentDescription = stringResource(if (collapsed) R.string.group_expand else R.string.group_collapse),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp),
             )
             Row(
@@ -681,8 +685,7 @@ internal fun GroupHeaderRow(
                     name,
                     modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -726,11 +729,11 @@ private fun HostCard(
     val resources = LocalResources.current
     var menuOpen by remember { mutableStateOf(false) }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onConnect),
+        modifier = Modifier.fillMaxWidth().clip(CardDefaults.shape).clickable(onClick = onConnect),
         colors = CardDefaults.cardColors(
             containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
         ),
-        elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
+        border = if (dragging) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else cardBorder(),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
@@ -833,10 +836,10 @@ private fun RouteBadge(spec: BadgeSpec) {
     }
 }
 
-/** 协议徽标：mosh 用主色强调、SSH 用中性色。背景块紧贴文字（去字体额外行距，收紧内边距），供连接列表 / 会话列表 / 终端顶栏共用。 */
+/** 协议徽标：mosh 用正文墨色、SSH 用说明字色（不上彩色，彩色只留给状态）。背景块紧贴文字（去字体额外行距，收紧内边距），供连接列表 / 会话列表 / 终端顶栏共用。 */
 @Composable
 fun ProtocolBadge(mosh: Boolean) {
-    val color = if (mosh) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val color = if (mosh) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(color = color.copy(alpha = MokeDimens.badgeAlpha), shape = MokeShapes.pill) {
         Text(
             if (mosh) "mosh" else "SSH",
@@ -1031,11 +1034,11 @@ private fun SessionCard(
             // 单击卡片任意处进入会话。「修改标题」的长按只挂在下面的文字列上，
             // **不能挂整张卡**：那样会连拖动手柄一起盖住，而手柄的 detectDragGesturesAfterLongPress
             // 不消费 down，两个长按检测会同时命中——长按手柄重排的同时弹出改名框。
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+            modifier = Modifier.fillMaxWidth().clip(CardDefaults.shape).clickable(onClick = onOpen),
             colors = CardDefaults.cardColors(
                 containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
             ),
-            elevation = if (dragging) CardDefaults.cardElevation(defaultElevation = 6.dp) else CardDefaults.cardElevation(),
+            border = if (dragging) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else cardBorder(),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
@@ -1135,15 +1138,17 @@ private fun SettingsMenuContent(
     }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
         // 而不是继续往这一屏平铺（那样很快就乱）。
-        NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
-        NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
-        NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
-        NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
-        // 有新版时在「关于」上点一个主题色小圆点（静默检查的唯一提示）。
+        SettingsGroup {
+            NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
+            NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
+            NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
+            NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
+        }
+        // 有新版时在「关于」上点一方朱砂小印（静默检查的唯一提示）。
         NavRow(
             Icons.Filled.Info,
             stringResource(R.string.menu_about),

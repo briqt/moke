@@ -1,25 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Moke 图标前景：终端提示符 `>_`（墨玉尖括号 + 墨白光标）。
-     此前是书法「M」，辨识不出这是终端工具（反馈"像笔记软件"），改用 shell 提示符这一通用符号。
-     viewport 1024；整组横向居中于 512，落在自适应图标安全区内。 -->
+<!-- 墨客启动图标前景：水墨尖角（终端提示符）+ 朱砂方印（光标）。轮廓由笔形参数生成，勿手改。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="1024"
-    android:viewportHeight="1024">
-    <!-- 尖括号（墨玉，主色强调——较主题绿更浓） -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#3AD9A8"
-        android:strokeWidth="104"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M334,372 L487,516 L334,660" />
-    <!-- 光标（墨白横杠，与尖括号收笔同高） -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#EAF1F6"
-        android:strokeWidth="104"
-        android:strokeLineCap="round"
-        android:pathData="M578,660 L690,660" />
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#17181A" android:pathData="M31.2,36.8 L32.7,38.9 L33.3,39.6 L34.3,40.4 L37.1,42.4 L41.2,45.0 L43.3,46.5 L44.8,47.6 L45.8,48.4 L46.6,49.2 L47.8,50.5 L50.0,53.2 L51.6,55.0 L51.8,55.4 L51.7,55.6 L51.3,56.4 L40.5,68.1 L32.3,77.3 L32.2,77.5 L32.1,77.7 L32.2,77.8 L32.4,77.9 L32.6,77.8 L38.6,72.6 L44.4,67.6 L48.5,64.3 L54.6,59.6 L55.7,58.9 L58.2,57.5 L59.3,56.9 L61.0,55.7 L61.8,55.0 L62.1,54.6 L62.6,53.8 L63.0,53.0 L63.1,52.6 L63.2,51.9 L63.1,51.2 L62.8,50.6 L62.5,50.3 L61.7,49.7 L59.3,48.0 L54.9,45.6 L53.2,44.5 L52.1,43.7 L51.0,42.8 L49.5,41.5 L48.1,40.0 L43.2,34.5 L40.7,32.0 L39.4,30.9 L38.6,30.3 L37.6,29.9 L36.8,29.3 L36.3,29.1 L35.7,29.1 L35.0,29.2 L34.3,29.5 L33.2,30.1 L32.5,30.7 L31.9,31.4 L31.4,32.2 L31.0,33.0 L30.7,33.8 L30.5,34.5 L30.5,35.3 L30.6,35.9 L30.9,36.5Z" />
+    <group android:rotation="-3" android:pivotX="69.75" android:pivotY="70.25">
+        <path android:fillColor="#BC3D17" android:pathData="M65.30,64.50 L74.20,64.50 A1.3,1.3 0 0 1 75.50,65.80 L75.50,74.70 A1.3,1.3 0 0 1 74.20,76.00 L65.30,76.00 A1.3,1.3 0 0 1 64.00,74.70 L64.00,65.80 A1.3,1.3 0 0 1 65.30,64.50Z" />
+    </group>
 </vector>

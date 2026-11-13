@@ -18,13 +18,25 @@ data class TermColorScheme(
     val accent: String,
     val ansi: List<String>,
 ) {
-    /** 把本方案写入全局终端调色板（cursor 由内核按背景亮度自动选取）。 */
+    /**
+     * 把本方案写入全局终端调色板。光标统一是朱砂（与启动图标的印、输入框光标同一个色），
+     * 按背景明暗取两档以保证对比；远端程序仍可用 OSC 12 临时改光标色。
+     */
     fun applyToTerminal() {
         val p = Properties()
         p["foreground"] = fg
         p["background"] = bg
+        p["cursor"] = cursorColor
         ansi.forEachIndexed { i, c -> p["color$i"] = c }
         TerminalColors.COLOR_SCHEME.updateWith(p)
+    }
+
+    /** 朱砂光标：深色背景用亮一档的朱砂，浅色背景用纸上的朱砂。 */
+    val cursorColor: String get() = if (isDark) SEAL_ON_DARK else SEAL_ON_LIGHT
+
+    companion object {
+        const val SEAL_ON_DARK = "#D9532C"
+        const val SEAL_ON_LIGHT = "#BC3D17"
     }
 }
 

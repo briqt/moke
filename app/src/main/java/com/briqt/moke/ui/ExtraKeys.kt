@@ -34,7 +34,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +66,7 @@ import com.briqt.moke.terminal.ModState
 import com.briqt.moke.terminal.Modifiers
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
+import com.briqt.moke.ui.theme.extra
 
 /** 附加键：普通按键（字节由 `KeySeq` 按当前修饰统一编码）/ 修饰键 / 动作键。 */
 sealed interface ExtraKey {
@@ -289,8 +291,7 @@ fun KeyboardPanel(
         modifier = modifier.fillMaxWidth().heightIn(max = maxHeight),
         color = MaterialTheme.colorScheme.surface,
         shape = MokeShapes.keyPanel,
-        tonalElevation = 3.dp,
-        shadowElevation = 8.dp,
+        border = cardBorder(),
     ) {
         Column(
             modifier = Modifier
@@ -356,16 +357,10 @@ private fun KeyCap(
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .semantics(mergeDescendants = true) { contentDescription = description },
         shape = MokeShapes.keycap,
-        color = when {
-            locked -> MaterialTheme.colorScheme.tertiary
-            active -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest
-        },
-        contentColor = when {
-            locked -> MaterialTheme.colorScheme.onTertiary
-            active -> MaterialTheme.colorScheme.onPrimary
-            else -> MaterialTheme.colorScheme.onSurface
-        },
+        // 不新增颜色：单次修饰（下一键生效）画墨色描边，锁定反白成墨块。
+        color = if (locked) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (locked) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
+        border = if (active && !locked) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface) else null,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (icon != null) {
@@ -396,7 +391,7 @@ fun TextBlockComposer(
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val requestKeyboard by rememberUpdatedState(onKeyboardRequest)
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.topHairline()) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -432,18 +427,18 @@ fun TextBlockComposer(
                             if (!requestKeyboard()) down.consume()
                         }
                     }
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outline, MokeShapes.control)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .verticalScroll(scroll),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     fontFamily = MokeMono,
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                cursorBrush = SolidColor(MaterialTheme.extra.seal),
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = { onSend(value, false) },
                     modifier = Modifier.height(36.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp),

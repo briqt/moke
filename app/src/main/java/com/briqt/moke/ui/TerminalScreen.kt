@@ -108,6 +108,7 @@ import com.briqt.moke.terminal.TerminalThemes
 import com.briqt.moke.terminal.TmuxSelection
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.extra
 import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.view.TerminalView
 import kotlinx.coroutines.delay
@@ -857,13 +858,10 @@ private fun TerminalTopBar(
                 IconButton(onClick = onOpenForwards) {
                     BadgedBox(
                         badge = {
-                            Badge(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            ) { Text(forwardCount.toString()) }
+                            CountBadge(forwardCount.toString())
                         },
                     ) {
-                        Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(R.string.menu_port_forward), tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(R.string.menu_port_forward), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -873,14 +871,11 @@ private fun TerminalTopBar(
                 BadgedBox(
                     badge = {
                         if (tmuxCount > 0) {
-                            Badge(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            ) { Text(tmuxCount.toString()) }
+                            CountBadge(tmuxCount.toString())
                         }
                     },
                 ) {
-                    Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             // 右上角折叠菜单：底部快捷键显隐 · 字号 ±0.5 · 恢复默认字号。
@@ -922,11 +917,11 @@ private fun TerminalTopBar(
                     ) {
                         Text(stringResource(R.string.font_size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                         IconButton(onClick = { onFontSize(fontSizeSp - 0.5f) }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
                         }
                         Text(fmtFontSize(fontSizeSp), fontFamily = MokeMono, style = MaterialTheme.typography.bodyMedium, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width(44.dp))
                         IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
                         }
                         // 恢复默认并进同一行：⋮ 保持在 8 项以内（交互原则 P5），给「端口转发」腾位置。
                         IconButton(
@@ -1043,7 +1038,7 @@ private fun LinkActionBar(
 
 @Composable
 fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
-    ms < 120 -> MaterialTheme.colorScheme.primary
+    ms < 120 -> MaterialTheme.extra.ok
     ms < 300 -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.error
 }

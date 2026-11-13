@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -54,7 +55,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +89,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import com.briqt.moke.ui.theme.mokeTextFieldColors
+import androidx.compose.material3.FloatingActionButtonDefaults
 
 /**
  * 远端文件页：面包屑 + 列表 + 传输队列条。
@@ -221,10 +223,12 @@ fun FilesScreen(
                                     text = {
                                         Text(
                                             stringResource(label),
-                                            color = if (s == sort) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = if (s == sort) FontWeight.SemiBold else FontWeight.Normal,
                                         )
                                     },
+                                    trailingIcon = if (s == sort) {
+                                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                                    } else null,
                                     onClick = { menuOpen = false; onSort(s) },
                                 )
                             }
@@ -236,7 +240,7 @@ fun FilesScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = mokeTopBarColors(),
             )
         },
         // 队列条走 bottomBar：放在内容 Column 末尾会被上传 FAB 压住右半边（真机实测「已完成」被挡）。
@@ -256,6 +260,10 @@ fun FilesScreen(
                     icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
                     onClick = { if (onBeforePickUpload()) uploadLauncher.launch(arrayOf("*/*")) },
                     modifier = Modifier.onGloballyPositioned { uploadFabTop = it.boundsInRoot().top },
+                    // 与首页添加主机同款：一屏唯一的实心按钮，墨色反白，不用阴影。
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp),
                 )
             }
         },
@@ -434,8 +442,10 @@ private fun Crumbs(path: String, onNavigate: (String) -> Unit) {
                 label,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = MokeMono,
+                // 当前目录用正文墨色加粗，可点的上级目录用说明字色。
                 color = if (target == path) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.primary,
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (target == path) FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier
                     .clickable(enabled = target != path) { onNavigate(target) }
                     .padding(vertical = 4.dp, horizontal = 2.dp),
@@ -755,6 +765,7 @@ private fun TextPrompt(
         title = { Text(title) },
         text = {
             OutlinedTextField(
+                colors = mokeTextFieldColors(),
                 value = text,
                 onValueChange = { text = it; failed = false },
                 enabled = !busy,

@@ -53,6 +53,8 @@ import com.briqt.moke.net.recovery
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import com.briqt.moke.ui.theme.extra
+import com.briqt.moke.ui.theme.mokeTextFieldColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,6 +110,7 @@ internal fun TailnetDevicePicker(
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close)) }
             }
             OutlinedTextField(
+                colors = mokeTextFieldColors(),
                 value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                 label = { Text(stringResource(R.string.tailnet_search_devices)) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
@@ -148,7 +151,7 @@ internal fun TailnetDevicePicker(
                         },
                         trailingContent = { Text(stringResource(if (device.online) R.string.tailnet_device_online else R.string.tailnet_device_offline),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (device.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
+                            color = if (device.online) MaterialTheme.extra.ok else MaterialTheme.colorScheme.onSurfaceVariant) },
                         modifier = Modifier.clickable(enabled = available) { onSelect(device) },
                     )
                 }

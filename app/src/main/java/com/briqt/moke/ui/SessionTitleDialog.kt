@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
+import com.briqt.moke.ui.theme.mokeTextFieldColors
 
 /** Shared title editor. Automatic updates never enter the draft or change the input selection. */
 @Composable
@@ -96,6 +97,7 @@ private fun SessionTitleField(
 ) {
     Column {
         OutlinedTextField(
+            colors = mokeTextFieldColors(),
             value = value,
             onValueChange = onValueChange,
             singleLine = true,

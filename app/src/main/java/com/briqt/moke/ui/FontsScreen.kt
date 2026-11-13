@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -22,12 +21,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +43,7 @@ import com.briqt.moke.terminal.FontInstallState
 import com.briqt.moke.terminal.FontSpec
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
+import com.briqt.moke.ui.theme.extra
 
 private fun fmtSize(bytes: Long): String = when {
     bytes <= 0 -> ""
@@ -126,11 +125,7 @@ fun FontsScreen(
                     }
                 },
                 expandedHeight = MokeDimens.topBarHeight,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors = mokeTopBarColors(),
             )
         },
     ) { padding ->
@@ -144,7 +139,7 @@ fun FontsScreen(
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
                         enabled = !importing,
                         modifier = Modifier.fillMaxWidth(),
@@ -163,7 +158,7 @@ fun FontsScreen(
                         Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                     if (importSuccess != null) {
-                        Text(stringResource(R.string.font_imported, importSuccess), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.font_imported, importSuccess), color = MaterialTheme.extra.ok, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -198,6 +193,7 @@ private fun FontCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = cardBorder(),
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -220,9 +216,9 @@ private fun FontCard(
                         stringResource(R.string.tag_local),
                         stringResource(R.string.tag_cjk),
                         stringResource(R.string.tag_ligature),
-                        MaterialTheme.colorScheme.tertiary,
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.secondary,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
                     ).forEach { MokeBadge(it.text, it.color) }
                 }
             }
@@ -284,9 +280,6 @@ private fun FontCard(
                     AssistChip(
                         onClick = onDownload,
                         label = { Text(stringResource(R.string.font_download) + fmtSize(spec.approxBytes).let { if (it.isNotBlank()) " · $it" else "" }) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            labelColor = MaterialTheme.colorScheme.primary,
-                        ),
                     )
                 }
             }

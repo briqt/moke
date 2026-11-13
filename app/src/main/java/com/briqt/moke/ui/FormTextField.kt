@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
+import com.briqt.moke.ui.theme.mokeTextFieldColors
 
 /** Show validation after blur or submit, and clear it as soon as the value is corrected. */
 @Composable
@@ -36,6 +37,7 @@ internal fun FormTextField(
 ) {
     FormTextFieldFeedback(modifier, error, submitted, hint) { fieldModifier, isError, supportingText ->
         OutlinedTextField(
+            colors = mokeTextFieldColors(),
             value = value,
             onValueChange = onValueChange,
             label = { Text(label) },
@@ -75,6 +77,7 @@ internal fun FormTextField(
 ) {
     FormTextFieldFeedback(modifier, error, submitted, hint) { fieldModifier, isError, supportingText ->
         OutlinedTextField(
+            colors = mokeTextFieldColors(),
             value = value,
             onValueChange = onValueChange,
             label = { Text(label) },

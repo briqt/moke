@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,59 +77,59 @@ fun TerminalSettingsScreen(
                     }
                 },
                 expandedHeight = MokeDimens.topBarHeight,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors = mokeTopBarColors(),
             )
         },
     ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            NavRow(
-                Icons.Filled.KeyboardAlt,
-                stringResource(R.string.keyboard_mode),
-                stringResource(keyboardModeLabel(keyboardMode)),
-                onClick = { kbDialog = true },
-            )
-            NavRow(
-                Icons.Filled.Keyboard,
-                stringResource(R.string.menu_extra_keys),
-                onClick = { keysDialog = true },
-            )
-            SwitchRow(
-                icon = Icons.Filled.SwipeVertical,
-                title = stringResource(R.string.menu_tmux_scroll_setup),
-                checked = tmuxScrollSetup,
-                onCheckedChange = onTmuxScrollSetup,
-            )
-            SwitchRow(
-                icon = Icons.Filled.LightMode,
-                title = stringResource(R.string.menu_keep_screen_on),
-                checked = keepScreenOn,
-                onCheckedChange = onKeepScreenOn,
-            )
-            SwitchRow(
-                icon = Icons.Filled.Shield,
-                title = stringResource(R.string.menu_confirm_close),
-                checked = confirmClose,
-                onCheckedChange = onConfirmClose,
-            )
-            SwitchRow(
-                icon = Icons.Filled.NotificationsActive,
-                title = stringResource(R.string.menu_terminal_alerts),
-                checked = terminalAlerts,
-                onCheckedChange = onTerminalAlerts,
-            )
-            SwitchRow(
-                icon = Icons.Filled.Key,
-                title = stringResource(R.string.menu_auto_trust_hostkey),
-                checked = autoTrustNewHostKey,
-                onCheckedChange = onAutoTrustNewHostKey,
-            )
+            SettingsGroup {
+                NavRow(
+                    Icons.Filled.KeyboardAlt,
+                    stringResource(R.string.keyboard_mode),
+                    stringResource(keyboardModeLabel(keyboardMode)),
+                    onClick = { kbDialog = true },
+                )
+                NavRow(
+                    Icons.Filled.Keyboard,
+                    stringResource(R.string.menu_extra_keys),
+                    onClick = { keysDialog = true },
+                )
+            }
+            SettingsGroup {
+                SwitchRow(
+                    icon = Icons.Filled.SwipeVertical,
+                    title = stringResource(R.string.menu_tmux_scroll_setup),
+                    checked = tmuxScrollSetup,
+                    onCheckedChange = onTmuxScrollSetup,
+                )
+                SwitchRow(
+                    icon = Icons.Filled.LightMode,
+                    title = stringResource(R.string.menu_keep_screen_on),
+                    checked = keepScreenOn,
+                    onCheckedChange = onKeepScreenOn,
+                )
+                SwitchRow(
+                    icon = Icons.Filled.Shield,
+                    title = stringResource(R.string.menu_confirm_close),
+                    checked = confirmClose,
+                    onCheckedChange = onConfirmClose,
+                )
+                SwitchRow(
+                    icon = Icons.Filled.NotificationsActive,
+                    title = stringResource(R.string.menu_terminal_alerts),
+                    checked = terminalAlerts,
+                    onCheckedChange = onTerminalAlerts,
+                )
+                SwitchRow(
+                    icon = Icons.Filled.Key,
+                    title = stringResource(R.string.menu_auto_trust_hostkey),
+                    checked = autoTrustNewHostKey,
+                    onCheckedChange = onAutoTrustNewHostKey,
+                )
+            }
         }
     }
 
