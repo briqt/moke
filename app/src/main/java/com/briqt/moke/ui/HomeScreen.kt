@@ -749,8 +749,9 @@ private fun HostCard(
                     )
                 }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 固定两行：名称行带路由与协议徽标，地址行单行省略——经网络的主机与直连主机一样高，列表节奏不乱。
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         host.displayName.ifBlank { stringResource(R.string.unnamed) },
                         fontWeight = FontWeight.SemiBold,
@@ -758,6 +759,7 @@ private fun HostCard(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    routeBadge?.let { RouteBadge(it) }
                     ProtocolBadge(host.useMosh)
                 }
                 Text(
@@ -766,8 +768,9 @@ private fun HostCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = MokeMono,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
-                routeBadge?.let { RouteBadge(it) }
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
@@ -812,7 +815,7 @@ private fun HostCard(
     }
 }
 
-/** 路由徽标：与协议徽标同一尺寸，比能力标签更紧凑；过长的网络名省略。 */
+/** 路由徽标：与协议徽标同一尺寸，比能力标签更紧凑；和名称同行，过长的网络名省略，给主机名留出位置。 */
 @Composable
 private fun RouteBadge(spec: BadgeSpec) {
     Surface(color = spec.color.copy(alpha = MokeDimens.badgeAlpha), shape = MokeShapes.pill) {
@@ -831,7 +834,7 @@ private fun RouteBadge(spec: BadgeSpec) {
                     trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
                 ),
             ),
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp).widthIn(max = 140.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp).widthIn(max = 112.dp),
         )
     }
 }
