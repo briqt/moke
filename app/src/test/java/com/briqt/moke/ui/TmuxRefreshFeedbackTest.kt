@@ -226,6 +226,16 @@ class TmuxRefreshFeedbackTest {
         assertTrue(source.contains("items(state.sessions, key = { \"\${it.id}:\${it.created}\" })"))
     }
 
+    @Test fun openingARowKeepsTheSameSheetState() {
+        // The lambda is a remember key of the sheet state: capturing a plain value that changes on tap
+        // would recreate the state hidden, so the sheet drops and slides up again.
+        val source = source("TmuxPanel.kt")
+        val confirm = source.substringAfter("confirmValueChange = {").substringBefore("\n")
+        assertTrue(confirm.contains("openingNow") && confirm.contains("busy"))
+        assertFalse(Regex("""\bopening\b""").containsMatchIn(confirm))
+        assertTrue(source.contains("val openingNow by androidx.compose.runtime.rememberUpdatedState(opening)"))
+    }
+
     private fun source(name: String): String = listOf(
         File("src/main/java/com/briqt/moke/ui", name),
         File("app/src/main/java/com/briqt/moke/ui", name),

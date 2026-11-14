@@ -136,10 +136,13 @@ internal fun TmuxSessionSheet(
     val opening = openingKey != null
     var openFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // confirmValueChange 是面板状态的记忆键：lambda 只能读 State，不能捕获会变的普通值——
+    // 否则一点行（opening 变化）就换成新 lambda、新建一个隐藏态的面板状态，面板先缩下去再滑上来。
     val busy by androidx.compose.runtime.rememberUpdatedState(state.busy)
+    val openingNow by androidx.compose.runtime.rememberUpdatedState(opening)
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
-        confirmValueChange = { value -> value != SheetValue.Hidden || (!opening && !busy) },
+        confirmValueChange = { value -> value != SheetValue.Hidden || (!openingNow && !busy) },
     )
     LaunchedEffect(sheetState, onPresented) {
         val report = onPresented ?: return@LaunchedEffect
