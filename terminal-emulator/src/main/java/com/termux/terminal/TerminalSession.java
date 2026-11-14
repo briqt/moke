@@ -95,11 +95,11 @@ public class TerminalSession extends TerminalOutput {
     /** [moke] 见 {@link TerminalEmulator#setMokeIgnoreAltScreen(boolean)}；emulator 惰性创建，先存在会话上。 */
     private boolean mMokeIgnoreAltScreen = false;
 
-    /** [moke] 触摸滑过多少个行高算一格滚轮（远端程序收滚轮时用）；tmux 里按它每格滚的行数设置，使内容跟手。 */
-    private volatile double mMokeWheelLineHeights = DEFAULT_WHEEL_LINE_HEIGHTS;
-
-    /** 常见程序（vim 等）每格滚 3 行。 */
-    public static final double DEFAULT_WHEEL_LINE_HEIGHTS = 3.0;
+    /**
+     * [moke] 触摸滑过多少个行高发一格滚轮（远端程序收滚轮时用）。与 Termux、触控板一致：每滑过一行发一格。
+     * 每格滚 1 行的程序正好跟手；vim 每格 3 行会偏快；tmux 翻历史每格 5 行会更快。
+     */
+    public static final double DEFAULT_WHEEL_LINE_HEIGHTS = 1.0;
 
     public TerminalSession(TerminalTransport transport, Integer transcriptRows, TerminalSessionClient client) {
         this.mTransport = transport;
@@ -113,11 +113,7 @@ public class TerminalSession extends TerminalOutput {
         if (mEmulator != null) mEmulator.setMokeIgnoreAltScreen(ignore);
     }
 
-    public double getMokeWheelLineHeights() { return mMokeWheelLineHeights; }
-
-    public void setMokeWheelLineHeights(double lineHeights) {
-        if (lineHeights > 0 && !Double.isInfinite(lineHeights)) mMokeWheelLineHeights = lineHeights;
-    }
+    public double getMokeWheelLineHeights() { return DEFAULT_WHEEL_LINE_HEIGHTS; }
 
     public void updateTerminalSessionClient(TerminalSessionClient client) {
         mClient = client;
