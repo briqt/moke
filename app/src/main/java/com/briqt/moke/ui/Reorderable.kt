@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -56,7 +58,7 @@ fun <T> ReorderableColumn(
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        itemsIndexed(working, key = { _, it -> key(it) }) { _, item ->
+        itemsIndexed(working, key = { _, it -> key(it) }) { index, item ->
             val itemKey = key(item)
             val isDragging = itemKey == draggingKey
             val dragMod = if (isDragging) {
@@ -92,11 +94,21 @@ fun <T> ReorderableColumn(
                         },
                     )
                 }
-                itemContent(item, isDragging, handle)
+                CompositionLocalProvider(LocalRowPosition provides RowPosition(index, working.size)) {
+                    itemContent(item, isDragging, handle)
+                }
             }
         }
     }
 }
+
+/** 行在所属容器里的位置：分组列表据此画同一个圆角容器的上沿、下沿和组内分隔线。 */
+data class RowPosition(val index: Int, val count: Int) {
+    val first: Boolean get() = index == 0
+    val last: Boolean get() = index == count - 1
+}
+
+val LocalRowPosition = staticCompositionLocalOf { RowPosition(0, 1) }
 
 /** 一个分组：稳定的组键 + 组内有序条目。 */
 data class ReorderGroup<T>(val key: String, val items: List<T>, val label: String = key)
@@ -181,7 +193,7 @@ fun <T> GroupedReorderableList(
                 }
             }
             if (group.key !in collapsed) {
-                items(group.items, key = { itemKey(it) }) { item ->
+                itemsIndexed(group.items, key = { _, it -> itemKey(it) }) { index, item ->
                     val itemK = itemKey(item)
                     val isDragging = itemK == dragKey
                     val dragMod = if (isDragging) Modifier.zIndex(1f).graphicsLayer { translationY = accumulated } else Modifier
@@ -220,7 +232,9 @@ fun <T> GroupedReorderableList(
                                 },
                             )
                         }
-                        itemContent(item, isDragging, handle)
+                        CompositionLocalProvider(LocalRowPosition provides RowPosition(index, group.items.size)) {
+                            itemContent(item, isDragging, handle)
+                        }
                     }
                 }
             }

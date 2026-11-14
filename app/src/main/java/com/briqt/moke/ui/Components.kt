@@ -11,6 +11,9 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.text.style.TextOverflow
@@ -474,8 +477,9 @@ fun Modifier.bottomHairline(): Modifier {
 }
 
 /**
- * 平铺列表行（主机、会话）：不做卡片——没有底色和描边，行直接落在页面底上，只在下沿画一条从文字起点
- * 开始的细线。标题与副标题合成一个整体垂直居中，把手和尾部按钮都对齐这个整体的中线。
+ * 分组列表行（主机、会话）：和设置页同一套样式——同组的行合成一个圆角容器（表面底 + 1px 细线），
+ * 组内用同色 1px 线分隔，没有一行一张的卡片，也没有行间空隙。行在组内的位置由 [LocalRowPosition] 给出。
+ * 标题 15sp、副标题 12sp：列表标题是主机名、终端标题这类长数据，比设置项文字小一档才不显突兀。
  * 长按只挂在文字列上：拖动把手有自己的长按手势，两者不能叠在同一块区域。
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -490,29 +494,41 @@ fun ListRow(
     dragging: Boolean = false,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
+    val pos = LocalRowPosition.current
+    val r = 12.dp
+    val shape = when {
+        dragging || (pos.first && pos.last) -> androidx.compose.foundation.shape.RoundedCornerShape(r)
+        pos.first -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = r, topEnd = r)
+        pos.last -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = r, bottomEnd = r)
+        else -> androidx.compose.ui.graphics.RectangleShape
+    }
     val line = MaterialTheme.colorScheme.outlineVariant
-    val textStart = if (dragHandle != null) 48.dp else 16.dp
+    val closesBottom = dragging || pos.last
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else androidx.compose.ui.graphics.Color.Transparent)
+            .clip(shape)
+            .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .drawBehind {
-                if (!dragging) {
-                    val y = size.height - 0.5.dp.toPx()
-                    drawLine(line, Offset(textStart.toPx(), y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+            .drawWithContent {
+                drawContent()
+                // 沿容器外形描 1px（描边宽 2px、外半被裁掉）；不是组内最后一行就不画下沿，由下一行的上沿充当分隔线。
+                val w = 1.dp.toPx()
+                val outline = shape.createOutline(size, layoutDirection, this)
+                clipRect(bottom = if (closesBottom) size.height else size.height - w) {
+                    drawOutline(outline, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2 * w))
                 }
             }
-            .heightIn(min = 64.dp)
-            .padding(start = if (dragHandle != null) 0.dp else 16.dp, end = 4.dp),
+            .heightIn(min = 56.dp)
+            .padding(start = if (dragHandle != null) 4.dp else 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (dragHandle != null) {
-            Box(modifier = dragHandle.size(48.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = dragHandle.size(44.dp), contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Filled.DragHandle,
                     contentDescription = stringResource(R.string.drag_to_reorder),
-                    tint = MaterialTheme.colorScheme.outline,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -521,12 +537,12 @@ fun ListRow(
             modifier = Modifier
                 .weight(1f)
                 .then(if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick) else Modifier)
-                .padding(vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+                .padding(start = if (dragHandle != null) 4.dp else 0.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -534,8 +550,7 @@ fun ListRow(
             )
             if (subtitle != null) Text(
                 subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                fontSize = 13.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

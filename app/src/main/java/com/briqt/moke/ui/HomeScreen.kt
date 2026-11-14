@@ -1,5 +1,11 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.layout.heightIn
+
+import androidx.compose.foundation.lazy.itemsIndexed
+
+import androidx.compose.runtime.CompositionLocalProvider
+
 import android.app.Activity
 import android.os.Build
 import android.content.ClipData
@@ -525,10 +531,10 @@ private fun ConnectionsContent(
     val fabOverlap = fabTop?.let { top ->
         with(density) { (listBottom - top).coerceAtLeast(0f).toDp() }
     } ?: 0.dp
-    val listPadding = PaddingValues(top = 4.dp, bottom = 12.dp + fabOverlap)
+    val listPadding = PaddingValues(top = 12.dp, bottom = 12.dp + fabOverlap)
     val listModifier = Modifier.fillMaxSize().onGloballyPositioned { listBottom = it.boundsInRoot().bottom }
 
-    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
         if (!hasNamedGroup) {
             // 一台主机都没设分组 → 退化成无分组头的平铺列表，仍可长按拖动重排。
             ReorderableColumn(
@@ -684,13 +690,15 @@ internal fun GroupHeaderRow(
     dragHandle: Modifier,
     dragging: Boolean,
 ) {
+    // 与设置页分区小标题同一层级：说明字色的小标题，下面紧跟本组的圆角容器。
     Surface(
         onClick = onToggle,
         shape = MokeShapes.control,
-        color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+        color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp).padding(start = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -698,7 +706,7 @@ internal fun GroupHeaderRow(
                 if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
                 contentDescription = stringResource(if (collapsed) R.string.group_expand else R.string.group_collapse),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
             Row(
                 modifier = Modifier.weight(1f),
@@ -709,25 +717,26 @@ internal fun GroupHeaderRow(
                     name,
                     modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     count.toString(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,
                 )
             }
             Box(
-                modifier = dragHandle.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                modifier = dragHandle.size(36.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Filled.DragHandle,
                     contentDescription = stringResource(R.string.drag_to_reorder),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
@@ -880,7 +889,7 @@ private fun SessionsContent(
     // 攒到四五条时清理成本比逐条关闭还高，所以有一条就给一个一次清空的入口。
     val endedCount = sessions.count { !it.alive.collectAsState().value }
     var confirmClearEnded by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
         if (endedCount > 0) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -909,7 +918,7 @@ private fun SessionsContent(
                     key = { it.id },
                     onReorder = { list -> onReorder(list.map { it.id }) },
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
                     spacing = 0.dp,
                 ) { ts, dragging, handle ->
                     SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id }, dragHandle = handle, dragging = dragging)
@@ -917,11 +926,14 @@ private fun SessionsContent(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
                 ) {
-                    items(sessions.sortedWith(cmp), key = { it.id }) { ts ->
-                        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
-                            onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id })
+                    val sorted = sessions.sortedWith(cmp)
+                    itemsIndexed(sorted, key = { _, it -> it.id }) { index, ts ->
+                        CompositionLocalProvider(LocalRowPosition provides RowPosition(index, sorted.size)) {
+                            SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
+                                onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id })
+                        }
                     }
                 }
             }
@@ -944,7 +956,7 @@ private fun SessionsContent(
                     onReorder(mergeSessionOrder(sessions.map { it.id }, newItems.map { it.id }.filter { it in members }))
                 },
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
                 spacing = 0.dp,
                 header = { group, dragging, handle ->
                     val key = group.key
