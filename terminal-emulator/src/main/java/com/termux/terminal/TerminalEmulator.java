@@ -298,6 +298,20 @@ public final class TerminalEmulator {
 
     private static final String LOG_TAG = "TerminalEmulator";
 
+    /**
+     * [moke] 忽略备用屏切换（DECSET 47/1047/1049），只用于 mosh 会话。
+     *
+     * <p>mosh-client 自己就是全屏程序：一连上就切进备用屏，且不转发远端程序自己的切屏。备用屏没有历史，
+     * 于是 mosh 下永远滚不动。忽略后会话留在主屏，mosh 画到屏幕上的内容照常沉进本地历史——和同类 mosh
+     * 客户端一样，滑动能看连上之后出现过的内容（mosh 协议本身不传远端历史，重连后从当前屏开始）。
+     */
+    private boolean mMokeIgnoreAltScreen;
+
+    /** [moke] 见 {@link #mMokeIgnoreAltScreen}。 */
+    public void setMokeIgnoreAltScreen(boolean ignore) {
+        mMokeIgnoreAltScreen = ignore;
+    }
+
     private boolean isDecsetInternalBitSet(int bit) {
         return (mCurrentDecSetFlags & bit) != 0;
     }
@@ -1388,6 +1402,8 @@ public final class TerminalEmulator {
             case 1049: {
                 // Set: Save cursor as in DECSC and use Alternate Screen Buffer, clearing it first.
                 // Reset: Use Normal Screen Buffer and restore cursor as in DECRC.
+                // [moke] mosh 会话整段忽略（含 reset），见 mMokeIgnoreAltScreen。
+                if (mMokeIgnoreAltScreen) break;
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);

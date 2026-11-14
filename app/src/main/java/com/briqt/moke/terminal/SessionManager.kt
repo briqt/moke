@@ -48,7 +48,6 @@ class TermSession(
     val customTitle: MutableStateFlow<String?>,
     private val displayTitleState: MutableStateFlow<String>,
     val alive: StateFlow<Boolean>,
-    val latency: StateFlow<Int?>,
     val startedAt: Long,
     val scripts: TmuxScripts,
     problemText: (TmuxProblem) -> String,
@@ -169,13 +168,11 @@ class SessionManager(context: Context) {
         val prefix = MutableStateFlow(overrides.prefix)
         val display = MutableStateFlow(SessionTitlePolicy.display(prefix.value, custom.value, "", base))
         val alive = MutableStateFlow(true)
-        val latency = MutableStateFlow<Int?>(null)
         var created: TermSession? = null
         val controller = TerminalController(
             context = appContext,
             onFinished = {
                 alive.value = false
-                latency.value = null
                 created?.endMetadata()
                 created?.tmuxCoordinator?.dataEnded()
             },
@@ -198,18 +195,20 @@ class SessionManager(context: Context) {
             )
             else -> SshTransport(
                 host = host, context = appContext, jumpHost = jumpHost, network = network,
-                onNetworkError = onNetworkError, onLatency = { latency.value = it }, startupCommand = command,
+                onNetworkError = onNetworkError, startupCommand = command,
                 observerNonce = observer, tmuxScripts = scripts, observeDefaultShell = observeTmux,
             )
         }
         val session = TerminalSession(transport, 2000, controller)
+        // mosh 只同步屏幕：留在主屏，让画过的内容沉进本地历史，滑动才看得到（见 setMokeIgnoreAltScreen）。
+        if (host.useMosh) session.setMokeIgnoreAltScreen(true)
         val ts = TermSession(
             id = id, host = host, controller = controller, session = session, transport = transport,
             jumpHost = jumpHost, network = network,
             scopeKey = scopeKey,
             tmuxIntent = actualIntent, title = title.asStateFlow(), baseTitleState = MutableStateFlow(base),
             customTitle = custom, displayTitleState = display, alive = alive.asStateFlow(),
-            latency = latency.asStateFlow(), startedAt = System.currentTimeMillis(), scripts = scripts,
+            startedAt = System.currentTimeMillis(), scripts = scripts,
             problemText = { appContext.tmuxProblemText(it) },
             copyMark = carryFrom?.takeIf { sameTarget }?.let { nextCopyMark(host.id) }, rememberEpoch = rememberEpoch,
             customPrefix = prefix,

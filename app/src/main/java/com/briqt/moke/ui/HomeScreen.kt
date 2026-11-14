@@ -1031,7 +1031,6 @@ private fun SessionCard(
 ) {
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
-    val latencyMs by ts.latency.collectAsState()
     Box {
         Card(
             // 单击卡片任意处进入会话。「修改标题」的长按只挂在下面的文字列上，
@@ -1085,12 +1084,7 @@ private fun SessionCard(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         ProtocolBadge(ts.host.useMosh)
-                        when {
-                            !alive -> Text("· " + stringResource(R.string.session_ended_short), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                            latencyMs != null -> Text("· $latencyMs ms", fontFamily = MokeMono, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = latencyColor(latencyMs!!), maxLines = 1)
-                            !ts.host.useMosh -> Text("· …", fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                            else -> {}
-                        }
+                        if (!alive) Text("· " + stringResource(R.string.session_ended_short), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
                 }
                 // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题并加不重复标记。

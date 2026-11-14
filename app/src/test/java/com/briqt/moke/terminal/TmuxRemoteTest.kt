@@ -447,12 +447,17 @@ class TmuxRemoteTest {
         assertTrue(peer.indexOf("moke_witness=\$(sh -c") < peer.indexOf(TmuxRemote.scrollSetup(target)))
     }
 
-    @Test fun `scroll setup neither installs copy policy nor queries unsupported key formats`() {
+    @Test fun `scroll setup touches only wheel keys and kills only its private config-free probe server`() {
         val command = body(TmuxRemote.scrollSetup(target)).substringAfter("unset TMUX TMUX_PANE")
-        for (forbidden in listOf("bind -n", "bind -T copy", "bind-key -T copy", "unbind", "kill-server",
-            "source-file", "key_command", "list-keys -F", "eval ", "sed ", "tr ")) {
+        for (forbidden in listOf("bind -n", "unbind", "source-file", "key_command", "list-keys -F", "eval ", "sed ", "tr ", " -g ")) {
             assertFalse(forbidden, command.contains(forbidden))
         }
+        // The only kill-server is for the private -L probe server; the user's socket (-S) is never killed.
+        assertEquals(1, Regex("kill-server").findAll(command).count())
+        assertTrue(command.contains("tmux -N -L \"moke-probe-\$\$\" kill-server"))
+        assertTrue(command.contains("tmux -u -f /dev/null -L \"moke-probe-\$\$\" start-server"))
+        // copy-mode tables are only ever restored to tmux's own default line.
+        assertTrue(command.contains("moke_copy_restore=\${moke_copy_default%"))
         assertTrue(command.contains("list-keys -T root WheelUpPane"))
         assertTrue(command.contains("list-keys -T root WheelDownPane"))
         assertTrue(command.contains("moke_scroll_before=\$moke_scroll_out"))

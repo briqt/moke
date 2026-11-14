@@ -35,9 +35,9 @@ public class ScrollMotionTest {
         assertFalse(motion.isRunning());
     }
 
-    @Test public void touchWheelCadenceUsesTwoRowHeightsWithoutExtraAcceleration() {
+    @Test public void touchWheelCadenceUsesTheSessionLineHeightsWithoutExtraAcceleration() {
         ScrollMotion.Quantizer quantizer = new ScrollMotion.Quantizer();
-        double unitPixels = 20 * ScrollMotion.TOUCH_WHEEL_LINE_HEIGHTS;
+        double unitPixels = 20 * 2.0;
         assertEquals(0, quantizer.add(-20, unitPixels, 8));
         assertEquals(-1, quantizer.add(-20, unitPixels, 8));
         assertEquals(3, quantizer.add(120, unitPixels, 8));

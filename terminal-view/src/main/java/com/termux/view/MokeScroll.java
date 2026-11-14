@@ -1,6 +1,10 @@
 package com.termux.view;
 
-/** Pure scroll routing. Only explicit terminal protocol requests affect automatic mode. */
+/**
+ * Pure scroll routing, matching what desktop terminals do with a mouse wheel:
+ * a program that asked for the mouse gets wheel events; a full-screen program that did not
+ * (less, man, nano) gets Up/Down keys; the ordinary screen scrolls local history.
+ */
 public final class MokeScroll {
     private MokeScroll() {}
 
@@ -14,11 +18,10 @@ public final class MokeScroll {
     public static final int ACTION_NONE = 3;
 
     /** Manual modes are an explicit, temporary request to send program input, in either buffer. */
-    public static int decide(int mode, boolean alternate, boolean mouseTracking, boolean alternateScroll) {
+    public static int decide(int mode, boolean alternate, boolean mouseTracking) {
         if (mode == MODE_WHEEL) return ACTION_WHEEL;
         if (mode == MODE_ARROWS) return ACTION_ARROWS;
         if (mouseTracking) return ACTION_WHEEL;
-        if (!alternate) return ACTION_LOCAL;
-        return alternateScroll ? ACTION_ARROWS : ACTION_NONE;
+        return alternate ? ACTION_ARROWS : ACTION_LOCAL;
     }
 }

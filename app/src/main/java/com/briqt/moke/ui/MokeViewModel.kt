@@ -725,6 +725,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                     tmuxSheets.dataEnded(ts.scopeKey)
                 }
                 updateTmuxRoute(ts, route)
+                // 在 tmux 里滑动由 tmux 滚：它每格滚 TMUX_WHEEL_LINES 行，按同样的行高换算一格，内容才跟手。
+                ts.session.setMokeWheelLineHeights(
+                    if (state.currentBinding != null) TmuxRemote.TMUX_WHEEL_LINES.toDouble()
+                    else com.termux.terminal.TerminalSession.DEFAULT_WHEEL_LINE_HEIGHTS
+                )
                 val binding = state.currentBinding ?: return@collect
                 if (binding.scope != ts.scopeKey || state.snapshot?.verified != true) return@collect
                 if (tmuxScrollSetup.value && scrollTarget?.sameInstance(binding.session) != true) {

@@ -84,7 +84,7 @@ class TransportResourcesTest {
         }
     }
 
-    @Test fun `normal EOF cleans resources and stops future latency probes before finish`() {
+    @Test fun `normal EOF cleans resources and stops future background work before finish`() {
         val lifetime = TransportResources()
         val leases = AtomicInteger()
         val connection = Handle(leases)
@@ -96,7 +96,7 @@ class TransportResourcesTest {
             allocatePty = {}, openChannel = {},
         ) { _, _, _ -> assertTrue(lifetime.establish {}) }
         lifetime.finish {
-            assertTrue(lifetime.closed) // RTT and login workers use this same terminal condition.
+            assertTrue(lifetime.closed) // Background workers (login command) use this same terminal condition.
             assertEquals(0, leases.get())
             finished++
         }

@@ -26,22 +26,47 @@ class TmuxScrollSetupTest {
     }
     private val safeUp = "bind-key -T root WheelUpPane if-shell -F \"$forward\" \"send -M\" \"copy-mode -e; send -M\"\n"
     private val safeDown = "bind-key -T root WheelDownPane send-keys -M\n"
-    private val writeUp = "bind-key -T root WheelUpPane if-shell -F ${q(forward)} 'send -M' 'copy-mode -e; send -M'"
-    private val writeDown = "bind-key -T root WheelDownPane send-keys -M"
+    // tmux 3.4/3.5a canonical default root WheelUpPane (root WheelDownPane is unbound by default).
+    private val defaultUp = "bind-key -T root WheelUpPane if-shell -F \"$forward\" { send-keys -M } { copy-mode -e }\n"
+    // The desktop-like binding written now: full-screen panes get five arrows, like tmux's five-line step.
+    private val newUp = old("WheelUpPane", 5)
+    private val newDown = old("WheelDownPane", 5)
+    private fun writeOf(key: String): String {
+        val arrow = if (key == "WheelUpPane") "Up" else "Down"
+        val fallback = if (key == "WheelUpPane") "copy-mode -e; send -M" else "send -M"
+        return "bind-key -T root $key if-shell -F \"$forward\" \"send -M\" \"if -F '#{alternate_on}' 'send -N5 $arrow' '$fallback'\""
+    }
+    private val writeUp = writeOf("WheelUpPane")
+    private val writeDown = writeOf("WheelDownPane")
+    private fun copyLine(table: String, key: String, n: Int) =
+        "bind-key -T $table $key select-pane \\; send-keys -X -N $n ${if (key == "WheelUpPane") "scroll-up" else "scroll-down"}\n"
+    private val copyKeys = listOf("copy-mode", "copy-mode-vi").flatMap { t -> listOf("WheelUpPane", "WheelDownPane").map { t to it } }
 
     private data class Run(val result: TmuxOperationResult?, val commands: List<String>, val writes: List<String>)
     private fun scripted(
         up: String = old("WheelUpPane", 1), down: String = old("WheelDownPane", 1),
-        rereadUp: String = up, afterUp: String = safeUp,
+        rereadUp: String = up, afterUp: String = newUp, afterDown: String = newDown,
+        copy: (String, String) -> String = { t, k -> copyLine(t, k, 5) },
         version: String = "3.3a\n", fault: String = "", faultAt: String = "",
-        failVerify: Int = 0, verifyCode: Int = 2,
+        failVerify: Int = 0, verifyCode: Int = 2, probeFails: Boolean = false,
     ): Run {
         val dir = Files.createTempDirectory("moke-scroll-script-").toFile()
         try {
-            listOf("up1" to up, "up2" to rereadUp, "up3" to afterUp,
-                "down1" to down, "down2" to down, "down3" to safeDown,
-                "version" to version).forEach { (name, value) ->
-                File(dir, name).writeText(value.replace("__INJECTED__", File(dir, "injected").path))
+            fun live(table: String, key: String, rows: List<String>) = rows.forEachIndexed { i, v ->
+                File(dir, "live-$table-$key-${i + 1}").writeText(v.replace("__INJECTED__", File(dir, "injected").path))
+            }
+            live("root", "WheelUpPane", listOf(up, rereadUp, afterUp))
+            live("root", "WheelDownPane", listOf(down, down, afterDown))
+            for ((t, k) in copyKeys) live(t, k, listOf(copy(t, k), copy(t, k), copyLine(t, k, 5)))
+            File(dir, "version").writeText(version)
+            // Private config-free server: tmux's own defaults, and the canonical form of what it was given.
+            File(dir, "probe-root-WheelUpPane").writeText(defaultUp)
+            File(dir, "probe-root-WheelDownPane").writeText("MISSING")
+            File(dir, "bound-root-WheelUpPane").writeText(newUp)
+            File(dir, "bound-root-WheelDownPane").writeText(newDown)
+            for ((t, k) in copyKeys) {
+                File(dir, "probe-$t-$k").writeText(copyLine(t, k, 5))
+                File(dir, "bound-$t-$k").writeText(copyLine(t, k, 1))
             }
             // This harness replaces only the external identity/tmux boundary, not comparisons,
             // captures, guards, status/ACK validation or sequencing in the generated script.
@@ -52,6 +77,22 @@ class TmuxScrollSetupTest {
                     [ "${'$'}moke_verify_count" -ne $failVerify ] || return $verifyCode
                 }
                 tmux() {
+                    if [ "${'$'}1" = -N ] && [ "${'$'}2" = -L ] && [ "${'$'}4" = kill-server ]; then return 0; fi
+                    if [ "${'$'}1" = -u ] && [ "${'$'}2" = -f ] && [ "${'$'}3" = /dev/null ] && [ "${'$'}4" = -L ]; then
+                        # Never -N here: a private server must actually start to report its defaults.
+                        case "${'$'}5" in moke-probe-*) :;; *) return 9;; esac
+                        [ "${'$'}6" = start-server ] && [ "${'$'}7" = ';' ] || return 9
+                        shift 7
+                        ${if (probeFails) "printf 'server exited unexpectedly\\n'; return 1" else ":"}
+                        bound=; [ "${'$'}1" = bind-key ] && bound=1
+                        while [ "${'$'}#" -gt 4 ]; do shift; done
+                        [ "${'$'}1" = list-keys ] && [ "${'$'}2" = -T ] || return 9
+                        printf 'probe %s %s %s\n' "${'$'}3" "${'$'}4" "${'$'}bound" >> ${q(File(dir, "probes").path)}
+                        if [ -n "${'$'}bound" ]; then cat ${q(dir.path)}/bound-"${'$'}3"-"${'$'}4"; return 0; fi
+                        row=${q(dir.path)}/probe-"${'$'}3"-"${'$'}4"
+                        if [ "${'$'}(cat "${'$'}row")" = MISSING ]; then printf 'unknown key: %s\n' "${'$'}4"; return 1; fi
+                        cat "${'$'}row"; return 0
+                    fi
                     [ "${'$'}1" = -N ] && [ "${'$'}2" = -u ] && [ "${'$'}3" = -S ] && [ "${'$'}4" = ${q(server.socketPath)} ] || return 9
                     shift 4
                     [ "${'$'}1" = has-session ] && [ "${'$'}2" = -t ] && [ "${'$'}3" = '${'$'}7' ] && [ "${'$'}4" = ';' ] || return 9
@@ -67,18 +108,17 @@ class TmuxScrollSetupTest {
                         "display-message -p '#{version}'") cat ${q(File(dir, "version").path)};;
                         ${q("set-option -t '\$7' mouse on")}) :;;
                         ${q("show-options -v -t '\$7' mouse")}) printf 'on\n';;
-                        "list-keys -T root WheelUpPane"|"list-keys -T root WheelDownPane")
-                            case "${'$'}command" in *WheelUpPane) key=up;; *) key=down;; esac
-                            file=${q(dir.path)}/${'$'}key-count
+                        "list-keys -T "*)
+                            set -- ${'$'}command; table=${'$'}3; key=${'$'}4
+                            file=${q(dir.path)}/count-${'$'}table-${'$'}key
                             n=0; if [ -f "${'$'}file" ]; then read -r n < "${'$'}file"; fi
-                            n=${'$'}((n + 1)); printf '%s\n' "${'$'}n" > "${'$'}file"
-                            row=${q(dir.path)}/${'$'}key${'$'}n
+                            n=${'$'}((n + 1)); [ "${'$'}n" -le 3 ] || n=3; printf '%s\n' "${'$'}n" > "${'$'}file"
+                            row=${q(dir.path)}/live-${'$'}table-${'$'}key-${'$'}n
                             if [ "${'$'}(cat "${'$'}row")" = MISSING ]; then
-                                case "${'$'}key" in up) key=WheelUpPane;; *) key=WheelDownPane;; esac
                                 printf 'unknown key: %s\n' "${'$'}key"; return 1
                             fi
                             cat "${'$'}row";;
-                        ${q(writeUp)}|${q(writeDown)}) printf '%s\n' "${'$'}command" >> ${q(File(dir, "writes").path)};;
+                        "bind-key "*) printf '%s\n' "${'$'}command" >> ${q(File(dir, "writes").path)};;
                         *) printf 'unexpected command\n'; return 9;;
                     esac
                     if [ "${'$'}command" = ${q(faultAt)} ]; then
@@ -104,11 +144,12 @@ class TmuxScrollSetupTest {
             fun lines(name: String) = File(dir, name).takeIf { it.exists() }?.readLines().orEmpty()
             val commands = lines("commands")
             val writes = lines("writes")
+            val restores = copyKeys.map { (t, k) -> copyLine(t, k, 5).trimEnd('\n') }
             val permitted = setOf("display-message -p '#{version}'", "set-option -t '\$7' mouse on",
-                "show-options -v -t '\$7' mouse", "list-keys -T root WheelUpPane",
-                "list-keys -T root WheelDownPane", writeUp, writeDown)
+                "show-options -v -t '\$7' mouse", writeUp, writeDown) +
+                (listOf("root" to "WheelUpPane", "root" to "WheelDownPane") + copyKeys).map { (t, k) -> "list-keys -T $t $k" } + restores
             assertTrue(commands.toString(), commands.all { it in permitted })
-            assertTrue(writes.all { it == writeUp || it == writeDown })
+            assertTrue(writes.toString(), writes.all { it == writeUp || it == writeDown || it in restores })
             assertFalse("Read-back data was executed", File(dir, "injected").exists())
             return Run(TmuxRemote.parseOperation(output), commands, writes)
         } finally {
@@ -116,23 +157,38 @@ class TmuxScrollSetupTest {
         }
     }
 
-    @Test fun `canonical N1 and N3 outputs correct only the two root wheel commands`() {
-        for (version in listOf("3.2a\n", "3.3a\n", "3.4\n")) for (count in listOf(1, 3)) {
-            val run = scripted(old("WheelUpPane", count), old("WheelDownPane", count), version = version)
-            assertEquals(run.commands.toString(), TmuxOperationCode.OK, run.result?.code)
-            assertEquals(listOf(writeUp, writeDown), run.writes)
-            assertEquals(3, run.commands.count { it == "list-keys -T root WheelUpPane" })
-            assertEquals(3, run.commands.count { it == "list-keys -T root WheelDownPane" })
+    @Test fun `earlier moke generators and tmux defaults become the desktop-like wheel binding`() {
+        for (version in listOf("3.2a\n", "3.4\n", "3.5a\n", "3.6\n")) {
+            for (up in listOf(old("WheelUpPane", 1), old("WheelUpPane", 3), safeUp, defaultUp)) {
+                for (down in listOf(old("WheelDownPane", 1), old("WheelDownPane", 3), safeDown, "MISSING\n")) {
+                    val run = scripted(up, down, version = version)
+                    assertEquals(run.commands.toString(), TmuxOperationCode.OK, run.result?.code)
+                    assertEquals(listOf(writeUp, writeDown), run.writes)
+                    assertEquals(3, run.commands.count { it == "list-keys -T root WheelUpPane" })
+                    assertEquals(3, run.commands.count { it == "list-keys -T root WheelDownPane" })
+                }
+            }
         }
     }
 
-    @Test fun `missing and unmatched bindings are preserved individually`() {
-        for (row in listOf("MISSING\n", "bind-key -T root WheelUpPane send-keys -M\n", safeUp)) {
+    @Test fun `custom current and absent-but-defaulted bindings are preserved individually`() {
+        for (row in listOf("MISSING\n", "bind-key -T root WheelUpPane send-keys -M\n", newUp)) {
             val run = scripted(up = row)
             assertEquals(run.commands.toString(), TmuxOperationCode.OK, run.result?.code)
             assertEquals(listOf(writeDown), run.writes)
         }
-        assertTrue(scripted(up = "MISSING\n", down = "MISSING\n").writes.isEmpty())
+        val custom = scripted(up = newUp, down = "bind-key -T root WheelDownPane display-message keep\n")
+        assertTrue(custom.writes.isEmpty())
+        assertEquals(TmuxOperationCode.OK, custom.result?.code)
+    }
+
+    @Test fun `moke's one-line copy-mode steps go back to tmux's own default and custom steps stay`() {
+        val run = scripted(up = newUp, down = newDown, copy = { t, k -> copyLine(t, k, 1) })
+        assertEquals(TmuxOperationCode.OK, run.result?.code)
+        assertEquals(copyKeys.map { (t, k) -> copyLine(t, k, 5).trimEnd('\n') }, run.writes)
+        val custom = scripted(up = newUp, down = newDown, copy = { t, k -> copyLine(t, k, 3) })
+        assertEquals(TmuxOperationCode.OK, custom.result?.code)
+        assertTrue(custom.writes.isEmpty())
     }
 
     @Test fun `never infer from keywords or rewrite nested whitespace quoting and flags`() {
@@ -146,7 +202,7 @@ class TmuxScrollSetupTest {
             "bind-key -T root WheelUpPane display-message \"alternate_on send -N1 Up\"\n",
         )
         for (row in mutations) {
-            val run = scripted(up = row, down = safeDown)
+            val run = scripted(up = row, down = newDown)
             assertEquals(run.commands.toString(), TmuxOperationCode.OK, run.result?.code)
             assertTrue(row, run.writes.isEmpty())
         }
@@ -188,20 +244,17 @@ class TmuxScrollSetupTest {
         }
     }
 
-    @Test fun `unknown valid versions retain verified mouse setup but explicitly skip legacy correction`() {
-        for (version in listOf("3.5\n", "3.6a\n", "next-3.7\n", "master\n")) {
-            val run = scripted(version = version)
-            assertEquals(TmuxOperationCode.OK, run.result?.code)
-            assertEquals("SCROLL_LEGACY_SKIPPED_UNSUPPORTED_VERSION", run.result?.output)
-            assertEquals(listOf("display-message -p '#{version}'", "set-option -t '\$7' mouse on",
-                "show-options -v -t '\$7' mouse"), run.commands)
-            assertTrue(run.writes.isEmpty())
-        }
+    @Test fun `without tmux's own defaults mouse setup stands and no binding is written`() {
+        val run = scripted(probeFails = true)
+        assertEquals(TmuxOperationCode.OK, run.result?.code)
+        assertEquals("SCROLL_DEFAULTS_UNAVAILABLE", run.result?.output)
+        assertEquals(listOf("display-message -p '#{version}'", "set-option -t '\$7' mouse on",
+            "show-options -v -t '\$7' mouse"), run.commands)
+        assertTrue(run.writes.isEmpty())
         for (fault in listOf("no-ack", "failed", "extra", "oversized")) {
-            val run = scripted(version = "3.5\n", fault = fault, faultAt = "show-options -v -t '\$7' mouse")
-            assertEquals(TmuxOperationCode.UNKNOWN, run.result?.code)
-            assertTrue(run.writes.isEmpty())
-            assertFalse(run.commands.any { it.startsWith("list-keys") })
+            val failed = scripted(probeFails = true, fault = fault, faultAt = "show-options -v -t '\$7' mouse")
+            assertEquals(TmuxOperationCode.UNKNOWN, failed.result?.code)
+            assertTrue(failed.writes.isEmpty())
         }
     }
 
@@ -274,11 +327,13 @@ class TmuxScrollSetupTest {
                 val otherRoot = tmux("list-keys", "-T", "root").lineSequence()
                     .filterNot { it.contains(" WheelUpPane ") || it.contains(" WheelDownPane ") }.toList()
                 assertEquals(TmuxOperationCode.OK, setup()?.code)
-                assertEquals(safeUp, tmux("list-keys", "-T", "root", "WheelUpPane"))
-                assertEquals(safeDown, tmux("list-keys", "-T", "root", "WheelDownPane"))
+                assertEquals(newUp, tmux("list-keys", "-T", "root", "WheelUpPane"))
+                assertEquals(newDown, tmux("list-keys", "-T", "root", "WheelDownPane"))
                 assertEquals(otherRoot, tmux("list-keys", "-T", "root").lineSequence()
                     .filterNot { it.contains(" WheelUpPane ") || it.contains(" WheelDownPane ") }.toList())
-                for (table in tables) assertEquals(before[table], tmux("list-keys", "-T", table))
+                assertEquals(before["prefix"], tmux("list-keys", "-T", "prefix"))
+                // moke's earlier one-line copy-mode steps are back to tmux's own five-line default.
+                for ((table, key) in copyKeys) assertEquals(copyLine(table, key, 5), tmux("list-keys", "-T", table, key))
                 assertEquals(untouchedSession, tmux("show-options", "-t", "\$1", "mouse"))
                 assertEquals(globalMouse, tmux("show-options", "-g", "mouse"))
                 assertEquals("on\n", tmux("show-options", "-v", "-t", "\$0", "mouse"))
@@ -287,6 +342,7 @@ class TmuxScrollSetupTest {
             tmux("bind-key", "-T", "root", "WheelDownPane", "display-message", "keep custom")
             val customDown = tmux("list-keys", "-T", "root", "WheelDownPane")
             assertEquals(TmuxOperationCode.OK, setup()?.code)
+            // A key the user removed although tmux binds it by default stays removed; a custom one stays.
             assertEquals(1, process("tmux", "-N", "-S", socket, "list-keys", "-T", "root", "WheelUpPane").first)
             assertEquals(customDown, tmux("list-keys", "-T", "root", "WheelDownPane"))
             val allRoot = tmux("list-keys", "-T", "root")

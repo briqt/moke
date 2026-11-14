@@ -437,44 +437,77 @@ object TmuxRemote {
     fun detach(target: TmuxSessionRef): String = mutation(target, "detach-client -s ${q(target.id)}")
     fun kill(target: TmuxSessionRef): String = mutation(target, "kill-session -t ${q(target.id)}")
 
-    /** Enable mouse only on the witnessed session; do not install new global wheel policy.
-     * Existing root wheel commands are corrected individually only when their complete list-keys
-     * bytes match the historical generators (N3, then N1). This proves content, not ownership or
-     * the user's original value. Correcting either root key affects all clients of that server;
-     * other root/prefix/copy bindings, including copy-mode N1, survive.
+    /** Lines one wheel notch moves in tmux (its default copy-mode step); arrows sent to full-screen panes match it. */
+    const val TMUX_WHEEL_LINES = 5
+
+    /**
+     * Make swiping in tmux behave like a desktop mouse wheel, on the witnessed session only where possible.
      *
-     * Each candidate is re-read near its guarded write and checked afterwards. Shell comparison
-     * yields to the server: external clients can still bind between comparison and write. This is
-     * best effort, not atomic CAS. Any uncertain/partial result stops, without replay or rollback.
+     * - Mouse is enabled for that session (not -g).
+     * - Root WheelUpPane/WheelDownPane (server-wide; tmux has no per-session key tables): a pane that asked
+     *   for the mouse or is in a mode gets the wheel; a full-screen pane (less, man, nano) gets
+     *   [TMUX_WHEEL_LINES] Up/Down keys; a shell enters copy mode and scrolls history. Written only when
+     *   the live binding is tmux's own default, absent like the default, or one of moke's earlier
+     *   generators — a user's custom binding is left alone.
+     * - copy-mode tables: moke's earlier one-line-per-notch bindings are put back to tmux's default.
+     *
+     * Defaults and the canonical form of every write come from a private, config-free tmux server of the
+     * same binary (-f /dev/null -L), so no version's bytes are hard-coded. Each candidate is re-read near
+     * its guarded write and checked afterwards. This is best effort, not atomic CAS: any uncertain or
+     * partial result stops, without replay or rollback.
      */
     fun scrollSetup(target: TmuxSessionRef): String {
         val forward = "#{||:#{pane_in_mode},#{mouse_any_flag}}"
-        // list-keys -T root <one key> avoids table/key padding. Its nested command strings are
-        // intentionally NOT reparsed, whitespace-folded or evaluated. tmux 3.3a has no list-keys -F
-        // or global key_command query. These are the canonical bytes on supported 3.2a/3.3a/3.4.
+        // Golden list-keys bytes of moke's earlier root generators (N1/N3 arrows, then the copy-mode-only form).
         fun historical(key: String, arrow: String, fallback: String) = listOf(1, 3).map { count ->
             "bind-key -T root $key if-shell -F \"$forward\" \"send -M\" " +
                 "\"if -F '#{alternate_on}' 'send -N$count $arrow' '$fallback'\"\n"
         }
-        val up = "bind-key -T root WheelUpPane if-shell -F ${q(forward)} ${q("send -M")} ${q("copy-mode -e; send -M")}"
-        val down = "bind-key -T root WheelDownPane send-keys -M"
-        val safeUp = "bind-key -T root WheelUpPane if-shell -F \"$forward\" \"send -M\" \"copy-mode -e; send -M\"\n"
-        val safeDown = "$down\n"
+        val earlierUp = historical("WheelUpPane", "Up", "copy-mode -e; send -M") +
+            "bind-key -T root WheelUpPane if-shell -F \"$forward\" \"send -M\" \"copy-mode -e; send -M\"\n"
+        val earlierDown = historical("WheelDownPane", "Down", "send -M") + "bind-key -T root WheelDownPane send-keys -M\n"
+        fun wheel(key: String, arrow: String, fallback: String) = listOf("bind-key", "-T", "root", key, "if-shell", "-F", forward,
+            "send -M", "if -F '#{alternate_on}' 'send -N$TMUX_WHEEL_LINES $arrow' '$fallback'")
+        val up = wheel("WheelUpPane", "Up", "copy-mode -e; send -M")
+        val down = wheel("WheelDownPane", "Down", "send -M")
+        // The same binding as one tmux command string (the form moke has always written), for the user's server.
+        // args = bind-key -T root <key> if-shell -F <format> <then> <else>; the last three are double-quoted.
+        fun parsed(args: List<String>) = args.take(6).joinToString(" ") + args.drop(6).joinToString("") { " \"$it\"" }
+        fun legacyCopy(table: String, key: String) =
+            listOf("bind-key", "-T", table, key, "select-pane ; send -X -N 1 ${if (key == "WheelUpPane") "scroll-up" else "scroll-down"}")
         val uncertain = "moke_result UNKNOWN 'scroll setup not confirmed'; exit 0"
-        fun correct(key: String, originals: List<String>, command: String, expected: String) = """
-            moke_scroll_call ${q("list-keys -T root $key")} $key
+        val noDefaults = "moke_scroll_confirm_mouse; moke_result OK SCROLL_DEFAULTS_UNAVAILABLE; exit 0"
+        fun words(args: List<String>) = args.joinToString(" ") { q(it) }
+        /** Probe [table] [key] on the private server, optionally after binding [bind] there first. */
+        fun probe(table: String, key: String, bind: List<String>? = null, into: String) =
+            "moke_probe ${q(table)} ${q(key)}${bind?.let { " " + words(it) } ?: ""} || { $noDefaults; }\n$into=${'$'}moke_probe_out"
+        /** Correct [key] in [table] when its live bytes equal one of [originals] (shell words); expect [expectedVar]. */
+        fun correct(table: String, key: String, originals: List<String>, command: String, expectedVar: String) = """
+            moke_scroll_call ${q("list-keys -T $table $key")} $key $table
             moke_scroll_before=${'$'}moke_scroll_out
             case "${'$'}moke_scroll_before" in
-                ${originals.joinToString("|") { q(it) }})
-                    moke_scroll_call ${q("list-keys -T root $key")} $key
+                ${originals.joinToString("|")})
+                    moke_scroll_call ${q("list-keys -T $table $key")} $key $table
                     [ "${'$'}moke_scroll_out" = "${'$'}moke_scroll_before" ] || { $uncertain; }
-                    moke_scroll_call ${q(command)}
+                    moke_scroll_call $command
                     [ -z "${'$'}moke_scroll_out" ] || { $uncertain; }
-                    moke_scroll_call ${q("list-keys -T root $key")} $key
-                    [ "${'$'}moke_scroll_out" = ${q(expected)} ] || { $uncertain; }
+                    moke_scroll_call ${q("list-keys -T $table $key")} $key $table
+                    [ "${'$'}moke_scroll_out" = "${'$'}$expectedVar" ] || { $uncertain; }
                     ;;
             esac
         """.trimIndent()
+        val nl = q("\n")
+        val copyFixes = listOf("copy-mode", "copy-mode-vi").flatMap { table ->
+            listOf("WheelUpPane", "WheelDownPane").map { key ->
+                probe(table, key, into = "moke_copy_default") + "\n" +
+                    probe(table, key, legacyCopy(table, key), into = "moke_copy_legacy") + "\n" +
+                    // tmux's own default line is itself the command that restores it.
+                    "if [ -n \"${'$'}moke_copy_default\" ] && [ -n \"${'$'}moke_copy_legacy\" ]; then\n" +
+                    "moke_copy_restore=${'$'}{moke_copy_default%$nl}\n" +
+                    correct(table, key, listOf("\"${'$'}moke_copy_legacy\""), "\"${'$'}moke_copy_restore\"", "moke_copy_default") +
+                    "\nfi"
+            }
+        }
         return shell(core + "\n" + frozen(target) + """
             unset TMUX TMUX_PANE
             command -v head >/dev/null 2>&1 || { $uncertain; }
@@ -483,7 +516,8 @@ object TmuxRemote {
                 moke_verify
                 case "${'$'}?" in 0) :;; 2) moke_result STALE; exit 0;; *) $uncertain;; esac
                 # Bound the capture, preserving trailing newlines with a final status sentinel.
-                # Only generated commands enter tmux's parser; read-back bytes are data throughout.
+                # Only generated commands and tmux's own config-free defaults enter tmux's parser;
+                # read-back bytes from the user's server are data throughout.
                 moke_scroll_out=${'$'}(
                     {
                         # 3.2a can crash when format context has a missing session. has-session
@@ -501,18 +535,18 @@ object TmuxRemote {
                     *"${'$'}moke_scroll_suffix")
                         moke_scroll_out=${'$'}{moke_scroll_out%"${'$'}moke_scroll_suffix"};;
                     *)
-                        # Missing keys are preserved, never recreated. All other errors stop.
+                        # A missing key reads as empty (tmux's own default for some keys). All other errors stop.
                         if [ -n "${'$'}{2-}" ] && [ "${'$'}moke_scroll_out" = "unknown key: ${'$'}2"${q("\n\n${P}SCROLL_EXIT|1!")} ]; then
                             moke_scroll_out=; return 0
                         else $uncertain; fi;;
                 esac
                 if [ -n "${'$'}{2-}" ]; then
                     # Check the one-key response envelope, without interpreting its command body.
-                    case "${'$'}moke_scroll_out" in *${q("\n")}) :;; *) $uncertain;; esac
-                    moke_scroll_line=${'$'}{moke_scroll_out%${q("\n")}}
-                    case "${'$'}moke_scroll_line" in *${q("\n")}*) $uncertain;; esac
+                    case "${'$'}moke_scroll_out" in *$nl) :;; *) $uncertain;; esac
+                    moke_scroll_line=${'$'}{moke_scroll_out%$nl}
+                    case "${'$'}moke_scroll_line" in *$nl*) $uncertain;; esac
                     case "${'$'}moke_scroll_line" in
-                        "bind-key -T root ${'$'}2 "?*|"bind-key -r -T root ${'$'}2 "?*) :;;
+                        "bind-key -T ${'$'}3 ${'$'}2 "?*|"bind-key -r -T ${'$'}3 ${'$'}2 "?*) :;;
                         *) $uncertain;;
                     esac
                 fi
@@ -522,23 +556,43 @@ object TmuxRemote {
                 [ "${'$'}moke_scroll_out" = ${q("on\n")} ] || { $uncertain; }
                 moke_verify || { $uncertain; }
             }
+            # A private server without any config: never the user's server, socket or files.
+            moke_probe() {
+                moke_probe_table=${'$'}1; moke_probe_key=${'$'}2; shift 2
+                if [ "${'$'}#" -gt 0 ]; then set -- "${'$'}@" \; list-keys -T "${'$'}moke_probe_table" "${'$'}moke_probe_key"
+                else set -- list-keys -T "${'$'}moke_probe_table" "${'$'}moke_probe_key"; fi
+                moke_probe_out=${'$'}(
+                    { tmux -u -f /dev/null -L "moke-probe-${'$'}${'$'}" start-server \; "${'$'}@" 2>&1
+                      printf '\n${P}PROBE_EXIT|%s!' "${'$'}?"; } | head -c 4097
+                )
+                tmux -N -L "moke-probe-${'$'}${'$'}" kill-server >/dev/null 2>&1
+                case "${'$'}moke_probe_out" in
+                    "unknown key: ${'$'}moke_probe_key"${q("\n\n${P}PROBE_EXIT|1!")}) moke_probe_out=; return 0;;
+                    *${q("\n\n${P}PROBE_EXIT|0!")}) moke_probe_out=${'$'}{moke_probe_out%${q("\n${P}PROBE_EXIT|0!")}};;
+                    *) return 1;;
+                esac
+                case "${'$'}moke_probe_out" in
+                    "bind-key -T ${'$'}moke_probe_table ${'$'}moke_probe_key "?*$nl) :;;
+                    *) return 1;;
+                esac
+                case "${'$'}{moke_probe_out%$nl}" in *$nl*) return 1;; esac
+            }
             moke_scroll_call ${q("display-message -p '#{version}'")}
             case "${'$'}moke_scroll_out" in
-                *${q("\n")}) moke_scroll_version=${'$'}{moke_scroll_out%${q("\n")}};;
+                *$nl) moke_scroll_version=${'$'}{moke_scroll_out%$nl};;
                 *) $uncertain;;
             esac
             case "${'$'}moke_scroll_version" in ''|*[!A-Za-z0-9._+-]*) $uncertain;; esac
             moke_scroll_call ${q("set-option -t ${q(target.id)} mouse on")}
             [ -z "${'$'}moke_scroll_out" ] || { $uncertain; }
-            # Version knowledge limits only historical key correction, not ordinary mouse setup.
-            case "${'$'}moke_scroll_version" in
-                3.2a|3.3a|3.4) :;;
-                *) moke_scroll_confirm_mouse
-                    moke_result OK SCROLL_LEGACY_SKIPPED_UNSUPPORTED_VERSION; exit 0;;
-            esac
         """.trimIndent() + "\n" +
-            correct("WheelUpPane", historical("WheelUpPane", "Up", "copy-mode -e; send -M"), up, safeUp) + "\n" +
-            correct("WheelDownPane", historical("WheelDownPane", "Down", "send -M"), down, safeDown) + "\n" + """
+            probe("root", "WheelUpPane", into = "moke_root_default") + "\n" +
+            probe("root", "WheelUpPane", up, into = "moke_root_expected") + "\n" +
+            correct("root", "WheelUpPane", earlierUp.map(::q) + "\"${'$'}moke_root_default\"", q(parsed(up)), "moke_root_expected") + "\n" +
+            probe("root", "WheelDownPane", into = "moke_root_default") + "\n" +
+            probe("root", "WheelDownPane", down, into = "moke_root_expected") + "\n" +
+            correct("root", "WheelDownPane", earlierDown.map(::q) + "\"${'$'}moke_root_default\"", q(parsed(down)), "moke_root_expected") + "\n" +
+            copyFixes.joinToString("\n") + "\n" + """
             moke_scroll_confirm_mouse
             moke_result OK
         """.trimIndent())

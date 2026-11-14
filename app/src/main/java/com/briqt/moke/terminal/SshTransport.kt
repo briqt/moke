@@ -32,7 +32,6 @@ class SshTransport(
     /** 经网络连不上时报给会话（需要登录时失败条给出「登录」）。 */
     private val onNetworkError: (NetworkException) -> Unit = {},
     /** 实时延迟回调（ms，null=测不到）。用于终端状态条显示 RTT。 */
-    private val onLatency: (Int?) -> Unit = {},
     /**
      * 运行时覆盖的协议级启动命令（tmux 附加用）：非空时在已分配 PTY 的 SSH command channel
      * 直接执行，不启动 shell/模拟键入。为 null 时才轮到主机自己配置的启动命令。
@@ -75,7 +74,6 @@ class SshTransport(
     private val windowSize = TerminalSizeState(inputQueue::execute)
     /** shell / exec 通道已经打开：此后的异常是"中断"，此前的是"连接失败"。 */
     private val established get() = resources.established
-    @Volatile private var latencyThread: Thread? = null
     @Volatile private var loginThread: Thread? = null
     private val closeRequested = AtomicBoolean()
 
@@ -161,7 +159,6 @@ class SshTransport(
                             size.cellWidthPixels, size.cellHeightPixels)
                     }
                     if (!resources.establish { onEstablished?.invoke() }) return@withSshChannel
-                    startLatencyProbe(client)
 
                     val input = channel.inputStream
                     val buf = ByteArray(8192)
@@ -241,25 +238,6 @@ class SshTransport(
         session.processToEmulator(b, b.size)
     }
 
-    /** 周期性 RTT 探测：发一个带回复的 keepalive 全局请求，测往返耗时 → 状态条延迟。 */
-    private fun startLatencyProbe(client: SSHClient) {
-        latencyThread = Thread({
-            while (!closed) {
-                val ms = runCatching {
-                    val t0 = System.nanoTime()
-                    val p = client.connection.sendGlobalRequest("keepalive@openssh.com", true, ByteArray(0))
-                    // 服务器对未知 keepalive 请求回 FAILURE 也算"回复"，据此计时；异常同样代表已往返。
-                    runCatching { p.retrieve(5, java.util.concurrent.TimeUnit.SECONDS) }
-                    ((System.nanoTime() - t0) / 1_000_000).toInt()
-                }.getOrNull()
-                if (closed) break
-                // ≥4500ms 视为未回复（避免把超时误报成假延迟）。
-                onLatency(ms?.takeIf { it < 4500 })
-                try { Thread.sleep(4000) } catch (_: InterruptedException) { break }
-            }
-        }, "moke-ssh-rtt-${host.host}").also { it.start() }
-    }
-
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (!closed) inputQueue.write(data, offset, count)
     }
@@ -287,7 +265,6 @@ class SshTransport(
 
     private fun stopAuxiliaryWork() {
         authenticationOwner.cancel()
-        latencyThread?.interrupt()
         loginThread?.interrupt()
         inputQueue.shutdownNow()
     }

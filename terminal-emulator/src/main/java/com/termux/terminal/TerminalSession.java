@@ -92,10 +92,31 @@ public class TerminalSession extends TerminalOutput {
 
     private static final String LOG_TAG = "TerminalSession";
 
+    /** [moke] 见 {@link TerminalEmulator#setMokeIgnoreAltScreen(boolean)}；emulator 惰性创建，先存在会话上。 */
+    private boolean mMokeIgnoreAltScreen = false;
+
+    /** [moke] 触摸滑过多少个行高算一格滚轮（远端程序收滚轮时用）；tmux 里按它每格滚的行数设置，使内容跟手。 */
+    private volatile double mMokeWheelLineHeights = DEFAULT_WHEEL_LINE_HEIGHTS;
+
+    /** 常见程序（vim 等）每格滚 3 行。 */
+    public static final double DEFAULT_WHEEL_LINE_HEIGHTS = 3.0;
+
     public TerminalSession(TerminalTransport transport, Integer transcriptRows, TerminalSessionClient client) {
         this.mTransport = transport;
         this.mTranscriptRows = transcriptRows;
         this.mClient = client;
+    }
+
+    /** [moke] mosh 会话专用：忽略备用屏切换。emulator 创建前后调用都生效。 */
+    public void setMokeIgnoreAltScreen(boolean ignore) {
+        mMokeIgnoreAltScreen = ignore;
+        if (mEmulator != null) mEmulator.setMokeIgnoreAltScreen(ignore);
+    }
+
+    public double getMokeWheelLineHeights() { return mMokeWheelLineHeights; }
+
+    public void setMokeWheelLineHeights(double lineHeights) {
+        if (lineHeights > 0 && !Double.isInfinite(lineHeights)) mMokeWheelLineHeights = lineHeights;
     }
 
     public void updateTerminalSessionClient(TerminalSessionClient client) {
@@ -127,6 +148,7 @@ public class TerminalSession extends TerminalOutput {
     /** 创建 emulator 并启动底层传输。 */
     public void initializeEmulator(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
         mEmulator = new TerminalEmulator(this, columns, rows, cellWidthPixels, cellHeightPixels, mTranscriptRows, mClient);
+        mEmulator.setMokeIgnoreAltScreen(mMokeIgnoreAltScreen);
         try {
             mTransport.start(this, columns, rows, cellWidthPixels, cellHeightPixels);
         } catch (Exception e) {

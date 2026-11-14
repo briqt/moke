@@ -168,7 +168,6 @@ fun TerminalScreen(
     val connectFailed by ts.connectFailed.collectAsState()
     val loginNetwork by ts.loginNetwork.collectAsState()
     val recovery by ts.recovery.collectAsState()
-    val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val observeCurrent = observesCurrentTmux(ts.host.useMosh, ts.host.persistence == SessionPersistence.TMUX, ts.tmuxIntent)
     val endNotice = terminalEndNotice(tmuxState, alive, connectFailed)
@@ -417,8 +416,6 @@ fun TerminalScreen(
                 title = title,
                 useMosh = ts.host.useMosh,
                 alive = alive,
-                latencyMs = latency,
-                showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 tmuxCount = tmuxState.sessions.size,
@@ -781,8 +778,6 @@ private fun TerminalTopBar(
     title: String,
     useMosh: Boolean,
     alive: Boolean,
-    latencyMs: Int?,
-    showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
     tmuxCount: Int,
@@ -824,34 +819,14 @@ private fun TerminalTopBar(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Box(Modifier.padding(start = 6.dp)) { ProtocolBadge(useMosh) }
-                when {
-                    !alive -> Text(
-                        "· " + stringResource(R.string.offline),
-                        fontFamily = MokeMono,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                    latencyMs != null -> Text(
-                        "· $latencyMs ms",
-                        fontFamily = MokeMono,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = latencyColor(latencyMs),
-                        maxLines = 1,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                    showLatency -> Text(
-                        "· …",
-                        fontFamily = MokeMono,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                    else -> {}
-                }
+                if (!alive) Text(
+                    "· " + stringResource(R.string.offline),
+                    fontFamily = MokeMono,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
             }
             // 端口转发：只在有转发时出现（交互原则 P1），角标 = 转发条数；点开即转发面板。
             if (forwardCount > 0) {
@@ -1034,13 +1009,6 @@ private fun LinkActionBar(
             }
         }
     }
-}
-
-@Composable
-fun latencyColor(ms: Int): androidx.compose.ui.graphics.Color = when {
-    ms < 120 -> MaterialTheme.extra.ok
-    ms < 300 -> MaterialTheme.colorScheme.onSurfaceVariant
-    else -> MaterialTheme.colorScheme.error
 }
 
 /** 「跳到底部」浮动按钮：仅在滚屏离开底部时淡入。 */
