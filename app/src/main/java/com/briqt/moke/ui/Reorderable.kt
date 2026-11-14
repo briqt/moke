@@ -33,6 +33,8 @@ import androidx.compose.ui.zIndex
  *
  * 目标索引：以被拖项当前布局偏移 + 累计位移求其中线，命中哪个可见项就换到那一格（逐格相邻交换，
  * 松手前不落库）。换格后校正累计位移，使被拖项保持在手指下。
+ *
+ * 长按后原地松手（没移出触摸容差）不算拖动，改调 [onItemHold]——行用它弹出菜单，与桌面图标的长按一致。
  */
 @Composable
 fun <T> ReorderableColumn(
@@ -42,9 +44,12 @@ fun <T> ReorderableColumn(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     spacing: Dp = 10.dp,
+    onItemHold: (T) -> Unit = {},
     itemContent: @Composable (item: T, dragging: Boolean, handle: Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val hold by rememberUpdatedState(onItemHold)
+    var travel by remember { mutableFloatStateOf(0f) }
     var working by remember { mutableStateOf(items) }
     var draggingKey by remember { mutableStateOf<Any?>(null) }
     var accumulated by remember { mutableFloatStateOf(0f) }
@@ -67,15 +72,16 @@ fun <T> ReorderableColumn(
             Box(modifier = dragMod) {
                 val handle = Modifier.pointerInput(itemKey) {
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { draggingKey = itemKey; accumulated = 0f },
+                        onDragStart = { draggingKey = itemKey; accumulated = 0f; travel = 0f },
                         onDragEnd = {
                             draggingKey = null
                             accumulated = 0f
-                            onReorder(working)
+                            if (travel < viewConfiguration.touchSlop) hold(item) else onReorder(working)
                         },
                         onDragCancel = { draggingKey = null; accumulated = 0f },
                         onDrag = { change, amount ->
                             change.consume()
+                            travel += amount.getDistance()
                             accumulated += amount.y
                             val info = listState.layoutInfo
                             val dragInfo = info.visibleItemsInfo.firstOrNull { it.key == draggingKey }
@@ -102,7 +108,7 @@ fun <T> ReorderableColumn(
     }
 }
 
-/** 行在所属容器里的位置：分组列表据此画同一个圆角容器的上沿、下沿和组内分隔线。 */
+/** 行在所属分组里的位置：分段列表据此决定这一段圆哪两个角（见 [segmentShape]）。 */
 data class RowPosition(val index: Int, val count: Int) {
     val first: Boolean get() = index == 0
     val last: Boolean get() = index == count - 1
@@ -119,6 +125,7 @@ data class ReorderGroup<T>(val key: String, val items: List<T>, val label: Strin
  * 交互：
  *  - 长按**分组头**的 `handle` 拖动 → 调整分组之间的顺序（整块移动，松手回调 [onReorderGroups] 交新组键序）。
  *  - 长按**组内条目**的 `handle` 拖动 → 仅在本组内重排（不跨组；松手回调 [onReorderItems] 交该组新条目序）。
+ *  - 长按组内条目后原地松手 → [onItemHold]（行用它弹出菜单）。
  *  - [collapsed] 内的组只渲染组头、隐藏条目。
  *
  * 拖动中在本地工作副本即时重排（视觉跟手），松手落库。外部数据变化时（非拖动中）同步到工作副本。
@@ -133,10 +140,13 @@ fun <T> GroupedReorderableList(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     spacing: Dp = 10.dp,
+    onItemHold: (T) -> Unit = {},
     header: @Composable (group: ReorderGroup<T>, dragging: Boolean, handle: Modifier) -> Unit,
     itemContent: @Composable (item: T, dragging: Boolean, handle: Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val hold by rememberUpdatedState(onItemHold)
+    var travel by remember { mutableFloatStateOf(0f) }
     var working by remember { mutableStateOf(groups) }
     val reorderGroups by rememberUpdatedState(onReorderGroups)
     val reorderItems by rememberUpdatedState(onReorderItems)
@@ -200,15 +210,20 @@ fun <T> GroupedReorderableList(
                     Box(modifier = dragMod) {
                         val handle = Modifier.pointerInput(group.key, itemK) {
                             detectDragGesturesAfterLongPress(
-                                onDragStart = { dragKey = itemK; dragIsGroup = false; dragGroup = group.key; accumulated = 0f },
+                                onDragStart = { dragKey = itemK; dragIsGroup = false; dragGroup = group.key; accumulated = 0f; travel = 0f },
                                 onDragEnd = {
-                                    val g = working.firstOrNull { it.key == dragGroup }
-                                    if (g != null) reorderItems(g.key, g.items)
+                                    if (travel < viewConfiguration.touchSlop) {
+                                        hold(item)
+                                    } else {
+                                        val g = working.firstOrNull { it.key == dragGroup }
+                                        if (g != null) reorderItems(g.key, g.items)
+                                    }
                                     reset()
                                 },
                                 onDragCancel = { reset() },
                                 onDrag = { change, amount ->
                                     change.consume()
+                                    travel += amount.getDistance()
                                     accumulated += amount.y
                                     val info = listState.layoutInfo
                                     val dragInfo = info.visibleItemsInfo.firstOrNull { it.key == dragKey }

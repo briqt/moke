@@ -192,8 +192,8 @@ private fun FontCard(
     val zh = isZh()
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = com.briqt.moke.ui.theme.MokeShapes.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = cardBorder(),
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

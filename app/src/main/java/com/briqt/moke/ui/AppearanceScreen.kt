@@ -411,7 +411,8 @@ private fun SectionHeader(text: String) {
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp),
+        // 与主机页分组头、行内文字同一起点（距卡片边 16dp）。
+        modifier = Modifier.padding(start = 16.dp, top = 6.dp),
     )
 }
 

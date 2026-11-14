@@ -210,7 +210,7 @@ fun NetworksScreen(
 private fun NetworkSectionHeader(title: String, addText: String, onAdd: () -> Unit, enabled: Boolean = true) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 16.dp))
         TextButton(onClick = onAdd, enabled = enabled, contentPadding = PaddingValues(horizontal = 8.dp),
             modifier = Modifier.weight(1f, fill = false).sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -231,7 +231,7 @@ private fun EmptyHint(text: String) {
 @Composable
 private fun NetworkCard(e: NetworkEntry, status: String?, statusColor: Color, onClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), shape = MokeShapes.card,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = cardBorder()) {
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(e.name, fontWeight = FontWeight.SemiBold)
@@ -506,7 +506,7 @@ private fun TailnetLoginPanel(
     onCancel: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = MokeShapes.card, border = cardBorder(), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MokeShapes.card, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (phase == TailnetPhase.CONNECTING || phase == TailnetPhase.CHECKING) {

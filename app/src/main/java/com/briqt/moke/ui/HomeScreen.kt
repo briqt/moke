@@ -41,7 +41,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -52,13 +51,13 @@ import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
@@ -531,7 +530,9 @@ private fun ConnectionsContent(
     val fabOverlap = fabTop?.let { top ->
         with(density) { (listBottom - top).coerceAtLeast(0f).toDp() }
     } ?: 0.dp
-    val listPadding = PaddingValues(top = 12.dp, bottom = 12.dp + fabOverlap)
+    val listPadding = PaddingValues(top = 4.dp, bottom = 12.dp + fabOverlap)
+    // 长按主机后原地松手弹出的菜单（与行尾 ⋮ 同一个）：状态提到列表这层，因为长按由重排列表判定。
+    var menuFor by remember { mutableStateOf<String?>(null) }
     val listModifier = Modifier.fillMaxSize().onGloballyPositioned { listBottom = it.boundsInRoot().bottom }
 
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
@@ -542,10 +543,12 @@ private fun ConnectionsContent(
                 key = { it.id },
                 onReorder = onReorderHosts,
                 modifier = listModifier,
-                contentPadding = listPadding,
-                spacing = 0.dp,
+                contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp + fabOverlap),
+                spacing = SegmentGap,
+                onItemHold = { menuFor = it.id },
             ) { host, dragging, handle ->
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
+                    menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
             }
         } else {
             val groups = orderedKeys.map { k -> ReorderGroup(k, hosts.filter { keyOf(it) == k }) }
@@ -562,7 +565,8 @@ private fun ConnectionsContent(
                 },
                 modifier = listModifier,
                 contentPadding = listPadding,
-                spacing = 0.dp,
+                spacing = SegmentGap,
+                onItemHold = { menuFor = it.id },
                 header = { group, dragging, handle ->
                     val key = group.key
                     GroupHeaderRow(
@@ -576,7 +580,8 @@ private fun ConnectionsContent(
                 },
             ) { host, dragging, handle ->
                 // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
+                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
+                    menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
             }
         }
     }
@@ -680,7 +685,11 @@ private fun <T> PickerChip(
     }
 }
 
-/** 连接页 / 会话页共用的可折叠 + 可拖动的分组头：[chevron] 组名 计数 …… [拖动手柄]。点行体折叠/展开，长按手柄调分组顺序。 */
+/**
+ * 连接页 / 会话页共用的分组头：说明字色的小标题 + 本组条数，行尾是折叠箭头；下面紧跟本组的分段列表。
+ * 点一下折叠/展开；长按后拖动调整分组顺序（整行就是拖动区，不另画把手）。
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun GroupHeaderRow(
     name: String,
@@ -690,56 +699,46 @@ internal fun GroupHeaderRow(
     dragHandle: Modifier,
     dragging: Boolean,
 ) {
-    // 与设置页分区小标题同一层级：说明字色的小标题，下面紧跟本组的圆角容器。
-    Surface(
-        onClick = onToggle,
-        shape = MokeShapes.control,
-        color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
-        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+    Row(
+        modifier = Modifier
+            .padding(top = 12.dp, bottom = 4.dp)
+            .fillMaxWidth()
+            .clip(MokeShapes.control)
+            .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+            // onLongClick 只用来吞掉长按后的单击（长按交给拖动），否则长按松手会顺带折叠。
+            .combinedClickable(onClick = onToggle, onLongClick = {})
+            .then(dragHandle)
+            .heightIn(min = 36.dp)
+            .padding(start = 16.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp).padding(start = 4.dp),
+            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(
-                if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
-                contentDescription = stringResource(if (collapsed) R.string.group_expand else R.string.group_collapse),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+            Text(
+                name,
+                modifier = Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    name,
-                    modifier = Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    count.toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                )
-            }
-            Box(
-                modifier = dragHandle.size(36.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.DragHandle,
-                    contentDescription = stringResource(R.string.drag_to_reorder),
-                    tint = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
+            Text(
+                count.toString(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+            )
         }
+        Icon(
+            if (collapsed) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+            contentDescription = stringResource(if (collapsed) R.string.group_expand else R.string.group_collapse),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -757,10 +756,12 @@ private fun HostCard(
     dragging: Boolean = false,
     /** 经网络时的网络名，或本地可知的路由问题（错误色）。 */
     routeBadge: BadgeSpec? = null,
+    /** 主机菜单（行尾 ⋮ 与长按原地松手打开的是同一个）。 */
+    menuOpen: Boolean,
+    onMenu: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
-    var menuOpen by remember { mutableStateOf(false) }
     // 副标题一行说清「怎么连」：地址 · 分组 · mosh（SSH 是默认，不标）· 网络（本地可知的问题用错误色）。
     val subtitle = androidx.compose.ui.text.buildAnnotatedString {
         append("${host.username}@${host.host}:${host.port}")
@@ -772,38 +773,40 @@ private fun HostCard(
         }
     }
     ListRow(
+        icon = Icons.Filled.Dns,
         title = host.displayName.ifBlank { stringResource(R.string.unnamed) },
         subtitle = subtitle,
         onClick = onConnect,
+        onLongClick = { onMenu(true) },
         dragHandle = dragHandle,
         dragging = dragging,
     ) {
             Box {
-                IconButton(onClick = { menuOpen = true }) {
+                IconButton(onClick = { onMenu(true) }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenu(false) }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.host_edit)) },
                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                        onClick = { menuOpen = false; onEdit() },
+                        onClick = { onMenu(false); onEdit() },
                     )
                     // 文件：不开会话也能进（主入口仍是终端 ⋮，那里还能带上终端当前目录）。
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.files_open)) },
                         leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                        onClick = { menuOpen = false; onFiles() },
+                        onClick = { onMenu(false); onFiles() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.host_duplicate)) },
                         leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
-                        onClick = { menuOpen = false; onDuplicate() },
+                        onClick = { onMenu(false); onDuplicate() },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.host_copy_command)) },
                         leadingIcon = { Icon(Icons.Filled.Terminal, contentDescription = null) },
                         onClick = {
-                            menuOpen = false
+                            onMenu(false)
                             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             cm.setPrimaryClip(ClipData.newPlainText("moke", host.connectCommand))
                             Toast.makeText(context, resources.getString(R.string.host_copied, host.connectCommand), Toast.LENGTH_SHORT).show()
@@ -813,7 +816,7 @@ private fun HostCard(
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { menuOpen = false; onDelete() },
+                        onClick = { onMenu(false); onDelete() },
                     )
                 }
             }
@@ -882,6 +885,8 @@ private fun SessionsContent(
     }
     fun keyOf(ts: TermSession): String = groupLabels.getValue(ts.id).key
     var editingTitleId by remember { mutableStateOf<String?>(null) }
+    // 长按会话弹出的菜单（修改标题、复制会话）：可拖动时由重排列表判定「长按后原地松手」，所以状态放在这层。
+    var menuFor by remember { mutableStateOf<String?>(null) }
     val manual = sortBy == SortBy.MANUAL
     val cmp = sessionComparator(sortBy)
 
@@ -918,21 +923,25 @@ private fun SessionsContent(
                     key = { it.id },
                     onReorder = { list -> onReorder(list.map { it.id }) },
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    spacing = 0.dp,
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                    spacing = SegmentGap,
+                    onItemHold = { menuFor = it.id },
                 ) { ts, dragging, handle ->
-                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id }, dragHandle = handle, dragging = dragging)
+                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                        menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null }, dragHandle = handle, dragging = dragging)
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
                     val sorted = sessions.sortedWith(cmp)
                     itemsIndexed(sorted, key = { _, it -> it.id }) { index, ts ->
                         CompositionLocalProvider(LocalRowPosition provides RowPosition(index, sorted.size)) {
                             SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
-                                onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id })
+                                onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                                menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null })
                         }
                     }
                 }
@@ -956,8 +965,9 @@ private fun SessionsContent(
                     onReorder(mergeSessionOrder(sessions.map { it.id }, newItems.map { it.id }.filter { it in members }))
                 },
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                spacing = 0.dp,
+                contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
+                spacing = SegmentGap,
+                onItemHold = { menuFor = it.id },
                 header = { group, dragging, handle ->
                     val key = group.key
                     GroupHeaderRow(
@@ -973,6 +983,7 @@ private fun SessionsContent(
                 // 手动排序时组内卡片可拖（接 handle）；创建/更新时间排序时按比较器排、卡片不可拖。
                 SessionCard(
                     ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                    menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null },
                     dragHandle = if (manual) handle else null, dragging = dragging,
                 )
             }
@@ -1011,12 +1022,13 @@ private fun SessionCard(
     onClose: () -> Unit,
     onDuplicate: () -> Unit,
     onTitle: () -> Unit,
+    menuOpen: Boolean,
+    onMenu: (Boolean) -> Unit,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
 ) {
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
-    var menuOpen by remember { mutableStateOf(false) }
     val ended = stringResource(R.string.session_ended_short)
     // 副标题：连接名 · mosh（SSH 是默认，不标）· 已结束。
     val subtitle = androidx.compose.ui.text.AnnotatedString(buildString {
@@ -1027,10 +1039,13 @@ private fun SessionCard(
     // 行上只留最常用的「关闭」；修改标题、复制会话收进长按菜单（单击仍是进入会话）。
     Box {
         ListRow(
+            icon = Icons.Filled.Terminal,
+            // 已结束的会话图标退成淡色，一眼区分还连着的。
+            iconTint = if (alive) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
             title = title,
             subtitle = subtitle,
             onClick = onOpen,
-            onLongClick = { menuOpen = true },
+            onLongClick = { onMenu(true) },
             dragHandle = dragHandle,
             dragging = dragging,
         ) {
@@ -1038,17 +1053,17 @@ private fun SessionCard(
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenu(false) }) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.session_set_title)) },
                 leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                onClick = { menuOpen = false; onTitle() },
+                onClick = { onMenu(false); onTitle() },
             )
             // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题并加不重复标记。
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.duplicate_session)) },
                 leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
-                onClick = { menuOpen = false; onDuplicate() },
+                onClick = { onMenu(false); onDuplicate() },
             )
         }
     }
@@ -1090,7 +1105,7 @@ private fun SettingsMenuContent(
     }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
         // 而不是继续往这一屏平铺（那样很快就乱）。

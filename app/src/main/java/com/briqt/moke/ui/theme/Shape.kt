@@ -23,8 +23,9 @@ object MokeShapes {
     /** 可点的轻量面：标题栏下拉胶囊、分组头、弹窗选项行。 */
     val control = RoundedCornerShape(8.dp)
 
-    /** 卡片 / 设置入口行 / 预览框。 */
-    val card = RoundedCornerShape(12.dp)
+    /** 卡片、分段列表一组的外沿、预览框（Android 16 系统设置的分组圆角）。 */
+    val cardRadius = 16.dp
+    val card = RoundedCornerShape(cardRadius)
 
     /** 朱砂小印（角标、更新提示）：实心方块，圆角很小，与启动图标的印同形。 */
     val seal = RoundedCornerShape(2.dp)

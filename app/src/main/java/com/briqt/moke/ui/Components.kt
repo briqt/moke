@@ -11,11 +11,8 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.ui.theme.MokeMono
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +24,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.Arrangement
@@ -37,8 +33,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.net.RecoveryKind
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -124,68 +118,62 @@ fun fontCapabilityBadges(
 }
 
 /**
- * 设置分组：把相邻的 [NavRow] / [SwitchRow] 收进一张卡片，行与行之间是 1dp 细线。
- * 实现上分组底色取细线色、每行铺卡片色、行间留 1dp 缝，缝就是分隔线——行不必知道自己是不是第一行。
+ * 分段列表的尺寸（Android 16 系统设置同款）：同组的行各是一块表面色，行间留 [SegmentGap] 露出页面底色当分隔，
+ * 整组外沿是 [MokeShapes.card] 的大圆角、组内拐角是直角；没有描边、没有分隔线。
+ * 设置、主机、会话三处列表都用这一套，行的版式也一致：左图标 + 标题（16sp 常规）/副标题（14sp 说明色）+ 行尾控件。
  */
+val SegmentGap = 2.dp
+private val RowIconTextGap = 16.dp
+private val RowMinHeight = 56.dp
+
+/** 设置分组：把相邻的 [NavRow] / [SwitchRow] 收成一组分段列表（见 [SegmentGap]）。 */
 @Composable
 fun SettingsGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MokeShapes.card,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.outlineVariant),
-        border = cardBorder(),
-    ) {
-        CompositionLocalProvider(LocalInSettingsGroup provides true) {
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp), content = content)
-        }
+    CompositionLocalProvider(LocalInSettingsGroup provides true) {
+        Column(
+            modifier = modifier.fillMaxWidth().clip(MokeShapes.card),
+            verticalArrangement = Arrangement.spacedBy(SegmentGap),
+            content = content,
+        )
     }
 }
 
 private val LocalInSettingsGroup = staticCompositionLocalOf { false }
 
-/** 设置行外壳：在 [SettingsGroup] 里是一条平铺的行，单独使用时自带卡片。两种情况行高、内边距一致。 */
+/** 设置行外壳：在 [SettingsGroup] 里是一段，单独使用时自成一块圆角面。两种情况行高、内边距一致。 */
 @Composable
 private fun SettingsRowShell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val rowModifier = Modifier
-        .fillMaxWidth()
-        .heightIn(min = 56.dp)
-        .clickable(onClick = onClick)
-        .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
-    if (LocalInSettingsGroup.current) {
-        Row(
-            modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).then(rowModifier),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
-        )
-    } else {
-        Card(
-            modifier = modifier.fillMaxWidth(),
-            shape = MokeShapes.card,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = cardBorder(),
-        ) {
-            Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically, content = content)
-        }
-    }
+    val shape = if (LocalInSettingsGroup.current) androidx.compose.ui.graphics.RectangleShape else MokeShapes.card
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .heightIn(min = RowMinHeight)
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
 }
 
 @Composable
 private fun RowScope.SettingsRowText(title: String, subtitle: String) {
-    Column(modifier = Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+    Column(modifier = Modifier.weight(1f).padding(start = RowIconTextGap, end = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
         if (subtitle.isNotEmpty()) {
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 /**
- * 统一「设置入口行」：图标 + 标题 + 副标题 + 右向箭头，整行可点。
- * 箭头用 auto-mirror 图标（可随 RTL 镜像）。放进 [SettingsGroup] 时与相邻行共用一张卡片。
+ * 统一「设置入口行」：图标 + 标题 + 副标题，整行可点。与系统设置一样不画行尾箭头。
+ * 放进 [SettingsGroup] 时是组里的一段。
  */
 @Composable
 fun NavRow(
@@ -194,18 +182,13 @@ fun NavRow(
     subtitle: String = "",
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    /** 右侧箭头前点一方朱砂小印（用于"远端有更新"这类无打扰提示）。 */
+    /** 行尾点一方朱砂小印（用于"远端有更新"这类无打扰提示）。 */
     showDot: Boolean = false,
 ) {
     SettingsRowShell(onClick = onClick, modifier = modifier) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsRowText(title, subtitle)
-        if (showDot) Dot(modifier = Modifier.padding(end = 6.dp))
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (showDot) Dot()
     }
 }
 
@@ -419,7 +402,7 @@ fun Dot(modifier: Modifier = Modifier, size: Dp = 8.dp) {
     )
 }
 
-/** 卡片细线：页面底与卡片只差一档墨色，不用阴影，靠 1px 细线分层。 */
+/** 浮层细线：只给浮在终端上的面板（附加键全键盘）用，页面里的卡片和列表靠底色分层、不描边。 */
 @Composable
 fun cardBorder(): BorderStroke = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
 
@@ -476,81 +459,70 @@ fun Modifier.bottomHairline(): Modifier {
     }
 }
 
+/** 分段列表里一行的外形：组的首行圆上角、末行圆下角、只有一行四角全圆，中间行直角；拖起来的行四角全圆。 */
+@Composable
+fun segmentShape(pos: RowPosition, lifted: Boolean = false): androidx.compose.ui.graphics.Shape {
+    val r = MokeShapes.cardRadius
+    return when {
+        lifted || (pos.first && pos.last) -> MokeShapes.card
+        pos.first -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = r, topEnd = r)
+        pos.last -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = r, bottomEnd = r)
+        else -> androidx.compose.ui.graphics.RectangleShape
+    }
+}
+
 /**
- * 分组列表行（主机、会话）：和设置页同一套样式——同组的行合成一个圆角容器（表面底 + 1px 细线），
- * 组内用同色 1px 线分隔，没有一行一张的卡片，也没有行间空隙。行在组内的位置由 [LocalRowPosition] 给出。
- * 标题 15sp、副标题 12sp：列表标题是主机名、终端标题这类长数据，比设置项文字小一档才不显突兀。
- * 长按只挂在文字列上：拖动把手有自己的长按手势，两者不能叠在同一块区域。
+ * 主机、会话列表的一行：与设置行同一版式（见 [SegmentGap]）。行在组内的位置由 [LocalRowPosition] 给出。
+ *
+ * 可拖动时（[dragHandle] 非空）整行就是拖动区：长按后移动是拖动排序，长按后原地松手由列表回调弹出菜单；
+ * 这时行自己的长按只用来吞掉长按后的单击。不可拖时长按直接调 [onLongClick]。
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ListRow(
+    icon: ImageVector,
     title: String,
     subtitle: androidx.compose.ui.text.AnnotatedString?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     onLongClick: (() -> Unit)? = null,
     dragHandle: Modifier? = null,
     dragging: Boolean = false,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
-    val pos = LocalRowPosition.current
-    val r = 12.dp
-    val shape = when {
-        dragging || (pos.first && pos.last) -> androidx.compose.foundation.shape.RoundedCornerShape(r)
-        pos.first -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = r, topEnd = r)
-        pos.last -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = r, bottomEnd = r)
-        else -> androidx.compose.ui.graphics.RectangleShape
-    }
-    val line = MaterialTheme.colorScheme.outlineVariant
-    val closesBottom = dragging || pos.last
+    val shape = segmentShape(LocalRowPosition.current, lifted = dragging)
+    val longClick: (() -> Unit)? = if (dragHandle != null) ({}) else onLongClick
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (dragging) Modifier.shadow(6.dp, shape) else Modifier)
             .clip(shape)
             .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onClick)
-            .drawWithContent {
-                drawContent()
-                // 沿容器外形描 1px（描边宽 2px、外半被裁掉）；不是组内最后一行就不画下沿，由下一行的上沿充当分隔线。
-                val w = 1.dp.toPx()
-                val outline = shape.createOutline(size, layoutDirection, this)
-                clipRect(bottom = if (closesBottom) size.height else size.height - w) {
-                    drawOutline(outline, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2 * w))
-                }
-            }
-            .heightIn(min = 56.dp)
-            .padding(start = if (dragHandle != null) 4.dp else 16.dp, end = 4.dp),
+            .then(
+                if (longClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = longClick)
+                else Modifier.clickable(onClick = onClick)
+            )
+            // 拖动检测要排在点击之后（更靠内，先拿到事件）：点击的长按判定一触发就吞掉后续事件，排在前面拖动就收不到。
+            .then(dragHandle ?: Modifier)
+            .heightIn(min = RowMinHeight)
+            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (dragHandle != null) {
-            Box(modifier = dragHandle.size(44.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Filled.DragHandle,
-                    contentDescription = stringResource(R.string.drag_to_reorder),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
+        Icon(icon, contentDescription = null, tint = iconTint)
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .then(if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick) else Modifier)
-                .padding(start = if (dragHandle != null) 4.dp else 0.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(1.dp),
+            modifier = Modifier.weight(1f).padding(start = RowIconTextGap, end = 4.dp),
         ) {
             Text(
                 title,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) Text(
                 subtitle,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -630,10 +602,9 @@ fun SliderSettingRow(
         Text(
             title,
             style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
-            modifier = Modifier.padding(start = 16.dp, end = 4.dp).widthIn(min = 52.dp),
+            modifier = Modifier.padding(start = RowIconTextGap, end = 4.dp).widthIn(min = 52.dp),
         )
         androidx.compose.material3.IconButton(onClick = onMinus, modifier = Modifier.size(32.dp)) {
             Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), modifier = Modifier.size(18.dp))

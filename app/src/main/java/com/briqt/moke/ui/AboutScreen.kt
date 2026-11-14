@@ -212,7 +212,6 @@ private fun PitchCard(onFeedback: () -> Unit, onShare: () -> Unit, modifier: Mod
     Card(
         shape = MokeShapes.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = cardBorder(),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
