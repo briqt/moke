@@ -220,6 +220,8 @@
     <string name="cursor_block">方块</string>
     <string name="cursor_underline">下划线</string>
     <string name="cursor_bar">竖线</string>
+    <string name="cursor_style">光标样式</string>
+    <string name="host_more_options">更多选项</string>
     <string name="cursor_blink">光标闪烁</string>
     <string name="reset_done">已恢复默认</string>
     <string name="fallback_none">无</string>

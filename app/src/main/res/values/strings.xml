@@ -226,6 +226,8 @@
     <string name="cursor_block">Block</string>
     <string name="cursor_underline">Underline</string>
     <string name="cursor_bar">Bar</string>
+    <string name="cursor_style">Cursor style</string>
+    <string name="host_more_options">More options</string>
     <string name="cursor_blink">Cursor blink</string>
     <string name="reset_done">Reset to defaults</string>
     <string name="fallback_none">None</string>

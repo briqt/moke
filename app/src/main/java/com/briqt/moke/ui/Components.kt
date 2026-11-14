@@ -11,6 +11,9 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.ui.theme.MokeMono
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -43,6 +46,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -459,5 +470,186 @@ fun Modifier.bottomHairline(): Modifier {
     return drawBehind {
         val y = size.height - 0.5.dp.toPx()
         drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    }
+}
+
+/**
+ * 平铺列表行（主机、会话）：不做卡片——没有底色和描边，行直接落在页面底上，只在下沿画一条从文字起点
+ * 开始的细线。标题与副标题合成一个整体垂直居中，把手和尾部按钮都对齐这个整体的中线。
+ * 长按只挂在文字列上：拖动把手有自己的长按手势，两者不能叠在同一块区域。
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun ListRow(
+    title: String,
+    subtitle: androidx.compose.ui.text.AnnotatedString?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    dragHandle: Modifier? = null,
+    dragging: Boolean = false,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    val line = MaterialTheme.colorScheme.outlineVariant
+    val textStart = if (dragHandle != null) 48.dp else 16.dp
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick)
+            .drawBehind {
+                if (!dragging) {
+                    val y = size.height - 0.5.dp.toPx()
+                    drawLine(line, Offset(textStart.toPx(), y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+                }
+            }
+            .heightIn(min = 64.dp)
+            .padding(start = if (dragHandle != null) 0.dp else 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (dragHandle != null) {
+            Box(modifier = dragHandle.size(48.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Filled.DragHandle,
+                    contentDescription = stringResource(R.string.drag_to_reorder),
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .then(if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick) else Modifier)
+                .padding(vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        trailing()
+    }
+}
+
+/** 右沿 1px 细线（侧边导航栏与内容分界）。 */
+@Composable
+fun Modifier.endHairline(): Modifier {
+    val color = MaterialTheme.colorScheme.outlineVariant
+    return drawBehind {
+        val x = size.width - 0.5.dp.toPx()
+        drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1.dp.toPx())
+    }
+}
+
+/**
+ * 设置行式下拉：与 [NavRow] 同高同排版，当前值靠右显示，点整行在行下展开选项（选项排版同 [RichDropdown]）。
+ * 设置页里用它代替带浮动标签的方框下拉——后者高一截、又是另一种样式，夹在分组行之间显得乱。
+ */
+@Composable
+fun DropdownSettingRow(
+    icon: ImageVector,
+    title: String,
+    options: List<DropdownOption>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+    missingTitle: String = "—",
+) {
+    var open by remember { mutableStateOf(false) }
+    val selected = options.firstOrNull { it.id == selectedId }
+    Box {
+        SettingsRowShell(onClick = { open = true }) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingsRowText(title, "")
+            Text(
+                selected?.title ?: missingTitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 168.dp),
+            )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { opt ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { OptionRow(opt) },
+                    onClick = { onSelect(opt.id); open = false },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 设置行式数值滑块：名称、−、滑块、+、当前值在一行（与其它设置行同高）。滑块快调（离散步进），± 单档精调。
+ */
+@Composable
+fun SliderSettingRow(
+    icon: ImageVector,
+    title: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValue: (Float) -> Unit,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+) {
+    SettingsRowShell(onClick = {}) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp).widthIn(min = 52.dp),
+        )
+        androidx.compose.material3.IconButton(onClick = onMinus, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), modifier = Modifier.size(18.dp))
+        }
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+            androidx.compose.material3.Slider(
+                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+                onValueChange = onValue,
+                valueRange = valueRange,
+                steps = steps,
+                // 墨色滑块：滑钮是正文墨，已走过的轨道退一档，刻度点不画（字号有 30 多档，点会连成一串）。
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.onSurface,
+                    activeTrackColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    activeTickColor = androidx.compose.ui.graphics.Color.Transparent,
+                    inactiveTickColor = androidx.compose.ui.graphics.Color.Transparent,
+                ),
+                modifier = Modifier.weight(1f).height(32.dp),
+            )
+        }
+        androidx.compose.material3.IconButton(onClick = onPlus, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), modifier = Modifier.size(18.dp))
+        }
+        Text(
+            valueText,
+            fontFamily = com.briqt.moke.ui.theme.MokeMono,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.widthIn(min = 36.dp),
+        )
     }
 }

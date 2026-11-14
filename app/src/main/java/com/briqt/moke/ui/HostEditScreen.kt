@@ -1,5 +1,13 @@
 package com.briqt.moke.ui
 
+import androidx.compose.foundation.layout.size
+
+import androidx.compose.foundation.layout.width
+
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -205,18 +213,21 @@ fun HostEditScreen(
     ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                .verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Column(modifier = Modifier.editorTarget(targets[7])) {
                 failure?.let { InfoNote(stringResource(R.string.store_save_failed) + "\n" + stringResource(storeFailureMessage(it)), error = true) }
                 if (hostStoreState == ListState.Unreadable) InfoNote(stringResource(R.string.hosts_unreadable_title), error = true)
             }
-            FormTextField(label, { label = it }, stringResource(R.string.field_name), enabled = !submitting)
-            EditableDropdownField(
-                label = stringResource(R.string.field_group), value = group, onValueChange = { if (!submitting) group = it },
-                options = loadedHosts.mapNotNull { it.group.trim().ifEmpty { null } }.distinct().sorted(), modifier = Modifier.fillMaxWidth(),
-            )
+            // 名称与分组都短，并排放一行（同类表单的通行做法），省出一整行。
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FormTextField(label, { label = it }, stringResource(R.string.field_name), enabled = !submitting, modifier = Modifier.weight(1f))
+                EditableDropdownField(
+                    label = stringResource(R.string.field_group), value = group, onValueChange = { if (!submitting) group = it },
+                    options = loadedHosts.mapNotNull { it.group.trim().ifEmpty { null } }.distinct().sorted(), modifier = Modifier.weight(1f),
+                )
+            }
             if (jumpOptions.size > 1 || jumpHostId.isNotEmpty()) {
                 Column(modifier = Modifier.editorTarget(targets[4])) {
                     RichDropdown(label = stringResource(R.string.field_jump_host), options = jumpOptions, selectedId = jumpHostId,
@@ -258,10 +269,13 @@ fun HostEditScreen(
                 }
                 InfoNote(stringResource(R.string.network_via_jump, jumpHost.displayName, via))
             }
-            FormTextField(host, { host = it }, stringResource(R.string.field_host), error = hostError, submitted = submitted,
-                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[0]))
-            FormTextField(port, { port = it }, stringResource(R.string.field_port), error = portError, submitted = submitted,
-                enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[1]))
+            // 地址与端口并排：端口只有几位数，独占一行是浪费。
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FormTextField(host, { host = it }, stringResource(R.string.field_host), error = hostError, submitted = submitted,
+                    enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next), modifier = Modifier.weight(1f).editorTarget(targets[0]))
+                FormTextField(port, { port = it }, stringResource(R.string.field_port), error = portError, submitted = submitted,
+                    enabled = !submitting, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next), modifier = Modifier.width(96.dp).editorTarget(targets[1]))
+            }
             FormTextField(username, { username = it }, stringResource(R.string.field_username), error = usernameError, submitted = submitted,
                 enabled = !submitting, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), modifier = Modifier.editorTarget(targets[2]))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -308,6 +322,14 @@ fun HostEditScreen(
                 DropdownOption(SessionPersistence.NONE.name, stringResource(R.string.persistence_none)),
                 DropdownOption(SessionPersistence.TMUX.name, stringResource(R.string.persistence_tmux))),
                 selectedId = persistence.name, onSelect = { persistence = SessionPersistence.valueOf(it) }, enabled = !submitting)
+            // 不常用的放进「更多选项」：默认收起，填过内容或有待改的错误时自动展开。
+            var moreOpen by remember(base.id) { mutableStateOf(startupCommand.isNotBlank() || loginCommand.isNotBlank() || forwardPorts.isNotBlank()) }
+            val showMore = moreOpen || (submitted && errors[6] != null)
+            TextButton(onClick = { moreOpen = !showMore }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                Text(stringResource(R.string.host_more_options))
+                Icon(if (showMore) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            if (showMore) {
             FormTextField(startupCommand, { startupCommand = it }, stringResource(R.string.field_startup_command),
                 enabled = !submitting && persistence != SessionPersistence.TMUX,
                 hint = stringResource(if (persistence == SessionPersistence.TMUX) R.string.startup_command_tmux_note else R.string.startup_command_hint))
@@ -315,6 +337,7 @@ fun HostEditScreen(
                 hint = stringResource(R.string.login_command_hint), singleLine = false, maxLines = 6)
             FormTextField(forwardPorts, { forwardPorts = it }, stringResource(R.string.field_forward_ports), enabled = !submitting,
                 error = errors[6], submitted = submitted, hint = stringResource(R.string.field_forward_ports_hint), modifier = Modifier.editorTarget(targets[6]))
+            }
             if (host.isNotBlank()) {
                 TextButton(onClick = { confirmFingerprint = fingerprintTarget }, enabled = fingerprintTarget != null && fingerprint != null && !fingerprintCleared && !submitting, contentPadding = PaddingValues(0.dp)) {
                     Text(stringResource(R.string.hostkey_clear))

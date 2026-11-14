@@ -20,13 +20,21 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.FontDownload
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Timelapse
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.FormatLineSpacing
+import androidx.compose.material.icons.filled.SpaceBar
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -283,29 +291,36 @@ fun AppearanceScreen(
                 }
 
                 SectionHeader(stringResource(R.string.section_font))
-                RichDropdown(
-                    label = stringResource(R.string.primary_font),
-                    options = primaryOptions,
-                    selectedId = primaryFontId,
-                    onSelect = onSelectPrimary,
-                )
-                RichDropdown(
-                    label = stringResource(R.string.fallback_font),
-                    options = fallbackOptions,
-                    selectedId = fallbackFontId,
-                    onSelect = onSelectFallback,
-                )
-                // 常驻入口：进入字体管理下载/上传/设角色（与设置菜单同款 NavRow）。
-                NavRow(
-                    icon = Icons.Filled.FontDownload,
-                    title = stringResource(R.string.font_manage_title),
-                    onClick = onOpenFonts,
-                )
+                // 字体、排版都用与设置一级页同款的分组行：一样的行高与对齐，当前值靠右。
+                SettingsGroup {
+                    DropdownSettingRow(
+                        icon = Icons.Filled.TextFields,
+                        title = stringResource(R.string.primary_font),
+                        options = primaryOptions,
+                        selectedId = primaryFontId,
+                        onSelect = onSelectPrimary,
+                    )
+                    DropdownSettingRow(
+                        icon = Icons.Filled.Translate,
+                        title = stringResource(R.string.fallback_font),
+                        options = fallbackOptions,
+                        selectedId = fallbackFontId,
+                        onSelect = onSelectFallback,
+                    )
+                    // 常驻入口：进入字体管理下载/上传/设角色。
+                    NavRow(
+                        icon = Icons.Filled.FontDownload,
+                        title = stringResource(R.string.font_manage_title),
+                        onClick = onOpenFonts,
+                    )
+                }
 
                 SectionHeader(stringResource(R.string.section_typography))
                 // 字号 0.5 步进；行距/字距 0.1 步进。滑块快调 + ± 精调。
-                SliderRow(
-                    label = stringResource(R.string.font_size),
+                SettingsGroup {
+                SliderSettingRow(
+                    icon = Icons.Filled.FormatSize,
+                    title = stringResource(R.string.font_size),
                     valueText = fmtFontSize(fontSizeSp),
                     value = fontSizeSp,
                     valueRange = 8f..24f,
@@ -314,8 +329,9 @@ fun AppearanceScreen(
                     onMinus = { onFontSize(fontSizeSp - 0.5f) },
                     onPlus = { onFontSize(fontSizeSp + 0.5f) },
                 )
-                SliderRow(
-                    label = stringResource(R.string.line_spacing),
+                SliderSettingRow(
+                    icon = Icons.Filled.FormatLineSpacing,
+                    title = stringResource(R.string.line_spacing),
                     valueText = String.format("%.1f", lineSpacing),
                     value = lineSpacing,
                     valueRange = 0.7f..1.3f,
@@ -324,8 +340,9 @@ fun AppearanceScreen(
                     onMinus = { onLineSpacing((lineSpacing - 0.1f).coerceIn(0.7f, 1.3f)) },
                     onPlus = { onLineSpacing((lineSpacing + 0.1f).coerceIn(0.7f, 1.3f)) },
                 )
-                SliderRow(
-                    label = stringResource(R.string.letter_spacing),
+                SliderSettingRow(
+                    icon = Icons.Filled.SpaceBar,
+                    title = stringResource(R.string.letter_spacing),
                     valueText = String.format("%.1f", letterSpacing),
                     value = letterSpacing,
                     valueRange = 0.7f..1.3f,
@@ -334,53 +351,52 @@ fun AppearanceScreen(
                     onMinus = { onLetterSpacing((letterSpacing - 0.1f).coerceIn(0.7f, 1.3f)) },
                     onPlus = { onLetterSpacing((letterSpacing + 0.1f).coerceIn(0.7f, 1.3f)) },
                 )
+                }
 
                 SectionHeader(stringResource(R.string.section_colors))
-                // 联动开启后拆成两套（深色用 / 浅色用），关闭时只有一套——避免平时多摆一个用不上的下拉。
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(stringResource(R.string.scheme_follows_theme), color = MaterialTheme.colorScheme.onSurface)
-                    }
-                    Switch(checked = schemeFollowsTheme, onCheckedChange = onSchemeFollowsTheme)
-                }
-                RichDropdown(
-                    label = stringResource(
-                        if (schemeFollowsTheme) R.string.color_scheme_dark else R.string.color_scheme
-                    ),
-                    options = schemeOptions,
-                    selectedId = schemeId,
-                    onSelect = onSelectScheme,
-                )
-                if (schemeFollowsTheme) {
-                    RichDropdown(
-                        label = stringResource(R.string.color_scheme_light),
-                        options = schemeOptions,
-                        selectedId = lightSchemeId,
-                        onSelect = onSelectLightScheme,
+                // 联动开启后拆成两套（深色用 / 浅色用），关闭时只有一套——避免平时多摆一个用不上的选项。
+                SettingsGroup {
+                    SwitchRow(
+                        icon = Icons.Filled.Contrast,
+                        title = stringResource(R.string.scheme_follows_theme),
+                        checked = schemeFollowsTheme,
+                        onCheckedChange = onSchemeFollowsTheme,
                     )
+                    DropdownSettingRow(
+                        icon = if (schemeFollowsTheme) Icons.Filled.DarkMode else Icons.Filled.Palette,
+                        title = stringResource(if (schemeFollowsTheme) R.string.color_scheme_dark else R.string.color_scheme),
+                        options = schemeOptions,
+                        selectedId = schemeId,
+                        onSelect = onSelectScheme,
+                    )
+                    if (schemeFollowsTheme) {
+                        DropdownSettingRow(
+                            icon = Icons.Filled.LightMode,
+                            title = stringResource(R.string.color_scheme_light),
+                            options = schemeOptions,
+                            selectedId = lightSchemeId,
+                            onSelect = onSelectLightScheme,
+                        )
+                    }
                 }
 
                 SectionHeader(stringResource(R.string.section_cursor))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        stringResource(R.string.cursor_block),
-                        stringResource(R.string.cursor_underline),
-                        stringResource(R.string.cursor_bar),
-                    ).forEachIndexed { i, label ->
-                        FilterChip(selected = cursorStyle == i, onClick = { onCursorStyle(i) }, label = { Text(label) })
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(stringResource(R.string.cursor_blink), color = MaterialTheme.colorScheme.onSurface)
-                    Switch(checked = cursorBlink, onCheckedChange = onCursorBlink)
+                val cursorOptions = listOf(R.string.cursor_block, R.string.cursor_underline, R.string.cursor_bar)
+                    .mapIndexed { i, res -> DropdownOption(i.toString(), stringResource(res)) }
+                SettingsGroup {
+                    DropdownSettingRow(
+                        icon = Icons.Filled.TextFields,
+                        title = stringResource(R.string.cursor_style),
+                        options = cursorOptions,
+                        selectedId = cursorStyle.toString(),
+                        onSelect = { onCursorStyle(it.toInt()) },
+                    )
+                    SwitchRow(
+                        icon = Icons.Filled.Timelapse,
+                        title = stringResource(R.string.cursor_blink),
+                        checked = cursorBlink,
+                        onCheckedChange = onCursorBlink,
+                    )
                 }
             }
             }
@@ -399,56 +415,6 @@ private fun SectionHeader(text: String) {
     )
 }
 
-/**
- * 数值滑块行：标题 + 当前值在上，滑块 + 两侧 ± 精调在下。
- * 滑块快调（离散步进 [steps]），± 做单档精调（字号 0.5 / 行距字距 0.1）。
- */
-@Composable
-private fun SliderRow(
-    label: String,
-    valueText: String,
-    value: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    onValue: (Float) -> Unit,
-    onMinus: () -> Unit,
-    onPlus: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(label, color = MaterialTheme.colorScheme.onSurface)
-            Text(valueText, fontFamily = MokeMono, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        // 压扁滑块行：± 按钮 34dp、图标 18dp，滑块限高 36dp——不再"超级大"，与页面其它控件协调。
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onMinus, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.decrease), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
-            }
-            Slider(
-                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-                onValueChange = onValue,
-                valueRange = valueRange,
-                steps = steps,
-                // 墨色滑块：滑钮是正文墨，已走过的轨道退一档到说明字色，刻度点不画（字号有 20 多档，点会连成一串）。
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.onSurface,
-                    activeTrackColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    activeTickColor = Color.Transparent,
-                    inactiveTickColor = Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f).height(36.dp),
-            )
-            IconButton(onClick = onPlus, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
-            }
-        }
-    }
-}
 
 /** 配色前导：5 个小色块（背景 / 红 / 绿 / 蓝 / 前景）。 */
 @Composable

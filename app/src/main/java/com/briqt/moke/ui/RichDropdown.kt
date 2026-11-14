@@ -153,7 +153,7 @@ fun EditableDropdownField(
 }
 
 @Composable
-private fun OptionRow(opt: DropdownOption) {
+internal fun OptionRow(opt: DropdownOption) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,

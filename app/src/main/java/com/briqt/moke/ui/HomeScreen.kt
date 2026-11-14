@@ -18,6 +18,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -257,7 +262,36 @@ fun HomeScreen(
         }
     }
 
+    // 宽屏（横屏手机、平板）用侧边导航栏，把纵向空间全留给内容；竖屏用矮版底栏（64dp）。Material 的标准自适应做法。
+    val useRail = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+    val navTabs = listOf(
+        NavSpec(HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, false),
+        NavSpec(HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, false),
+        // 有新版时给「设置」tab 点一方朱砂小印（顺着分组一路指到「关于」）。
+        NavSpec(HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, updateInfo != null),
+    )
+    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    if (useRail) {
+        androidx.compose.material3.NavigationRail(
+            modifier = Modifier.endHairline(),
+            containerColor = MaterialTheme.colorScheme.background,
+        ) {
+            Spacer(Modifier.weight(1f))
+            navTabs.forEach { spec ->
+                androidx.compose.material3.NavigationRailItem(
+                    selected = tab == spec.tab,
+                    onClick = { onTab(spec.tab) },
+                    icon = { NavIcon(spec) },
+                    label = { Text(spec.label, maxLines = 1) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+        }
+    }
     Scaffold(
+        modifier = Modifier.weight(1f).then(
+            if (useRail) Modifier.consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Start)) else Modifier
+        ),
         topBar = {
             TopAppBar(
                 title = {
@@ -286,23 +320,25 @@ fun HomeScreen(
                         HomeTab.Settings -> {}
                     }
                 },
-                // 略压高度（默认 64 → 49，较原 56 再收约 1/8）扩大可见区；标题在栏内垂直居中，收窄自然把上/下间距平分。
+                // 44dp（与 iOS 导航栏同高）：一行标题加 48dp 触控按钮已够；标题在栏内垂直居中。
                 expandedHeight = MokeDimens.topBarHeight,
                 colors = mokeTopBarColors(),
             )
         },
         bottomBar = {
-            // 标准 M3 NavigationBar：默认高度 + 官方 label 槽 + 选中态药丸指示器（此前自绘的紧凑样式
-            // 被反馈"不像 Material"）。仅保留 surface 底色以贴合墨客表面阶梯。
-            NavigationBar(
+            // Material 3 的矮版底栏（64dp，标准 80dp 的上下留白对三个入口是浪费）；仍是官方组件与选中药丸。
+            if (!useRail) androidx.compose.material3.ShortNavigationBar(
                 modifier = Modifier.topHairline(),
                 containerColor = MaterialTheme.colorScheme.background,
-                tonalElevation = 0.dp,
             ) {
-                NavItem(tab, HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, onTab)
-                NavItem(tab, HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, onTab)
-                // 有新版时给「设置」tab 点一方朱砂小印（顺着分组一路指到「关于」）。
-                NavItem(tab, HomeTab.Settings, Icons.Filled.Settings, stringResource(R.string.nav_settings), null, onTab, dot = updateInfo != null)
+                navTabs.forEach { spec ->
+                    androidx.compose.material3.ShortNavigationBarItem(
+                        selected = tab == spec.tab,
+                        onClick = { onTab(spec.tab) },
+                        icon = { NavIcon(spec) },
+                        label = { Text(spec.label, maxLines = 1) },
+                    )
+                }
             }
         },
         floatingActionButton = {
@@ -331,6 +367,7 @@ fun HomeScreen(
                 )
             }
         }
+    }
     }
 
     pendingDeleteHost?.let { host ->
@@ -383,35 +420,20 @@ fun HomeScreen(
     }
 }
 
+private data class NavSpec(val tab: HomeTab, val icon: ImageVector, val label: String, val count: Int?, val dot: Boolean)
+
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.NavItem(
-    current: HomeTab,
-    target: HomeTab,
-    icon: ImageVector,
-    label: String,
-    count: Int?,
-    onTab: (HomeTab) -> Unit,
-    dot: Boolean = false,
-) {
-    val selected = current == target
-    // 标准 M3 用法：icon 槽放图标（会话数用 Badge 表达）、label 槽放文字，选中态由默认药丸指示器体现。
-    NavigationBarItem(
-        selected = selected,
-        onClick = { onTab(target) },
-        icon = {
-            when {
-                // 计数用中性小方块；「有新版」用朱砂小印（M3 Badge 默认是 error 色，那语义是"出错/警告"）。
-                count != null -> BadgedBox(badge = { CountBadge(count.toString()) }) {
-                    Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
-                }
-                dot -> BadgedBox(badge = { Dot(size = 7.dp) }) {
-                    Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
-                }
-                else -> Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
-            }
-        },
-        label = { Text(label, maxLines = 1) },
-    )
+private fun NavIcon(spec: NavSpec) {
+    when {
+        // 计数用中性小方块；「有新版」用朱砂小印（M3 Badge 默认是 error 色，那语义是"出错/警告"）。
+        spec.count != null -> BadgedBox(badge = { CountBadge(spec.count.toString()) }) {
+            Icon(spec.icon, contentDescription = spec.label, modifier = Modifier.size(24.dp))
+        }
+        spec.dot -> BadgedBox(badge = { Dot(size = 7.dp) }) {
+            Icon(spec.icon, contentDescription = spec.label, modifier = Modifier.size(24.dp))
+        }
+        else -> Icon(spec.icon, contentDescription = spec.label, modifier = Modifier.size(24.dp))
+    }
 }
 
 // ---------- 连接 ----------
@@ -503,10 +525,10 @@ private fun ConnectionsContent(
     val fabOverlap = fabTop?.let { top ->
         with(density) { (listBottom - top).coerceAtLeast(0f).toDp() }
     } ?: 0.dp
-    val listPadding = PaddingValues(top = 12.dp, bottom = 12.dp + fabOverlap)
+    val listPadding = PaddingValues(top = 4.dp, bottom = 12.dp + fabOverlap)
     val listModifier = Modifier.fillMaxSize().onGloballyPositioned { listBottom = it.boundsInRoot().bottom }
 
-    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
         if (!hasNamedGroup) {
             // 一台主机都没设分组 → 退化成无分组头的平铺列表，仍可长按拖动重排。
             ReorderableColumn(
@@ -515,6 +537,7 @@ private fun ConnectionsContent(
                 onReorder = onReorderHosts,
                 modifier = listModifier,
                 contentPadding = listPadding,
+                spacing = 0.dp,
             ) { host, dragging, handle ->
                 HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host))
             }
@@ -533,6 +556,7 @@ private fun ConnectionsContent(
                 },
                 modifier = listModifier,
                 contentPadding = listPadding,
+                spacing = 0.dp,
                 header = { group, dragging, handle ->
                     val key = group.key
                     GroupHeaderRow(
@@ -666,7 +690,7 @@ internal fun GroupHeaderRow(
         color = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -728,50 +752,23 @@ private fun HostCard(
     val context = LocalContext.current
     val resources = LocalResources.current
     var menuOpen by remember { mutableStateOf(false) }
-    Card(
-        modifier = Modifier.fillMaxWidth().clip(CardDefaults.shape).clickable(onClick = onConnect),
-        colors = CardDefaults.cardColors(
-            containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
-        ),
-        border = if (dragging) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else cardBorder(),
+    // 副标题一行说清「怎么连」：地址 · 分组 · mosh（SSH 是默认，不标）· 网络（本地可知的问题用错误色）。
+    val subtitle = androidx.compose.ui.text.buildAnnotatedString {
+        append("${host.username}@${host.host}:${host.port}")
+        if (host.group.isNotBlank() && showGroup) append(" · ${host.group}")
+        if (host.useMosh) append(" · mosh")
+        routeBadge?.let { route ->
+            append(" · ")
+            pushStyle(androidx.compose.ui.text.SpanStyle(color = route.color)); append(route.text); pop()
+        }
+    }
+    ListRow(
+        title = host.displayName.ifBlank { stringResource(R.string.unnamed) },
+        subtitle = subtitle,
+        onClick = onConnect,
+        dragHandle = dragHandle,
+        dragging = dragging,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (dragHandle != null) {
-                Box(modifier = dragHandle) {
-                    Icon(
-                        Icons.Filled.DragHandle,
-                        contentDescription = stringResource(R.string.drag_to_reorder),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
-                }
-            }
-            // 固定两行：名称行带路由与协议徽标，地址行单行省略——经网络的主机与直连主机一样高，列表节奏不乱。
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        host.displayName.ifBlank { stringResource(R.string.unnamed) },
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    routeBadge?.let { RouteBadge(it) }
-                    ProtocolBadge(host.useMosh)
-                }
-                Text(
-                    "${host.username}@${host.host}:${host.port}" +
-                        (if (host.group.isNotBlank() && showGroup) "  · ${host.group}" else ""),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = MokeMono,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-            }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -811,31 +808,6 @@ private fun HostCard(
                     )
                 }
             }
-        }
-    }
-}
-
-/** 路由徽标：与协议徽标同一尺寸，比能力标签更紧凑；和名称同行，过长的网络名省略，给主机名留出位置。 */
-@Composable
-private fun RouteBadge(spec: BadgeSpec) {
-    Surface(color = spec.color.copy(alpha = MokeDimens.badgeAlpha), shape = MokeShapes.pill) {
-        Text(
-            spec.text,
-            color = spec.color,
-            fontSize = 10.sp,
-            lineHeight = 10.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            style = LocalTextStyle.current.copy(
-                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
-                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-                    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-                    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
-                ),
-            ),
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp).widthIn(max = 112.dp),
-        )
     }
 }
 
@@ -908,7 +880,7 @@ private fun SessionsContent(
     // 攒到四五条时清理成本比逐条关闭还高，所以有一条就给一个一次清空的入口。
     val endedCount = sessions.count { !it.alive.collectAsState().value }
     var confirmClearEnded by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
         if (endedCount > 0) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -937,15 +909,15 @@ private fun SessionsContent(
                     key = { it.id },
                     onReorder = { list -> onReorder(list.map { it.id }) },
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 12.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    spacing = 0.dp,
                 ) { ts, dragging, handle ->
                     SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id }, dragHandle = handle, dragging = dragging)
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
                 ) {
                     items(sessions.sortedWith(cmp), key = { it.id }) { ts ->
                         SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
@@ -972,7 +944,8 @@ private fun SessionsContent(
                     onReorder(mergeSessionOrder(sessions.map { it.id }, newItems.map { it.id }.filter { it in members }))
                 },
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 12.dp),
+                contentPadding = PaddingValues(vertical = 4.dp),
+                spacing = 0.dp,
                 header = { group, dragging, handle ->
                     val key = group.key
                     GroupHeaderRow(
@@ -1031,70 +1004,40 @@ private fun SessionCard(
 ) {
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
+    var menuOpen by remember { mutableStateOf(false) }
+    val ended = stringResource(R.string.session_ended_short)
+    // 副标题：连接名 · mosh（SSH 是默认，不标）· 已结束。
+    val subtitle = androidx.compose.ui.text.AnnotatedString(buildString {
+        append(ts.host.displayName)
+        if (ts.host.useMosh) append(" · mosh")
+        if (!alive) append(" · ").append(ended)
+    })
+    // 行上只留最常用的「关闭」；修改标题、复制会话收进长按菜单（单击仍是进入会话）。
     Box {
-        Card(
-            // 单击卡片任意处进入会话。「修改标题」的长按只挂在下面的文字列上，
-            // **不能挂整张卡**：那样会连拖动手柄一起盖住，而手柄的 detectDragGesturesAfterLongPress
-            // 不消费 down，两个长按检测会同时命中——长按手柄重排的同时弹出改名框。
-            modifier = Modifier.fillMaxWidth().clip(CardDefaults.shape).clickable(onClick = onOpen),
-            colors = CardDefaults.cardColors(
-                containerColor = if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
-            ),
-            border = if (dragging) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else cardBorder(),
+        ListRow(
+            title = title,
+            subtitle = subtitle,
+            onClick = onOpen,
+            onLongClick = { menuOpen = true },
+            dragHandle = dragHandle,
+            dragging = dragging,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = if (dragHandle != null) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (dragHandle != null) {
-                    Box(modifier = dragHandle) {
-                        Icon(
-                            Icons.Filled.DragHandle,
-                            contentDescription = stringResource(R.string.drag_to_reorder),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        )
-                    }
-                }
-                // 双行布局：第1行动态标题，第2行 设备名 · 协议徽标 · 延迟/状态（不再单列 user@host）。
-                // 长按这一列（不含手柄）打开「修改标题」；单击与卡片一致，进入会话。
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .combinedClickable(onClick = onOpen, onLongClick = onTitle)
-                        .padding(start = if (dragHandle != null) 4.dp else 0.dp),
-                ) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        // 第 2 行身份：设备名（连接名，未命名回落 user@host）。
-                        Text(
-                            ts.host.displayName,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        ProtocolBadge(ts.host.useMosh)
-                        if (!alive) Text("· " + stringResource(R.string.session_ended_short), fontFamily = MokeMono, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                    }
-                }
-                // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题并加不重复标记。
-                IconButton(onClick = onDuplicate) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = stringResource(R.string.duplicate_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_session), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.session_set_title)) },
+                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                onClick = { menuOpen = false; onTitle() },
+            )
+            // 复制：用同一主机再开一个独立会话（新连接，非克隆 live 状态）；沿用标题并加不重复标记。
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.duplicate_session)) },
+                leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                onClick = { menuOpen = false; onDuplicate() },
+            )
         }
     }
 }

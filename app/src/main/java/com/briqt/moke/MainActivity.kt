@@ -86,18 +86,36 @@ class MainActivity : ComponentActivity() {
                 if (hasSession.isNotEmpty()) requestNotifPermissionOnce()
             }
             // 系统栏图标明暗随主题：浅色主题下必须切 light 样式，否则白底上的白图标看不见。
+            // 运行中切换系统深浅色时，系统处理配置变化会在我们之后再按窗口主题重置一次栏样式（时序竞争，
+            // 实测时有时无），所以稍后再补设一次，以最后一次为准。
             LaunchedEffect(dark) {
-                enableEdgeToEdge(
-                    statusBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
-                    else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-                    navigationBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
-                    else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-                )
+                barsDark = dark
+                applySystemBars(dark)
+                kotlinx.coroutines.delay(400)
+                applySystemBars(dark)
             }
             MokeTheme(darkTheme = dark, dynamicColor = dynamicColor) {
                 MokeApp(vm)
             }
         }
+    }
+
+    /** 当前应用明暗（供配置变化后补设系统栏样式）。 */
+    private var barsDark = true
+
+    private fun applySystemBars(dark: Boolean) {
+        enableEdgeToEdge(
+            statusBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
+            else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
+            else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 系统在配置变化里可能重置栏样式：排到其后补设当前值（明暗若随之改变，LaunchedEffect 会再设新值）。
+        window.decorView.post { applySystemBars(barsDark) }
     }
 
     override fun onNewIntent(intent: Intent) {
