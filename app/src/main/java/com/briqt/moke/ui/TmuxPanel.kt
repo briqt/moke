@@ -131,7 +131,9 @@ internal fun TmuxSessionSheet(
     var creating by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
     var confirmation by remember { mutableStateOf<TmuxConfirmation?>(null) }
-    var opening by remember { mutableStateOf(false) }
+    // 正在打开的那一行（key 同列表项）。进度只画在这一行末尾，不往列表里插「处理中」行——插行会让整个面板高度跳一下。
+    var openingKey by remember { mutableStateOf<String?>(null) }
+    val opening = openingKey != null
     var openFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val busy by androidx.compose.runtime.rememberUpdatedState(state.busy)
@@ -157,9 +159,13 @@ internal fun TmuxSessionSheet(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                // 不属于某一行的操作（新建、改名、结束等对话框之后的收尾）在标题栏右侧固定位置转圈，同样不改面板高度。
+                val sheetBusy = state.busy && !opening
+                val workingDescription = stringResource(R.string.action_working)
                 if (onRefresh != null && canRefreshTmuxObservation(state)) {
                     val refreshDescription = stringResource(R.string.tmux_refresh)
-                    val refreshStatus = if (state.refreshing) stringResource(R.string.tmux_checking) else ""
+                    val refreshStatus = if (state.refreshing) stringResource(R.string.tmux_checking)
+                        else if (sheetBusy) workingDescription else ""
                     IconButton(
                         onClick = onRefresh,
                         enabled = !state.busy && !opening && !state.refreshing,
@@ -168,11 +174,15 @@ internal fun TmuxSessionSheet(
                             stateDescription = refreshStatus
                         },
                     ) {
-                        if (state.refreshing) {
+                        if (state.refreshing || sheetBusy) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp).clearAndSetSemantics {}, strokeWidth = 2.dp)
                         } else {
                             Icon(Icons.Filled.Refresh, contentDescription = null)
                         }
+                    }
+                } else if (sheetBusy) {
+                    Box(Modifier.size(48.dp).semantics { contentDescription = workingDescription }, contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp).clearAndSetSemantics {}, strokeWidth = 2.dp)
                     }
                 }
             }
@@ -197,9 +207,6 @@ internal fun TmuxSessionSheet(
                             modifier = Modifier.padding(vertical = 8.dp))
                     }
                 }
-                if (opening || state.busy) {
-                    item("working") { TmuxStatusText(stringResource(R.string.action_working), loading = true) }
-                }
                 when (state.phase) {
                     TmuxPhase.IDLE, TmuxPhase.CHECKING -> item("checking") {
                         TmuxStatusText(stringResource(R.string.tmux_checking), loading = true)
@@ -223,6 +230,7 @@ internal fun TmuxSessionSheet(
                             TmuxStatusText(stringResource(R.string.tmux_empty))
                         }
                         items(state.sessions, key = { "${it.id}:${it.created}" }) { row ->
+                            val rowKey = "${row.id}:${row.created}"
                             val selected = state.selectionFor(row)
                             val current = isCurrentTmuxRow(state, row)
                             val canReturn = current && onReturnCurrent != null && !state.busy && !opening
@@ -231,17 +239,18 @@ internal fun TmuxSessionSheet(
                                 session = row,
                                 current = current,
                                 enabled = enabled || canReturn,
+                                loading = openingKey == rowKey,
                                 showManagement = management != null,
                                 managementEnabled = enabled,
                                 onOpen = {
                                     if (canReturn) onReturnCurrent.invoke()
                                     else if (selected != null && !opening) {
-                                        opening = true
+                                        openingKey = rowKey
                                         openFailed = false
                                         scope.launch {
                                             try {
                                                 completeTmuxUiAction({ onOpen(selected) }, onOpened, { openFailed = true })
-                                            } finally { opening = false }
+                                            } finally { openingKey = null }
                                         }
                                     }
                                 },
@@ -339,6 +348,7 @@ private fun TmuxSessionRow(
     session: TmuxSession,
     current: Boolean,
     enabled: Boolean,
+    loading: Boolean,
     showManagement: Boolean,
     managementEnabled: Boolean,
     onOpen: () -> Unit,
@@ -349,10 +359,12 @@ private fun TmuxSessionRow(
     var menuExpanded by remember { mutableStateOf(false) }
     var menuTarget by remember { mutableStateOf<TmuxRowTarget?>(null) }
     val openLabel = stringResource(if (current) R.string.tmux_return else R.string.tmux_attach)
+    val workingDescription = stringResource(R.string.action_working)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(
             Modifier.weight(1f).heightIn(min = 72.dp)
                 .clickable(enabled = enabled, onClickLabel = openLabel, onClick = onOpen)
+                .semantics { if (loading) stateDescription = workingDescription }
                 .padding(vertical = 12.dp, horizontal = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -372,7 +384,10 @@ private fun TmuxSessionRow(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (showManagement) Box {
+        // 打开中：在本行末尾转圈（占「更多」按钮的位置，行高不变）。
+        if (loading) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp).clearAndSetSemantics {}, strokeWidth = 2.dp)
+        } else if (showManagement) Box {
             IconButton(onClick = {
                 if (target != null) {
                     menuTarget = target

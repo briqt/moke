@@ -138,7 +138,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 配色是否随应用明暗联动。 */
     val schemeFollowsTheme: StateFlow<Boolean> = settings.schemeFollowsTheme
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     /**
      * 应用当前是否深色。由 UI 层（已把「跟随系统/浅色/深色」解析成布尔）回灌——

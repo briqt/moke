@@ -113,7 +113,8 @@ class SettingsStore(
 
     /** 终端配色是否随应用明暗自动切换（默认关，老用户行为不变）。 */
     val schemeFollowsTheme: Flow<Boolean> = preferencesStore.data.map { prefs ->
-        prefs[schemeFollowsThemeKey] ?: false
+        // 默认联动：界面跟随系统明暗，终端也跟着走（手机浅色进来就是浅色终端）。用户显式关过的保留 false。
+        prefs[schemeFollowsThemeKey] ?: true
     }
 
     private fun localFontExists(id: String): Boolean = File(context.filesDir, "fonts/$id.ttf").isFile
@@ -417,7 +418,7 @@ class SettingsStore(
         preferencesStore.edit { prefs ->
             prefs[colorSchemeKey] = TerminalThemes.DEFAULT_ID
             prefs[lightColorSchemeKey] = TerminalThemes.DEFAULT_LIGHT_ID
-            prefs[schemeFollowsThemeKey] = false
+            prefs[schemeFollowsThemeKey] = true
             prefs[primaryFontKey] = FontCatalog.DEFAULT_ID
             prefs[fallbackFontKey] = DEFAULT_FALLBACK_FONT_ID
             prefs[fontSizeKey] = DEFAULT_FONT_SIZE_SP

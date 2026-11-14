@@ -217,7 +217,10 @@ class TmuxRefreshFeedbackTest {
         assertTrue(header.contains("CircularProgressIndicator("))
         assertTrue(header.contains("Icon(Icons.Filled.Refresh, contentDescription = null)"))
         assertTrue(source.contains("TmuxPhase.IDLE, TmuxPhase.CHECKING -> item(\"checking\")"))
-        assertTrue(source.contains("if (opening || state.busy)"))
+        // Opening progress belongs to the tapped row; no status row is inserted above the list.
+        assertFalse(source.contains("item(\"working\")"))
+        assertTrue(source.contains("loading = openingKey == rowKey"))
+        assertTrue(source.contains("if (state.refreshing || sheetBusy)"))
         assertTrue(source.contains("TextButton(onClick = onRefresh, enabled = !state.busy && !opening && !state.refreshing"))
         assertTrue(source.contains("val enabled = !opening && state.canManage && selected != null"))
         assertTrue(source.contains("items(state.sessions, key = { \"\${it.id}:\${it.created}\" })"))
