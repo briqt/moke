@@ -50,6 +50,7 @@
 | [sshj](https://github.com/hierynomus/sshj) | Apache-2.0 | SSH 传输 |
 | [Bouncy Castle](https://www.bouncycastle.org/)（`bcprov-jdk18on`、`bcpkix-jdk18on`） | MIT-style（Bouncy Castle License） | 加密算法 |
 | [SLF4J](https://www.slf4j.org/)（`slf4j-api`） | MIT | 日志接口 |
+| [OkHttp](https://github.com/square/okhttp)（含 Okio） | Apache-2.0 | WebDAV 同步的 HTTP 客户端 |
 | [Tailscale](https://github.com/tailscale/tailscale)（`tailscale.com`） | BSD-3-Clause | 用户态 tailnet 节点 |
 | [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto) | BSD-3-Clause | mosh 中继 AES-OCB 认证 |
 | Go 运行时与 `golang.org/x/*` | BSD-3-Clause | 网络桥接 |
