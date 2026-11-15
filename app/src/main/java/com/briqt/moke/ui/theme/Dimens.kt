@@ -9,4 +9,10 @@ object MokeDimens {
 
     /** 徽标 / 能力标签底色透明度：在强调色上叠一层淡背景（统一原 0.15/0.16 两种取值）。 */
     const val badgeAlpha = 0.16f
+
+    /** 非终端阅读/表单页面在大屏下的最大内容宽度。 */
+    val contentMaxWidth = 700.dp
+
+    /** 终端页底部附加快捷键与浮层控制栏在宽屏下的最大宽度。 */
+    val terminalControlsMaxWidth = 680.dp
 }

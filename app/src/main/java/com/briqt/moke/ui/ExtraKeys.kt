@@ -14,13 +14,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -64,6 +70,7 @@ import com.briqt.moke.terminal.KeyId
 import com.briqt.moke.terminal.ModKind
 import com.briqt.moke.terminal.ModState
 import com.briqt.moke.terminal.Modifiers
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.briqt.moke.ui.theme.extra
@@ -198,13 +205,18 @@ fun ExtraKeys(
     onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        CenteredItem(
+            maxWidth = MokeDimens.terminalControlsMaxWidth,
+            modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
         ) {
-            rows.forEach { row ->
-                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onHoldMod, onAction)
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                rows.forEach { row ->
+                    KeyRow(row, mods, panelOpen, onKey, onToggleMod, onHoldMod, onAction)
+                }
             }
         }
     }
@@ -288,7 +300,7 @@ fun KeyboardPanel(
     val perRow = if (config.screenWidthDp >= 600) 14 else 0
     val collapseLabel = stringResource(R.string.keys_panel_collapse)
     Surface(
-        modifier = modifier.fillMaxWidth().heightIn(max = maxHeight),
+        modifier = modifier.widthIn(max = MokeDimens.terminalControlsMaxWidth).fillMaxWidth().heightIn(max = maxHeight),
         color = MaterialTheme.colorScheme.surface,
         shape = MokeShapes.keyPanel,
         border = cardBorder(),
@@ -391,11 +403,15 @@ fun TextBlockComposer(
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val requestKeyboard by rememberUpdatedState(onKeyboardRequest)
-    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.topHairline()) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().topHairline()) {
+        CenteredItem(
+            maxWidth = MokeDimens.terminalControlsMaxWidth,
+            modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
         ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(R.string.composer_title),
@@ -449,6 +465,7 @@ fun TextBlockComposer(
                     contentPadding = PaddingValues(horizontal = 12.dp),
                 ) { Text(stringResource(R.string.composer_send_enter)) }
             }
+        }
         }
     }
     // 内联展开：直接聚焦输入框（同窗口焦点转移，IME 顺滑续上），无需等窗口入场动画。

@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -177,7 +175,10 @@ fun NetworksScreen(
     val tailnets = entries.filter { it.kind == NetworkKind.TAILSCALE }
     val proxies = entries.filter { it.kind == NetworkKind.PROXY }
     Scaffold(topBar = { SubPageTopBar(stringResource(R.string.menu_network), onBack) }) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        CenteredScrollColumn(
+            contentPadding = padding,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             when (networkState) {
                 ListState.Loading -> InfoNote(stringResource(R.string.networks_loading))
                 ListState.Unreadable -> {
@@ -385,8 +386,12 @@ fun NetworkEditScreen(
     })
     EditorScaffold(title, rawDraft() != baseline, submitting, onLeave = { onClose(savedEntry?.id) }, onSave = { submit() },
         submittingLabel = if (actionFailure) R.string.action_working else R.string.action_saving) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-            .verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        CenteredScrollColumn(
+            contentPadding = padding,
+            extraContainerModifier = Modifier.consumeWindowInsets(padding).imePadding(),
+            innerPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column(modifier = Modifier.editorTarget(targets[9])) {
                 failure?.let { InfoNote(stringResource(if (actionFailure) R.string.form_action_failed else R.string.store_save_failed) + "\n" + stringResource(storeFailureMessage(it)), error = true) }
                 when (networkState) {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -55,6 +56,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +86,7 @@ import com.briqt.moke.terminal.sftp.RemoteEntry
 import com.briqt.moke.terminal.sftp.RemotePath
 import com.briqt.moke.terminal.sftp.TransferState
 import com.briqt.moke.terminal.sftp.TransferTask
+import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -292,27 +295,31 @@ fun FilesScreen(
                     ) {
                         if (state.path != RemotePath.ROOT && state.path.isNotBlank()) {
                             item {
-                                EntryRow(
-                                    icon = Icons.Filled.ArrowUpward,
-                                    title = "..",
-                                    subtitle = stringResource(R.string.files_parent),
-                                    onClick = onUp,
-                                    onLongClick = null,
-                                )
+                                CenteredItem {
+                                    EntryRow(
+                                        icon = Icons.Filled.ArrowUpward,
+                                        title = "..",
+                                        subtitle = stringResource(R.string.files_parent),
+                                        onClick = onUp,
+                                        onLongClick = null,
+                                    )
+                                }
                             }
                         }
                         items(visible, key = { it.path }) { e ->
-                            EntryRow(
-                                icon = if (e.isDir) Icons.Filled.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
-                                title = e.name,
-                                subtitle = subtitleOf(e),
-                                titleDescription = stringResource(
-                                    if (e.isDir) R.string.files_folder_description else R.string.files_file_description,
-                                    e.name,
-                                ),
-                                onClick = { if (e.isDir) onNavigate(e.path) else selected = e },
-                                onLongClick = { selected = e },
-                            )
+                            CenteredItem {
+                                EntryRow(
+                                    icon = if (e.isDir) Icons.Filled.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    title = e.name,
+                                    subtitle = subtitleOf(e),
+                                    titleDescription = stringResource(
+                                        if (e.isDir) R.string.files_folder_description else R.string.files_file_description,
+                                        e.name,
+                                    ),
+                                    onClick = { if (e.isDir) onNavigate(e.path) else selected = e },
+                                    onLongClick = { selected = e },
+                                )
+                            }
                         }
                     }
                 }
@@ -422,34 +429,37 @@ private fun subtitleOf(e: RemoteEntry): String {
 @Composable
 private fun Crumbs(path: String, onNavigate: (String) -> Unit) {
     if (path.isBlank()) return
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RemotePath.crumbs(path).forEachIndexed { i, (label, target) ->
-            if (i > 0) {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        Row(
+            modifier = Modifier
+                .widthIn(max = MokeDimens.contentMaxWidth)
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RemotePath.crumbs(path).forEachIndexed { i, (label, target) ->
+                if (i > 0) {
+                    Text(
+                        "/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    )
+                }
                 Text(
-                    "/",
+                    label,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 2.dp),
+                    fontFamily = MokeMono,
+                    // 当前目录用正文墨色加粗，可点的上级目录用说明字色。
+                    color = if (target == path) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (target == path) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier
+                        .clickable(enabled = target != path) { onNavigate(target) }
+                        .padding(vertical = 4.dp, horizontal = 2.dp),
                 )
             }
-            Text(
-                label,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = MokeMono,
-                // 当前目录用正文墨色加粗，可点的上级目录用说明字色。
-                color = if (target == path) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (target == path) FontWeight.SemiBold else FontWeight.Normal,
-                modifier = Modifier
-                    .clickable(enabled = target != path) { onNavigate(target) }
-                    .padding(vertical = 4.dp, horizontal = 2.dp),
-            )
         }
     }
 }
@@ -457,35 +467,37 @@ private fun Crumbs(path: String, onNavigate: (String) -> Unit) {
 @Composable
 private fun ErrorBanner(message: String, onDismiss: () -> Unit, recovery: NetworkRecovery?, onRecover: (NetworkRecovery) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f),
-            )
-            if (recovery != null) {
-                val label = when (recovery.kind) {
-                    RecoveryKind.LOGIN_NETWORK -> R.string.action_login
-                    RecoveryKind.VIEW_NETWORK -> R.string.action_view_network
-                    RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
-                    RecoveryKind.EDIT_HOST -> R.string.host_edit_title
-                    RecoveryKind.RETRY -> R.string.action_retry
-                }
-                TextButton(onClick = { onRecover(recovery) }) {
-                    Text(stringResource(label), color = MaterialTheme.colorScheme.onErrorContainer)
-                }
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = stringResource(R.string.action_close),
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.size(18.dp),
+        CenteredItem {
+            Row(
+                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.weight(1f),
                 )
+                if (recovery != null) {
+                    val label = when (recovery.kind) {
+                        RecoveryKind.LOGIN_NETWORK -> R.string.action_login
+                        RecoveryKind.VIEW_NETWORK -> R.string.action_view_network
+                        RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
+                        RecoveryKind.EDIT_HOST -> R.string.host_edit_title
+                        RecoveryKind.RETRY -> R.string.action_retry
+                    }
+                    TextButton(onClick = { onRecover(recovery) }) {
+                        Text(stringResource(label), color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = stringResource(R.string.action_close),
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -551,8 +563,9 @@ private fun EntryActions(
     onCopyPath: () -> Unit,
     onSendToTerminal: () -> Unit,
 ) {
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             Text(
                 entry.name,
                 style = MaterialTheme.typography.titleSmall,
@@ -613,35 +626,37 @@ private fun TransferBar(tasks: List<TransferTask>, activeCount: Int, onExpand: (
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (running.direction == com.briqt.moke.terminal.sftp.TransferDirection.UPLOAD) Icons.Filled.Upload
-                    else Icons.Filled.Download,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    running.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-                )
-                Text(
-                    if (activeCount > 1) "$activeCount" else stateLabel(running),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            val fraction = running.fraction
-            if (running.active) {
-                if (fraction != null) {
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        CenteredItem {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (running.direction == com.briqt.moke.terminal.sftp.TransferDirection.UPLOAD) Icons.Filled.Upload
+                        else Icons.Filled.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
                     )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    Text(
+                        running.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                    )
+                    Text(
+                        if (activeCount > 1) "$activeCount" else stateLabel(running),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val fraction = running.fraction
+                if (running.active) {
+                    if (fraction != null) {
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    }
                 }
             }
         }
@@ -658,7 +673,8 @@ private fun TransferQueueSheet(
     onClearFinished: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),

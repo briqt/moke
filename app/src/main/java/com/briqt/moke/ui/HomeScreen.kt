@@ -12,14 +12,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -38,8 +37,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
@@ -82,8 +79,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -91,6 +86,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailDefaults
+import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.WideNavigationRailItemDefaults
+import androidx.compose.material3.WideNavigationRailValue
+import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -105,7 +106,6 @@ import kotlinx.coroutines.isActive
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -142,10 +142,9 @@ import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.briqt.moke.update.UpdateInfo
-import kotlin.math.abs
 
 /**
- * 主界面：底部导航「连接 · 会话 · 设置」三分区，内容区可左右滑动切换（顺序同底栏）。
+ * 主界面：通过底部导航或侧边导航在「连接 · 会话 · 设置」三分区间点击切换。
  * 终端本体是独立全屏页（不带底栏），由 MokeApp 在此之上导航打开。会话对象常驻 ViewModel，切分区不销毁。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -234,10 +233,10 @@ fun HomeScreen(
     var pendingDeleteHost by remember { mutableStateOf<Host?>(null) }
     val showAddHostFab = tab == HomeTab.Connections && hostsState is ListState.Ready
     var addHostFabTop by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(showAddHostFab) {
+        if (!showAddHostFab) addHostFabTop = null
+    }
 
-    // 左右滑动切分区：页序即底栏顺序，pager 与外部 [tab] 双向同步。
-    val tabs = remember { HomeTab.entries.toList() }
-    val pagerState = rememberPagerState(initialPage = tab.ordinal) { tabs.size }
     val lifecycleOwner = LocalLifecycleOwner.current
     val visibleSessions by rememberUpdatedState(sessions)
     val refreshSession by rememberUpdatedState(onTmuxRefresh)
@@ -253,25 +252,19 @@ fun HomeScreen(
             }
         }
     }
-    // 外部改分区（底栏点击 / 返回键 / 从二级页带着分区回来）→ 翻页跟上。
-    LaunchedEffect(tab) {
-        val target = tab.ordinal
-        if (pagerState.currentPage == target) return@LaunchedEffect
-        // 相邻分区带动画滑过去；跨一页（连接↔设置）直接落位——动画会途经中间页，
-        // 那一瞬的 currentPage 会被下面的回写当成"用户选了中间页"，把切换半路截停。
-        if (abs(pagerState.currentPage - target) == 1) pagerState.animateScrollToPage(target)
-        else pagerState.scrollToPage(target)
-    }
-    // 滑过半即认页（currentPage 而非 settledPage）→ 顶栏标题 / 底栏高亮 / FAB 当场跟手，不等回弹结束。
-    // 回写同值不会触发重组，所以这里不必再判 `!= tab`（那还会读到启动时的旧值）。
-    LaunchedEffect(pagerState, tabs) {
-        snapshotFlow { pagerState.currentPage }.collect { page ->
-            tabs.getOrNull(page)?.let(onTab)
-        }
-    }
 
-    // 宽屏（横屏手机、平板）用侧边导航栏，把纵向空间全留给内容；竖屏用矮版底栏（64dp）。Material 的标准自适应做法。
-    val useRail = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+    // 三维自适应导航：窄屏用矮底栏；平板竖屏/手机横屏用顶置折叠侧栏；大屏横屏展开侧栏。
+    val windowSpec = rememberWindowAdaptiveSpec()
+    val useRail = windowSpec.homeNavMode != HomeNavMode.Bottom
+    val targetRailValue = if (windowSpec.homeNavMode == HomeNavMode.ExpandedRail) {
+        WideNavigationRailValue.Expanded
+    } else {
+        WideNavigationRailValue.Collapsed
+    }
+    val railState = rememberWideNavigationRailState(initialValue = targetRailValue)
+    LaunchedEffect(targetRailValue) {
+        railState.snapTo(targetRailValue)
+    }
     val navTabs = listOf(
         NavSpec(HomeTab.Connections, Icons.Filled.Dns, stringResource(R.string.nav_connections), null, false),
         NavSpec(HomeTab.Sessions, Icons.Filled.Terminal, stringResource(R.string.nav_sessions), sessions.size.takeIf { it > 0 }, false),
@@ -280,20 +273,22 @@ fun HomeScreen(
     )
     Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     if (useRail) {
-        androidx.compose.material3.NavigationRail(
+        val railExpanded = targetRailValue == WideNavigationRailValue.Expanded
+        WideNavigationRail(
             modifier = Modifier.endHairline(),
-            containerColor = MaterialTheme.colorScheme.background,
+            state = railState,
+            colors = WideNavigationRailDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
         ) {
-            Spacer(Modifier.weight(1f))
             navTabs.forEach { spec ->
-                androidx.compose.material3.NavigationRailItem(
+                WideNavigationRailItem(
                     selected = tab == spec.tab,
                     onClick = { onTab(spec.tab) },
                     icon = { NavIcon(spec) },
                     label = { Text(spec.label, maxLines = 1) },
+                    railExpanded = railExpanded,
+                    iconPosition = WideNavigationRailItemDefaults.iconPositionFor(railExpanded),
                 )
             }
-            Spacer(Modifier.weight(1f))
         }
     }
     Scaffold(
@@ -364,9 +359,13 @@ fun HomeScreen(
             }
         },
     ) { padding ->
-        // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-            when (tabs[page]) {
+        Crossfade(
+            targetState = tab,
+            animationSpec = tween(150),
+            modifier = Modifier.fillMaxSize(),
+            label = "homeTab",
+        ) { currentTab ->
+            when (currentTab) {
                 HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, onRetryReads, addHostFabTop.takeIf { showAddHostFab })
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
@@ -550,8 +549,10 @@ private fun ConnectionsContent(
                 spacing = SegmentGap,
                 onItemHold = { menuFor = it.id },
             ) { host, dragging, handle ->
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
-                    menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
+                CenteredItem {
+                    HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
+                        menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
+                }
             }
         } else {
             val groups = orderedKeys.map { k -> ReorderGroup(k, hosts.filter { keyOf(it) == k }) }
@@ -572,19 +573,23 @@ private fun ConnectionsContent(
                 onItemHold = { menuFor = it.id },
                 header = { group, dragging, handle ->
                     val key = group.key
-                    GroupHeaderRow(
-                        name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else group.label,
-                        count = group.items.size,
-                        collapsed = key in collapsed,
-                        onToggle = { onToggleCollapse(key) },
-                        dragHandle = handle,
-                        dragging = dragging,
-                    )
+                    CenteredItem {
+                        GroupHeaderRow(
+                            name = if (key == UNGROUPED_KEY) stringResource(R.string.ungrouped) else group.label,
+                            count = group.items.size,
+                            collapsed = key in collapsed,
+                            onToggle = { onToggleCollapse(key) },
+                            dragHandle = handle,
+                            dragging = dragging,
+                        )
+                    }
                 },
             ) { host, dragging, handle ->
                 // 已按项目分组，分组头展示组名 → 卡片副标题尾部不再重复。
-                HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
-                    menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
+                CenteredItem {
+                    HostCard(host, { onConnect(host) }, { onEdit(host) }, { onFiles(host) }, { onDuplicate(host) }, { onDelete(host) }, showGroup = false, dragHandle = handle, dragging = dragging, routeBadge = routeBadge(host),
+                        menuOpen = menuFor == host.id, onMenu = { menuFor = if (it) host.id else null })
+                }
             }
         }
     }
@@ -899,12 +904,14 @@ private fun SessionsContent(
     var confirmClearEnded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
         if (endedCount > 0) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = { confirmClearEnded = true }) {
-                    Text(stringResource(R.string.sessions_clear_ended, endedCount))
+            CenteredItem {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = { confirmClearEnded = true }) {
+                        Text(stringResource(R.string.sessions_clear_ended, endedCount))
+                    }
                 }
             }
         }
@@ -930,8 +937,10 @@ private fun SessionsContent(
                     spacing = SegmentGap,
                     onItemHold = { menuFor = it.id },
                 ) { ts, dragging, handle ->
-                    SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
-                        menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null }, dragHandle = handle, dragging = dragging)
+                    CenteredItem {
+                        SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                            menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null }, dragHandle = handle, dragging = dragging)
+                    }
                 }
             } else {
                 LazyColumn(
@@ -941,10 +950,12 @@ private fun SessionsContent(
                 ) {
                     val sorted = sessions.sortedWith(cmp)
                     itemsIndexed(sorted, key = { _, it -> it.id }) { index, ts ->
-                        CompositionLocalProvider(LocalRowPosition provides RowPosition(index, sorted.size)) {
-                            SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
-                                onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
-                                menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null })
+                        CenteredItem {
+                            CompositionLocalProvider(LocalRowPosition provides RowPosition(index, sorted.size)) {
+                                SessionCard(ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) },
+                                    onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                                    menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null })
+                            }
                         }
                     }
                 }
@@ -973,22 +984,26 @@ private fun SessionsContent(
                 onItemHold = { menuFor = it.id },
                 header = { group, dragging, handle ->
                     val key = group.key
-                    GroupHeaderRow(
-                        name = group.label.ifBlank { stringResource(R.string.ungrouped) },
-                        count = group.items.size,
-                        collapsed = key in collapsed,
-                        onToggle = { onToggleCollapse(key) },
-                        dragHandle = handle,
-                        dragging = dragging,
-                    )
+                    CenteredItem {
+                        GroupHeaderRow(
+                            name = group.label.ifBlank { stringResource(R.string.ungrouped) },
+                            count = group.items.size,
+                            collapsed = key in collapsed,
+                            onToggle = { onToggleCollapse(key) },
+                            dragHandle = handle,
+                            dragging = dragging,
+                        )
+                    }
                 },
             ) { ts, dragging, handle ->
                 // 手动排序时组内卡片可拖（接 handle）；创建/更新时间排序时按比较器排、卡片不可拖。
-                SessionCard(
-                    ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
-                    menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null },
-                    dragHandle = if (manual) handle else null, dragging = dragging,
-                )
+                CenteredItem {
+                    SessionCard(
+                        ts, onOpen = { onOpen(ts.id) }, onClose = { onClose(ts.id) }, onDuplicate = { onDuplicate(ts.id) }, onTitle = { editingTitleId = ts.id },
+                        menuOpen = menuFor == ts.id, onMenu = { menuFor = if (it) ts.id else null },
+                        dragHandle = if (manual) handle else null, dragging = dragging,
+                    )
+                }
             }
         }
     }
@@ -1108,10 +1123,7 @@ private fun SettingsMenuContent(
         LocaleManager.EN -> stringResource(R.string.lang_en)
         else -> stringResource(R.string.lang_system)
     }
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(padding).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    CenteredScrollColumn(contentPadding = padding) {
         // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
         // 而不是继续往这一屏平铺（那样很快就乱）。
         SettingsGroup {
@@ -1190,7 +1202,7 @@ private fun EmptyState(
     onRetry: (() -> Unit)? = null,
 ) {
     Box(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(modifier = Modifier.widthIn(max = 420.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(
                 icon,
                 contentDescription = null,

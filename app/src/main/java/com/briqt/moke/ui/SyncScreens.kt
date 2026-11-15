@@ -15,9 +15,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
@@ -183,8 +182,8 @@ fun SyncScreen(
         when {
             state is MokeViewModel.SyncSettingsState.Loading -> Unit
             settings == null -> SyncEmpty(padding, onSetup)
-            else -> Column(
-                modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(12.dp),
+            else -> CenteredScrollColumn(
+                contentPadding = padding,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 NavRow(Icons.Filled.Cloud, "WebDAV",
@@ -257,7 +256,7 @@ fun SyncScreen(
 @Composable
 private fun SyncEmpty(padding: PaddingValues, onSetup: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(modifier = Modifier.widthIn(max = 420.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Filled.CloudSync, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp))
             Text(stringResource(R.string.sync_empty_title), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             Text(stringResource(R.string.sync_empty_hint), style = MaterialTheme.typography.bodyMedium,
@@ -325,9 +324,10 @@ fun WebDavEditScreen(
         onSave = ::submit,
         submittingLabel = R.string.sync_connecting,
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                .verticalScroll(rememberScrollState()).padding(16.dp),
+        CenteredScrollColumn(
+            contentPadding = padding,
+            extraContainerModifier = Modifier.consumeWindowInsets(padding).imePadding(),
+            innerPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FormTextField(url, { url = it }, stringResource(R.string.webdav_url), error = urlError, submitted = submitted,
@@ -425,16 +425,16 @@ fun BackupScreen(
     }
 
     Scaffold(topBar = { SyncTopBar(backup.parsed?.device ?: backup.name, onBack) }) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                .verticalScroll(rememberScrollState()).padding(12.dp),
+        CenteredScrollColumn(
+            contentPadding = padding,
+            extraContainerModifier = Modifier.consumeWindowInsets(padding).imePadding(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(backupSubtitle(backup), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp))
             if (lastResult != null) {
                 RestoreResultView(lastResult, networkLive, loginFlows, onWatchNetworks, onLogin, onDone)
-                return@Column
+                return@CenteredScrollColumn
             }
             when (val d = detail) {
                 Detail.Loading -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {

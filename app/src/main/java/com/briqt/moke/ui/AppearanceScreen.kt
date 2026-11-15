@@ -6,14 +6,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -48,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -229,40 +230,15 @@ fun AppearanceScreen(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // 预览高度按样张 5 行估算：含中文回退时行高偏大（≈ 字号×行距×1.6dp）+ 上下 padding。
-            // 上限 190dp：大字号时不至于吃掉整块滚动区（超出部分终端内部滚动，色带仍在底部可见）。
-            val previewHeight = (fontSizeSp * lineSpacing * 1.6f * 5 + 28).dp.coerceAtMost(190.dp)
-            // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
-            AppearancePreview(
-                // 预览必须跟"眼下真正生效"的那套一致，否则联动开启时改一个下拉、预览却不动。
-                schemeId = effectiveSchemeId,
-                primaryFontId = primaryFontId,
-                fallbackFontId = fallbackFontId,
-                fontSizeSp = fontSizeSp,
-                lineSpacing = lineSpacing,
-                letterSpacing = letterSpacing,
-                cursorStyle = cursorStyle,
-                cursorBlink = cursorBlink,
-                resolveTypeface = resolveTypeface,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(previewHeight)
-                    .padding(12.dp)
-                    .clip(MokeShapes.card),
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            // 控制区分组：字体 → 排版 → 配色 → 光标。恢复默认收进顶栏 ⋮。
-            // 用 bodyMedium 收敛正文/输入框字号，与外层列表页一致（进设置页不再明显变大）；间距/内边距也向列表页看齐。
+        val windowSpec = rememberWindowAdaptiveSpec()
+        // 控制区分组：字体 → 排版 → 配色 → 光标。恢复默认收进顶栏 ⋮。
+        // 用 bodyMedium 收敛正文/输入框字号，与外层列表页一致（进设置页不再明显变大）；间距/内边距也向列表页看齐。
+        val controls: @Composable (Modifier) -> Unit = { controlsModifier ->
             CompositionLocalProvider(LocalTextStyle provides MaterialTheme.typography.bodyMedium) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+                CenteredScrollColumn(
+                    modifier = controlsModifier,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                 // 「界面」= 应用自身的明暗与取色；与下方「配色」（终端调色板）分成两个分区，避免混淆。
                 SectionHeader(stringResource(R.string.section_ui))
                 var themeDialog by remember { mutableStateOf(false) }
@@ -399,6 +375,63 @@ fun AppearanceScreen(
                     )
                 }
             }
+        }
+        }
+
+        if (windowSpec.twoPaneAppearance) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxHeight().widthIn(max = 1080.dp).fillMaxWidth(),
+                ) {
+                    AppearancePreview(
+                        // 预览必须跟"眼下真正生效"的那套一致，否则联动开启时改一个下拉、预览却不动。
+                        schemeId = effectiveSchemeId,
+                        primaryFontId = primaryFontId,
+                        fallbackFontId = fallbackFontId,
+                        fontSizeSp = fontSizeSp,
+                        lineSpacing = lineSpacing,
+                        letterSpacing = letterSpacing,
+                        cursorStyle = cursorStyle,
+                        cursorBlink = cursorBlink,
+                        resolveTypeface = resolveTypeface,
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxHeight()
+                            .padding(12.dp)
+                            .clip(MokeShapes.card),
+                    )
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    controls(Modifier.weight(0.58f))
+                }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // 预览高度按样张 5 行估算：含中文回退时行高偏大（≈ 字号×行距×1.6dp）+ 上下 padding。
+                // 上限 190dp：大字号时不至于吃掉整块滚动区（超出部分终端内部滚动，色带仍在底部可见）。
+                val previewHeight = (fontSizeSp * lineSpacing * 1.6f * 5 + 28).dp.coerceAtMost(190.dp)
+                // 顶部固定实时预览：字体/字号/配色/光标任一改动都即时反映
+                AppearancePreview(
+                    // 预览必须跟"眼下真正生效"的那套一致，否则联动开启时改一个下拉、预览却不动。
+                    schemeId = effectiveSchemeId,
+                    primaryFontId = primaryFontId,
+                    fallbackFontId = fallbackFontId,
+                    fontSizeSp = fontSizeSp,
+                    lineSpacing = lineSpacing,
+                    letterSpacing = letterSpacing,
+                    cursorStyle = cursorStyle,
+                    cursorBlink = cursorBlink,
+                    resolveTypeface = resolveTypeface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(previewHeight)
+                        .padding(12.dp)
+                        .clip(MokeShapes.card),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                controls(Modifier.weight(1f))
             }
         }
     }

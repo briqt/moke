@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,13 +30,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -79,6 +86,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
@@ -410,6 +418,7 @@ fun TerminalScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             // 单行顶栏：会话名、协议、延迟排在同一行。状态栏保持可见。
             TerminalTopBar(
@@ -433,6 +442,7 @@ fun TerminalScreen(
             )
         },
     ) { padding ->
+        val horizontalCutout = WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)
         TerminalContentLayout(
             modifier = Modifier
                 .fillMaxSize()
@@ -443,87 +453,99 @@ fun TerminalScreen(
             onBudget = { inputBudget = it },
         ) {
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(schemeBgColor(schemeId))),
             ) {
-                AndroidView(
-                    factory = { view },
-                    modifier = Modifier.fillMaxSize(),
-                )
-                // 缩放提示浮层：字号 + 百分比，非默认给「恢复默认」。
-                zoomHintSp?.let { sp ->
-                    ZoomHint(
-                        sp = sp,
-                        onResetDefault = { onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
-                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(horizontalCutout),
+                ) {
+                    AndroidView(
+                        factory = { view },
+                        modifier = Modifier.fillMaxSize(),
                     )
-                }
-                // 「跳到底部」：只在真的翻进历史时出现。翻到几百行深处后，回底部原本只能反复滑动，
-                // 或者随便敲个键——但敲键会把字节真发给远端，在别人的 shell 里不是无害动作。
-                JumpToBottomButton(
-                    visible = topRow < 0 && !panelOpen && !showComposer && tappedLink == null,
-                    onClick = { controller.scrollToBottom() },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
-                )
-                if (swipeMode != ScrollMode.SMART && zoomHintSp == null && !panelOpen && !showComposer && tappedLink == null) {
-                    TemporarySwipeHint(
-                        mode = swipeMode,
-                        onAutomatic = {
-                            swipeMode = ScrollMode.SMART
-                            view.setMokeScrollMode(ScrollMode.SMART.ordinal)
-                        },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    // 缩放提示浮层：字号 + 百分比，非默认给「恢复默认」。
+                    zoomHintSp?.let { sp ->
+                        ZoomHint(
+                            sp = sp,
+                            onResetDefault = { onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
+                        )
+                    }
+                    // 「跳到底部」：只在真的翻进历史时出现。翻到几百行深处后，回底部原本只能反复滑动，
+                    // 或者随便敲个键——但敲键会把字节真发给远端，在别人的 shell 里不是无害动作。
+                    JumpToBottomButton(
+                        visible = topRow < 0 && !panelOpen && !showComposer && tappedLink == null,
+                        onClick = { controller.scrollToBottom() },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
                     )
-                }
-                // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
-                // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
-                // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
-                // 因此不会出现 rc.2 那种边框与内容各走各的。
-                KeyboardPanelOverlay(
-                    visible = panelOpen && extraKeysVisible && !showComposer,
-                    sections = remember(extraKeysLayout) { panelSections(extraKeysLayout) },
-                    mods = mods,
-                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
-                    onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
-                    onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
-                    onDismiss = { panelOpen = false },
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
-                // 单击命中链接后的操作条：一步可达，但不直接跳走（误触一下就离开终端太粗暴）。
-                // 画在面板之后：面板开着时点链接，操作条不能被盖住。
-                tappedLink?.let { url ->
-                    LinkActionBar(
-                        url = url,
-                        onOpen = if (TerminalLinks.isLocal(url)) null else {
-                            { tappedLink = null; openUrl(context, url) }
-                        },
-                        // 本机链接：先把远端端口转到手机，再打开改写后的地址（一步完成，转发会留在面板里）。
-                        onForwardOpen = run {
-                            val forwards = ts.forwards
-                            val remotePort = PortForwards.remotePortOf(url)
-                            if (forwards == null || remotePort == null || !alive) null else {
-                                {
-                                    tappedLink = null
-                                    scope.launch {
-                                        val local = withContext(Dispatchers.IO) { forwards.start(remotePort) }
-                                        if (local != null) {
-                                            openUrl(context, PortForwards.rewriteToLocal(url, local))
-                                        } else {
-                                            Toast.makeText(context, resources.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
+                    if (swipeMode != ScrollMode.SMART && zoomHintSp == null && !panelOpen && !showComposer && tappedLink == null) {
+                        TemporarySwipeHint(
+                            mode = swipeMode,
+                            onAutomatic = {
+                                swipeMode = ScrollMode.SMART
+                                view.setMokeScrollMode(ScrollMode.SMART.ordinal)
+                            },
+                            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                        )
+                    }
+                    // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
+                    // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
+                    // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
+                    // 因此不会出现 rc.2 那种边框与内容各走各的。
+                    KeyboardPanelOverlay(
+                        visible = panelOpen && extraKeysVisible && !showComposer,
+                        sections = remember(extraKeysLayout) { panelSections(extraKeysLayout) },
+                        mods = mods,
+                        onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                        onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
+                        onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
+                        onDismiss = { panelOpen = false },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                    // 单击命中链接后的操作条：一步可达，但不直接跳走（误触一下就离开终端太粗暴）。
+                    // 画在面板之后：面板开着时点链接，操作条不能被盖住。
+                    tappedLink?.let { url ->
+                        LinkActionBar(
+                            url = url,
+                            onOpen = if (TerminalLinks.isLocal(url)) null else {
+                                { tappedLink = null; openUrl(context, url) }
+                            },
+                            // 本机链接：先把远端端口转到手机，再打开改写后的地址（一步完成，转发会留在面板里）。
+                            onForwardOpen = run {
+                                val forwards = ts.forwards
+                                val remotePort = PortForwards.remotePortOf(url)
+                                if (forwards == null || remotePort == null || !alive) null else {
+                                    {
+                                        tappedLink = null
+                                        scope.launch {
+                                            val local = withContext(Dispatchers.IO) { forwards.start(remotePort) }
+                                            if (local != null) {
+                                                openUrl(context, PortForwards.rewriteToLocal(url, local))
+                                            } else {
+                                                Toast.makeText(context, resources.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        },
-                        onCopy = { tappedLink = null; copyText(context, url) },
-                        onDismiss = { tappedLink = null },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    )
+                            },
+                            onCopy = { tappedLink = null; copyText(context, url) },
+                            onDismiss = { tappedLink = null },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                        )
+                    }
                 }
             }
 
             if (endNotice != null) {
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp)) {
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    CenteredItem(
+                        maxWidth = MokeDimens.terminalControlsMaxWidth,
+                        modifier = Modifier.windowInsetsPadding(horizontalCutout),
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp)) {
                         Text(
                             stringResource(when (endNotice) {
                                 TerminalEndNotice.REMOTE_ENDED -> R.string.tmux_remote_ended
@@ -564,6 +586,7 @@ fun TerminalScreen(
                                 Text(stringResource(R.string.action_close), modifier = Modifier.padding(start = 8.dp))
                             }
                         }
+                    }
                     }
                 }
             }
@@ -796,7 +819,10 @@ private fun TerminalTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
+                .windowInsetsPadding(
+                    WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+                )
                 // 与其它页顶栏（TopAppBar expandedHeight）一致，避免详情页顶栏偏高。
                 .height(MokeDimens.topBarHeight)
                 .padding(start = 4.dp, end = 4.dp),
@@ -975,7 +1001,7 @@ private fun LinkActionBar(
         color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.95f),
         contentColor = MaterialTheme.colorScheme.inverseOnSurface,
         shape = MokeShapes.floating,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.widthIn(max = MokeDimens.terminalControlsMaxWidth).fillMaxWidth(),
     ) {
         // 链接单独占一段、最多三行：挤在按钮旁边只剩一行时，长链接的尾巴被省略号盖住，
         // 看上去像只识别到了一半。

@@ -557,26 +557,29 @@ fun DropdownSettingRow(
 ) {
     var open by remember { mutableStateOf(false) }
     val selected = options.firstOrNull { it.id == selectedId }
-    Box {
-        SettingsRowShell(onClick = { open = true }) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            SettingsRowText(title, "")
-            Text(
-                selected?.title ?: missingTitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 168.dp),
-            )
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            options.forEach { opt ->
-                androidx.compose.material3.DropdownMenuItem(
-                    text = { OptionRow(opt) },
-                    onClick = { onSelect(opt.id); open = false },
+    val valueMaxWidth = if (rememberWindowAdaptiveSpec().constrainReadableWidth) 280.dp else 168.dp
+    SettingsRowShell(onClick = { open = true }) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsRowText(title, "")
+        Box {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    selected?.title ?: missingTitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = valueMaxWidth),
                 )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                options.forEach { opt ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { OptionRow(opt) },
+                        onClick = { onSelect(opt.id); open = false },
+                    )
+                }
             }
         }
     }

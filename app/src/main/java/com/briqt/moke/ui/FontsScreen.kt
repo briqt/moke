@@ -138,41 +138,45 @@ fun FontsScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilledTonalButton(
-                        onClick = { importLauncher.launch(arrayOf("*/*")) },
-                        enabled = !importing,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (importing) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                            )
-                            Text("  " + stringResource(R.string.font_importing))
-                        } else {
-                            Text(stringResource(R.string.font_upload))
+                CenteredItem {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilledTonalButton(
+                            onClick = { importLauncher.launch(arrayOf("*/*")) },
+                            enabled = !importing,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (importing) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Text("  " + stringResource(R.string.font_importing))
+                            } else {
+                                Text(stringResource(R.string.font_upload))
+                            }
                         }
-                    }
-                    if (importError != null) {
-                        Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (importSuccess != null) {
-                        Text(stringResource(R.string.font_imported, importSuccess), color = MaterialTheme.extra.ok, style = MaterialTheme.typography.bodySmall)
+                        if (importError != null) {
+                            Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (importSuccess != null) {
+                            Text(stringResource(R.string.font_imported, importSuccess), color = MaterialTheme.extra.ok, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
             items(sortedFonts, key = { it.id }) { spec ->
-                FontCard(
-                    spec = spec,
-                    state = states[spec.id] ?: FontInstallState.Absent,
-                    isPrimary = spec.id == primaryId,
-                    isFallback = spec.id == fallbackId,
-                    onDownload = { onDownload(spec.id) },
-                    onDelete = { pendingDelete = spec },
-                    onSetPrimary = { onSetPrimary(spec.id) },
-                    onSetFallback = { onSetFallback(if (fallbackId == spec.id) "" else spec.id) },
-                )
+                CenteredItem {
+                    FontCard(
+                        spec = spec,
+                        state = states[spec.id] ?: FontInstallState.Absent,
+                        isPrimary = spec.id == primaryId,
+                        isFallback = spec.id == fallbackId,
+                        onDownload = { onDownload(spec.id) },
+                        onDelete = { pendingDelete = spec },
+                        onSetPrimary = { onSetPrimary(spec.id) },
+                        onSetFallback = { onSetFallback(if (fallbackId == spec.id) "" else spec.id) },
+                    )
+                }
             }
         }
     }
