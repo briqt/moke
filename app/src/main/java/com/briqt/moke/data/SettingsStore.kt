@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.briqt.moke.terminal.FontCatalog
 import com.briqt.moke.terminal.TerminalThemes
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -427,6 +428,75 @@ class SettingsStore(
             prefs[cursorStyleKey] = 0
             prefs[cursorBlinkKey] = true
         }
+    }
+
+    /*
+     * 可随同步备份走的偏好：白名单，按类型分开列。以后新增的键默认**不**同步，必须在这里显式归类，
+     * 防止设备专属状态（下载目录授权、更新检查记录、导入字体清单、迁移标记、已废弃的滚动键）被误带走。
+     */
+    private val syncableStrings = listOf(colorSchemeKey, lightColorSchemeKey, primaryFontKey, fallbackFontKey,
+        sessionGroupByKey, sessionSortByKey, extraKeysLayoutKey, themeModeKey, keyboardModeKey, filesSortKey)
+    private val syncableBooleans = listOf(schemeFollowsThemeKey, cursorBlinkKey, extraKeysVisibleKey, dynamicColorKey,
+        tmuxScrollSetupKey, confirmCloseKey, keepScreenOnKey, autoTrustNewHostKeyKey, terminalAlertsKey,
+        includePrereleaseKey, filesShowHiddenKey)
+    private val syncableFloats = listOf(fontSizeKey, lineSpacingKey, letterSpacingKey)
+    private val syncableInts = listOf(fontSizeKeyInt, cursorStyleKey)
+
+    /** 本机已设置过的可同步偏好（没设过的不导出，恢复时据此回到默认）。 */
+    suspend fun exportSyncable(): Map<String, com.briqt.moke.sync.PrefValue> {
+        val prefs = preferencesStore.data.first()
+        val out = mutableMapOf<String, com.briqt.moke.sync.PrefValue>()
+        syncableStrings.forEach { k -> prefs[k]?.let { out[k.name] = com.briqt.moke.sync.PrefValue.S(it) } }
+        syncableBooleans.forEach { k -> prefs[k]?.let { out[k.name] = com.briqt.moke.sync.PrefValue.B(it) } }
+        syncableFloats.forEach { k -> prefs[k]?.let { out[k.name] = com.briqt.moke.sync.PrefValue.F(it) } }
+        syncableInts.forEach { k -> prefs[k]?.let { out[k.name] = com.briqt.moke.sync.PrefValue.I(it) } }
+        return out
+    }
+
+    /**
+     * 按备份恢复偏好（单次事务）：文件里有的写入；文件里没有的（来源设备没设过）移除，回到默认；
+     * 类型对不上的视为损坏，保留本机值。字体选择指向本机不存在的字体时由 [repairUnavailableFontSelections] 修正。
+     */
+    suspend fun importSyncable(values: Map<String, com.briqt.moke.sync.PrefValue>) {
+        preferencesStore.edit { prefs ->
+            val prereleaseBefore = prefs[includePrereleaseKey]
+            syncableStrings.forEach { k ->
+                when (val v = values[k.name]) {
+                    null -> prefs.remove(k)
+                    is com.briqt.moke.sync.PrefValue.S -> prefs[k] = v.v
+                    else -> Unit
+                }
+            }
+            syncableBooleans.forEach { k ->
+                when (val v = values[k.name]) {
+                    null -> prefs.remove(k)
+                    is com.briqt.moke.sync.PrefValue.B -> prefs[k] = v.v
+                    else -> Unit
+                }
+            }
+            syncableFloats.forEach { k ->
+                when (val v = values[k.name]) {
+                    null -> prefs.remove(k)
+                    is com.briqt.moke.sync.PrefValue.F -> if (v.v.isFinite()) prefs[k] = v.v
+                    else -> Unit
+                }
+            }
+            syncableInts.forEach { k ->
+                when (val v = values[k.name]) {
+                    null -> prefs.remove(k)
+                    is com.briqt.moke.sync.PrefValue.I -> prefs[k] = v.v
+                    else -> Unit
+                }
+            }
+            prefs[fontSizeKey]?.let { prefs[fontSizeKey] = snapFontSize(it) }
+            // 与 setIncludePrerelease 相同：口径变了就清掉已记住的版本与节流。
+            if (prefs[includePrereleaseKey] != prereleaseBefore) {
+                prefs[latestSeenTagKey] = ""
+                prefs[latestSeenUrlKey] = ""
+                prefs[lastUpdateCheckKey] = 0L
+            }
+        }
+        repairUnavailableFontSelections()
     }
 
     /** 用户上传字体清单。 */

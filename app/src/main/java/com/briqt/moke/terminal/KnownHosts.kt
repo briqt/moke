@@ -29,6 +29,16 @@ class KnownHosts(context: Context) {
         prefs.edit().remove(id).apply()
     }
 
+    /** 全部已记录的指纹（同步导出用）。 */
+    fun all(): Map<String, String> = prefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+
+    /** 整体写成 [entries]（同步恢复用；合并与否由调用方算好）。同步提交，返回是否落盘。 */
+    fun replaceAll(entries: Map<String, String>): Boolean {
+        val editor = prefs.edit().clear()
+        entries.forEach { (k, v) -> editor.putString(k, v) }
+        return editor.commit()
+    }
+
     companion object {
         fun idOf(host: String, port: Int) = "$host:$port"
 

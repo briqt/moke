@@ -45,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
@@ -189,6 +190,8 @@ fun HomeScreen(
     networks: List<NetworkEntry> = emptyList(),
     networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
     onOpenNetworks: () -> Unit = {},
+    onOpenSync: () -> Unit = {},
+    syncSubtitle: String = "",
     /** 点主机连接前的本地检查（已删除的网络/跳板机、从没登录的 tailnet），见 [MokeViewModel.preflight]。 */
     preflight: (Host) -> MokeViewModel.Preflight = { MokeViewModel.Preflight.Ok },
     onLoginNetwork: (NetworkEntry) -> Unit = {},
@@ -368,7 +371,7 @@ fun HomeScreen(
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
-                    networks, networkLive, onOpenNetworks, networkState,
+                    networks, networkLive, onOpenNetworks, networkState, onOpenSync, syncSubtitle,
                 )
             }
         }
@@ -1083,6 +1086,8 @@ private fun SettingsMenuContent(
     networkLive: MokeViewModel.NetworkLive,
     onOpenNetworks: () -> Unit,
     networkState: ListState<NetworkEntry>,
+    onOpenSync: () -> Unit,
+    syncSubtitle: String,
 ) {
     val context = LocalContext.current
     var langDialog by remember { mutableStateOf(false) }
@@ -1113,6 +1118,7 @@ private fun SettingsMenuContent(
             NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
             NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
             NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
+            NavRow(Icons.Filled.CloudSync, stringResource(R.string.menu_sync), syncSubtitle, onClick = onOpenSync)
             NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
         }
         // 有新版时在「关于」上点一方朱砂小印（静默检查的唯一提示）。

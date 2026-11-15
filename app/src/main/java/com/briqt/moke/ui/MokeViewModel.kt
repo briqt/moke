@@ -543,6 +543,41 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }.await()
 
+    // ---------- 同步（WebDAV 配置网盘） ----------
+
+    val sync: com.briqt.moke.sync.SyncController by lazy {
+        com.briqt.moke.sync.SyncController(
+            getApplication(), com.briqt.moke.sync.SyncConfigStore(getApplication()), store, networkStore, settings, knownHosts,
+            object : com.briqt.moke.sync.SyncController.Ops {
+                override suspend fun <T> withStoreLock(block: suspend () -> T): T = sessions.tmuxMemoryMutex.withLock { block() }
+                override suspend fun deleteNetwork(entry: NetworkEntry) = this@MokeViewModel.deleteNetwork(entry)
+                override suspend fun resetTailnetIdentity(entry: NetworkEntry) = logoutTailnet(entry)
+                override suspend fun hasLoggedIn(entry: NetworkEntry): Boolean = withContext(Dispatchers.IO) { networkManager.hasLoggedIn(entry) }
+                override fun refreshNetworks() { refreshNetworksOnce() }
+                override fun defaultDeviceName(): String = NetworkManager.defaultDeviceName()
+            },
+        )
+    }
+
+    /** 同步设置：null = 还在读；Ready(null) = 未配置。 */
+    val syncSettings: StateFlow<SyncSettingsState> = sync.settings
+        .map<com.briqt.moke.sync.SyncSettings?, SyncSettingsState> { SyncSettingsState.Ready(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SyncSettingsState.Loading)
+
+    sealed interface SyncSettingsState {
+        data object Loading : SyncSettingsState
+        data class Ready(val settings: com.briqt.moke.sync.SyncSettings?) : SyncSettingsState
+    }
+
+    /** 最近一次恢复的结果（按文件名），离开详情页去登录网络再回来时仍能看到。 */
+    private val _lastRestore = MutableStateFlow<Pair<String, com.briqt.moke.sync.ApplyResult>?>(null)
+    val lastRestore: StateFlow<Pair<String, com.briqt.moke.sync.ApplyResult>?> = _lastRestore.asStateFlow()
+
+    suspend fun applyRestore(name: String, plan: com.briqt.moke.sync.RestorePlan, bundle: com.briqt.moke.sync.SyncBundle): com.briqt.moke.sync.ApplyResult =
+        viewModelScope.async { sync.apply(plan, bundle) }.await().also { _lastRestore.value = name to it }
+
+    fun clearLastRestore() { _lastRestore.value = null }
+
     private suspend fun forgetNetwork(entry: NetworkEntry): StoreResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val ok = networkManager.forget(entry)

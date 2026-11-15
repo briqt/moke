@@ -68,6 +68,11 @@ sealed interface Screen {
     /** 设置 → 网络（tailnet 与代理）。 */
     data object Networks : Screen
 
+    /** 设置 → 同步（WebDAV 配置网盘）及其 WebDAV 设置页、单个备份的详情页。 */
+    data object Sync : Screen
+    data object SyncSetup : Screen
+    data class SyncBackup(val backup: com.briqt.moke.sync.RemoteBackup) : Screen
+
     /** Keep the opening snapshot: a read failure must not turn an existing editor into a new entry. */
     data class NetworkEdit(val kind: NetworkKind, val entry: NetworkEntry?, val back: Screen) : Screen
 
@@ -94,6 +99,11 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
 
     val hosts by vm.hosts.collectAsState()
     val hostsState by vm.hostsState.collectAsState()
+    val syncSettings by vm.syncSettings.collectAsState()
+    val lastRestore by vm.lastRestore.collectAsState()
+    val syncSubtitle = (syncSettings as? MokeViewModel.SyncSettingsState.Ready)?.let { ready ->
+        syncSummary(ready.settings) ?: androidx.compose.ui.res.stringResource(com.briqt.moke.R.string.menu_sync_off)
+    }.orEmpty()
     val networksState by vm.networksState.collectAsState()
     val credentialsUnreadable by vm.credentialsUnreadable.collectAsState()
     val sessions by vm.sessions.sessions.collectAsState()
@@ -283,7 +293,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     }
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
-    val backEnabled = screen !is Screen.Edit && screen !is Screen.NetworkEdit &&
+    val backEnabled = screen !is Screen.Edit && screen !is Screen.NetworkEdit && screen !is Screen.SyncSetup &&
         (screen !is Screen.Home || homeTab != HomeTab.Connections)
     // 打开文件页：断开旧的（若有）并按新主机建连；从终端进时带上会话以取当前目录。
     val openFiles: (Host, String?) -> Unit = { host, sessionId ->
@@ -297,7 +307,9 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             is Screen.TerminalSettings -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.Networks -> { screen = Screen.Home; homeTab = HomeTab.Settings }
-            is Screen.NetworkEdit, is Screen.Edit -> Unit // Their editor shell owns every leave request.
+            is Screen.Sync -> { screen = Screen.Home; homeTab = HomeTab.Settings }
+            is Screen.SyncBackup -> screen = Screen.Sync
+            is Screen.NetworkEdit, is Screen.Edit, is Screen.SyncSetup -> Unit // Their editor shell owns every leave request.
             is Screen.Terminal -> screen = Screen.Home
             // 从终端进来的回终端，从连接列表进来的回列表；离开即断开那条 SFTP 连接。
             is Screen.Files -> {
@@ -348,6 +360,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             networks = networks,
             networkLive = networkLive,
             onOpenNetworks = { screen = Screen.Networks },
+            onOpenSync = { screen = Screen.Sync },
+            syncSubtitle = syncSubtitle,
             preflight = vm::preflight,
             onLoginNetwork = { screen = Screen.NetworkEdit(NetworkKind.TAILSCALE, it, Screen.Home) },
             hostsState = hostsState,
@@ -394,6 +408,41 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             networkState = networksState,
             onRetry = vm::retryNetworkReads,
         )
+
+        is Screen.Sync -> SyncScreen(
+            state = syncSettings,
+            onList = vm.sync::list,
+            onUpload = vm.sync::upload,
+            onSetup = { screen = Screen.SyncSetup },
+            onOpen = { screen = Screen.SyncBackup(it) },
+            onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+        )
+
+        is Screen.SyncSetup -> WebDavEditScreen(
+            initial = (syncSettings as? MokeViewModel.SyncSettingsState.Ready)?.settings,
+            onSave = vm.sync::testAndSave,
+            onRemove = vm.sync::clearSettings,
+            onClose = { if (screen == s) screen = Screen.Sync },
+        )
+
+        is Screen.SyncBackup -> key(s.backup.name) {
+            BackupScreen(
+                backup = s.backup,
+                onDownload = vm.sync::download,
+                onDecrypt = vm.sync::decrypt,
+                onLocalState = vm.sync::localState,
+                onPlan = vm.sync::plan,
+                onApply = { plan, bundle -> vm.applyRestore(s.backup.name, plan, bundle) },
+                onDelete = vm.sync::delete,
+                lastResult = lastRestore?.takeIf { it.first == s.backup.name }?.second,
+                networkLive = networkLive,
+                loginFlows = loginFlows,
+                onWatchNetworks = vm::watchNetworks,
+                onLogin = { e -> screen = Screen.NetworkEdit(e.kind, e, s) },
+                onDone = { vm.clearLastRestore(); screen = Screen.Sync },
+                onBack = { screen = Screen.Sync },
+            )
+        }
 
         is Screen.NetworkEdit -> key(s.entry?.id ?: s.kind.name) {
             networkEditor(s.kind, s.entry) { if (screen == s) returnTo(s.back) }

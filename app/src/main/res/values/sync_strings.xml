@@ -1,0 +1,106 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="menu_sync">Sync</string>
+    <string name="menu_sync_off">Not set up</string>
+    <string name="sync_empty_title">Back up your setup to your own WebDAV</string>
+    <string name="sync_empty_hint">Backups are end-to-end encrypted with your sync password, so the storage provider cannot read them. On a new or another device, pick a backup to restore hosts, networks, fingerprints and preferences.</string>
+    <string name="sync_setup_webdav">Set up WebDAV</string>
+    <string name="sync_upload">Upload this device\'s setup</string>
+    <string name="sync_uploading">Encrypting and uploading…</string>
+    <string name="sync_uploaded">Uploaded: %1$s</string>
+    <string name="sync_backups">Backups</string>
+    <string name="sync_loading">Loading…</string>
+    <string name="sync_no_backups">No backups yet. Tap \"Upload this device\'s setup\" to create one.</string>
+    <string name="sync_this_device">This device</string>
+
+    <string name="webdav_url">Server URL</string>
+    <string name="webdav_url_hint">Starts with https://, for example https://dav.example.com/remote.php/dav/files/me/</string>
+    <string name="webdav_url_invalid">Enter a valid address starting with https://</string>
+    <string name="webdav_username">Username</string>
+    <string name="webdav_password">Password</string>
+    <string name="webdav_password_hint">If your provider offers app passwords, use one here</string>
+    <string name="webdav_directory">Folder</string>
+    <string name="webdav_directory_hint">Backups are stored in this folder. It is created if missing.</string>
+    <string name="webdav_required">Required</string>
+    <string name="sync_password">Sync password</string>
+    <string name="sync_password_confirm">Confirm sync password</string>
+    <string name="sync_password_keep_hint">Leave blank to keep the current one</string>
+    <string name="sync_password_short">At least 8 characters</string>
+    <string name="sync_password_mismatch">The passwords do not match</string>
+    <string name="sync_password_note">The sync password encrypts your backups, and restoring on another device needs the same password. If you forget it, backups encrypted with it cannot be restored. Changing it only affects later uploads.</string>
+    <string name="sync_connecting">Connecting…</string>
+    <string name="webdav_remove">Remove WebDAV setup</string>
+    <string name="webdav_remove_title">Remove WebDAV setup?</string>
+    <string name="webdav_remove_message">Only the server details and sync password saved on this device are removed. Backups on WebDAV are not affected.</string>
+    <string name="webdav_remove_action">Remove</string>
+
+    <string name="sync_err_invalid_url">Invalid address: it must start with https://</string>
+    <string name="sync_err_auth">Wrong username or password</string>
+    <string name="sync_err_forbidden">No permission to use this folder</string>
+    <string name="sync_err_not_found">Folder not found, or the address is wrong</string>
+    <string name="sync_err_quota">WebDAV storage is full</string>
+    <string name="sync_err_certificate">The server certificate is not trusted</string>
+    <string name="sync_err_network">Cannot reach the server. Check your network.</string>
+    <string name="sync_err_server">Server error (%1$d)</string>
+    <string name="sync_err_protocol">The server returned an unexpected response</string>
+    <string name="sync_err_too_large">The file is too large</string>
+    <string name="sync_err_local_unreadable">Host or network data on this device cannot be read right now, so upload and restore are unavailable</string>
+    <string name="sync_err_not_configured">WebDAV is not set up</string>
+    <string name="sync_err_storage">Could not save the settings</string>
+
+    <string name="sync_backup_loading">Downloading and decrypting…</string>
+    <string name="sync_backup_password_title">This backup uses a different sync password</string>
+    <string name="sync_backup_password_hint">Enter the sync password used when this backup was made</string>
+    <string name="sync_backup_password_wrong">Wrong password, or the file is damaged</string>
+    <string name="sync_backup_unlock">Unlock</string>
+    <string name="sync_backup_newer">This backup was made by a newer version. Update the app first.</string>
+    <string name="sync_backup_corrupt">The file is damaged and cannot be read</string>
+    <string name="sync_restore_what">What to restore</string>
+    <string name="sync_cat_hosts">Hosts</string>
+    <string name="sync_cat_networks">Networks</string>
+    <string name="sync_cat_fingerprints">Host fingerprints</string>
+    <string name="sync_cat_settings">Preferences</string>
+    <plurals name="sync_items">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <plurals name="sync_fingerprints">
+        <item quantity="one">%d fingerprint</item>
+        <item quantity="other">%d fingerprints</item>
+    </plurals>
+    <string name="sync_mode">Mode</string>
+    <string name="sync_mode_merge">Merge</string>
+    <string name="sync_mode_replace">Replace</string>
+    <string name="sync_mode_merge_hint">Adds or updates what is in the backup and keeps what only this device has.</string>
+    <string name="sync_mode_replace_hint">Makes the selected items match the backup exactly. Items that exist only on this device are removed.</string>
+    <string name="sync_auto_networks">\"Networks\" was selected too, because some hosts use networks from this backup.</string>
+    <string name="sync_preview">Changes</string>
+    <!-- 一句里有三个计数，不适合拆成复数资源；英文用「2 added」这种不变形写法。 -->
+    <string name="sync_preview_counts" tools:ignore="PluralsCandidate">%1$s: %2$d added · %3$d updated · %4$d removed</string>
+    <string name="sync_preview_unchanged">%1$s: no changes</string>
+    <string name="sync_preview_settings">Preferences: restored from the backup. Items not set there return to their defaults.</string>
+    <string name="sync_preview_added">Will add: %1$s</string>
+    <string name="sync_preview_removed">Will remove: %1$s</string>
+    <string name="sync_preview_more" tools:ignore="PluralsCandidate">%1$s and %2$d more</string>
+    <string name="sync_preview_none">Nothing to change</string>
+    <string name="sync_preview_relogin">%1$s will use a different control server and must sign in again on this device</string>
+    <string name="sync_preview_skipped">Over the Tailscale network limit, not restored: %1$s</string>
+    <plurals name="sync_preview_dangling">
+        <item quantity="one">%d host uses a network that is not on this device. Choose a network for it after restoring.</item>
+        <item quantity="other">%d hosts use networks that are not on this device. Choose a network for them after restoring.</item>
+    </plurals>
+    <string name="sync_list_separator">", "</string>
+    <string name="sync_restore">Restore to this device</string>
+    <string name="sync_restoring">Restoring…</string>
+    <string name="sync_restore_confirm_title">Restore to this device?</string>
+    <string name="sync_restore_confirm_message">The backup will be written to this device as selected.</string>
+    <string name="sync_restore_confirm_removal">These will be removed from this device and cannot be recovered: %1$s</string>
+    <string name="sync_delete_backup">Delete this backup</string>
+    <string name="sync_deleting">Deleting…</string>
+    <string name="sync_delete_title">Delete this backup?</string>
+    <string name="sync_delete_message">%1$s will be permanently deleted from WebDAV. Settings on this device are not affected.</string>
+    <string name="sync_result_title">Restored</string>
+    <string name="sync_result_failed">These could not be written: %1$s</string>
+    <string name="sync_result_login">Networks that need to sign in on this device</string>
+    <string name="sync_result_login_hint">Each device joins Tailscale as its own device and signs in once.</string>
+    <string name="sync_done">Done</string>
+</resources>
