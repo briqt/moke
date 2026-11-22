@@ -20,6 +20,7 @@
 - **Sessions & tmux**: multiple sessions, background connections, remote tmux session management, and port forwarding that listens only on the device's loopback interface.
 - **Files**: SFTP browsing, uploads and downloads with resume, and sending file paths to the terminal.
 - **Terminal**: customizable extra keys, IME input, text-block input, links, clipboard and notification support, fonts and color schemes, and English / Chinese interfaces.
+- **Backup & restore**: upload end-to-end encrypted backups over HTTPS WebDAV, and preview changes before merging or replacing selected categories.
 
 Network credentials and tailnet login state are encrypted with the Android Keystore.
 
