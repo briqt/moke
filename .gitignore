@@ -1,8 +1,12 @@
+# 默认忽略所有 . 开头的文件和目录，需要跟踪的逐个放行
 .*
 !.gitignore
+!/.github/
 !.github
 
-# 构建产物
+# 个人 Agent 指令不入库
+/AGENTS.md
+
 build/
 /local.properties
 captures/
@@ -10,23 +14,11 @@ captures/
 *.aab
 *.ap_
 *.dex
-
-# mosh native 产物：由 scripts/build-mosh-native.sh 生成（GPLv3 二进制不入库）
 app/src/main/jniLibs/**/*.so
-
-# 旧构建遗留的可下载字体：不得意外重新纳入随包资源
 app/src/main/res/font/maple_mono.ttf
-
-# 密钥/签名
 *.keystore
 *.jks
-
-# 内部：AI/协作开发指引（不公开）
-/AGENTS.md
-
-# netbridge（Go）AAR：由 scripts/build-netbridge.sh 生成（不入库）
 app/libs/netbridge.aar
-# AAR 与内容指纹的不可变生成目录；netbridge.aar 原子指向一个完整生成。
 app/libs/netbridge-artifacts/
 app/libs/netbridge.aar.fingerprint
 app/libs/netbridge-sources.jar
