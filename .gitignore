@@ -25,5 +25,4 @@ app/libs/netbridge-artifacts/
 app/libs/netbridge.aar.fingerprint
 app/libs/netbridge-sources.jar
 
-# 内部：AI/协作开发指引（不公开）
 /AGENTS.md
