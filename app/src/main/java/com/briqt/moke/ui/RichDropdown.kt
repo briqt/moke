@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +32,7 @@ data class DropdownOption(
     val id: String,
     val title: String,
     val subtitle: String? = null,
+    val annotatedSubtitle: AnnotatedString? = null,
     val tags: List<BadgeSpec> = emptyList(),
     val status: String? = null,
     val leading: (@Composable () -> Unit)? = null,
@@ -165,8 +167,13 @@ internal fun OptionRow(opt: DropdownOption) {
                 Text(opt.title, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
                 opt.tags.forEach { MokeBadge(it.text, it.color) }
             }
-            if (opt.subtitle != null) {
-                Text(
+            when {
+                opt.annotatedSubtitle != null -> Text(
+                    opt.annotatedSubtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                opt.subtitle != null -> Text(
                     opt.subtitle,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

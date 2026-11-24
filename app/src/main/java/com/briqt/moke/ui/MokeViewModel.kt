@@ -32,6 +32,8 @@ import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.SortBy
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.KeyEntry
+import com.briqt.moke.data.KeyStore
 import com.briqt.moke.data.ListState
 import com.briqt.moke.data.MissingKind
 import com.briqt.moke.data.NetworkEntry
@@ -46,7 +48,10 @@ import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.data.UserFont
 import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.data.hostsUsingKey
 import com.briqt.moke.data.hostsUsingNetwork
+import com.briqt.moke.data.migrateInlineKeysIfNeeded
+import com.briqt.moke.data.migrateInlineKeysLocked
 import com.briqt.moke.net.NetworkException
 import com.briqt.moke.net.NetworkManager
 import com.briqt.moke.net.NetworkRecovery
@@ -119,6 +124,12 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private val networkStore = NetworkStore(app)
     val networksState: StateFlow<ListState<NetworkEntry>> = networkStore.state
         .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
+    private val keyStore = KeyStore(app)
+    val keysState: StateFlow<ListState<KeyEntry>> = keyStore.state
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ListState.Loading)
+    val keys: StateFlow<List<KeyEntry>> = keysState
+        .map { (it as? ListState.Ready)?.items.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
      * 存量凭据解不开（Keystore 密钥失效，典型是整机备份恢复到新机）。
@@ -272,6 +283,20 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         if (store.updateAll { clearDanglingJumps(it) }) settings.setDanglingJumpsCleared()
     }
 
+    private fun migrateInlineKeys() = viewModelScope.launch(Dispatchers.IO) {
+        migrateInlineKeysIfNeeded(store, keyStore, sessions.tmuxMemoryMutex)
+    }
+
+    suspend fun saveKey(entry: KeyEntry, editing: Boolean): StoreResult<KeyEntry> = sessions.tmuxMemoryMutex.withLock {
+        keyStore.commit(entry, editing)
+    }
+
+    suspend fun deleteKey(entry: KeyEntry): StoreResult<Unit> = sessions.tmuxMemoryMutex.withLock {
+        keyStore.remove(entry.id)
+    }
+
+    fun hostsUsingKey(keyId: String): Int = hostsUsingKey(keyId, hostsState.value)
+
     // 连接页：固定按项目分组，仅持久化「分组顺序」与「已折叠分组」。
     val hostGroupOrder: StateFlow<List<String>> = settings.hostGroupOrder
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -334,7 +359,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun clearImportSuccess() { _importSuccess.value = null }
 
     suspend fun saveHost(host: Host, editing: Boolean): StoreResult<Host> = sessions.tmuxMemoryMutex.withLock {
-        store.commit(host, editing)
+        val committed = store.commit(host, editing)
+        if (committed is StoreResult.Saved && (committed.value.privateKeyPem.isNotEmpty() || committed.value.passphrase.isNotEmpty())) {
+            migrateInlineKeysLocked(store, keyStore)
+            val migrated = (store.state.first() as? ListState.Ready)?.items?.firstOrNull { it.id == committed.value.id }
+            if (migrated != null) return@withLock StoreResult.Saved(migrated)
+        }
+        committed
     }
 
     fun save(host: Host) = viewModelScope.launch {
@@ -343,17 +374,22 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun delete(host: Host) = viewModelScope.launch {
-        val removed = store.remove(host.id)
+        val removed = sessions.tmuxMemoryMutex.withLock {
+            val res = store.remove(host.id)
+            if (res is StoreResult.Saved) {
+                // 同时忘记指纹：否则服务器换密钥后"删除重建连接"依然连不上（指纹按 host:port 存，与条目无关）。
+                val remaining = (store.state.first() as? ListState.Ready)?.items ?: hosts.value
+                if (remaining.none {
+                        it.id != host.id && it.host == host.host && it.port == host.port && it.fingerprintNamespace == host.fingerprintNamespace
+                    }
+                ) {
+                    knownHosts.forget(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
+                }
+            }
+            res
+        }
         if (removed is StoreResult.Failed) {
             _networkNotice.value = str(storeFailureMessage(removed.reason))
-            return@launch
-        }
-        // 同时忘记指纹：否则服务器换密钥后"删除重建连接"依然连不上（指纹按 host:port 存，与条目无关）。
-        if (hosts.value.none {
-                it.id != host.id && it.host == host.host && it.port == host.port && it.fingerprintNamespace == host.fingerprintNamespace
-            }
-        ) {
-            knownHosts.forget(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
         }
     }
 
@@ -435,7 +471,9 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun retryNetworkReads() {
         networkStore.refresh()
+        keyStore.refresh()
         store.refresh()
+        migrateInlineKeys()
         refreshNetworksOnce()
     }
 
@@ -546,7 +584,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     val sync: com.briqt.moke.sync.SyncController by lazy {
         com.briqt.moke.sync.SyncController(
-            getApplication(), com.briqt.moke.sync.SyncConfigStore(getApplication()), store, networkStore, settings, knownHosts,
+            getApplication(), com.briqt.moke.sync.SyncConfigStore(getApplication()), store, keyStore, networkStore, settings, knownHosts,
             object : com.briqt.moke.sync.SyncController.Ops {
                 override suspend fun <T> withStoreLock(block: suspend () -> T): T = sessions.tmuxMemoryMutex.withLock { block() }
                 override suspend fun deleteNetwork(entry: NetworkEntry) = this@MokeViewModel.deleteNetwork(entry)
@@ -642,14 +680,26 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         knownHosts.forget(KnownHosts.idOf(host.host, host.port, host.fingerprintNamespace))
     }
 
-    /** 复制主机为新条目（label 加「副本」，新 id，清空最近连接时间）。 */
+    /** 复制主机为新条目（label 加「副本」，新 id，清空最近连接时间与 tmux 绑定记忆）。 */
     fun duplicate(host: Host) = viewModelScope.launch {
-        val copy = host.copy(
-            id = java.util.UUID.randomUUID().toString(),
-            label = (host.label.ifBlank { host.displayName }) + " " + str(R.string.duplicate_suffix),
-            lastConnectedAt = 0L,
-        )
-        store.upsert(copy, hosts.value)
+        val result = sessions.tmuxMemoryMutex.withLock {
+            val source = (store.state.first() as? ListState.Ready)?.items?.firstOrNull { it.id == host.id } ?: host
+            val copy = source.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                label = (source.label.ifBlank { source.displayName }) + " " + str(R.string.duplicate_suffix),
+                lastConnectedAt = 0L,
+                tmuxSessionName = "",
+                tmuxTargetStamp = "",
+            )
+            val committed = store.commit(copy, editing = false)
+            if (committed is StoreResult.Saved && (committed.value.privateKeyPem.isNotEmpty() || committed.value.passphrase.isNotEmpty())) {
+                migrateInlineKeysLocked(store, keyStore)
+            }
+            committed
+        }
+        if (result is StoreResult.Failed) {
+            _networkNotice.value = str(storeFailureMessage(result.reason))
+        }
     }
 
     fun setSessionGroupBy(g: GroupBy) = viewModelScope.launch { settings.setSessionGroupBy(g) }
@@ -750,8 +800,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         tmuxTracking[ts.id] = viewModelScope.launch {
             var scrollTarget: TmuxSessionRef? = null
             var dataEnded = false
-            combine(ts.tmuxState, store.state, networkStore.state, ts.alive, ts.connectFailed) { state, hosts, networks, _, _ ->
-                state to resolveRoute(ts.host.id, hosts, networks)
+            val routeFlow = combine(store.state, networkStore.state, keyStore.state) { hosts, networks, keys ->
+                resolveRoute(ts.host.id, hosts, networks, keys)
+            }
+            combine(ts.tmuxState, routeFlow, ts.alive, ts.connectFailed) { state, route, _, _ ->
+                state to route
             }.collect { (state, route) ->
                 if (sessions.get(ts.id) !== ts) return@collect
                 if (!dataEnded && (!ts.alive.value || ts.connectFailed.value)) {
@@ -1025,10 +1078,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      * 这台主机现在怎么连（唯一入口，见 [resolveRoute]）：失效的跳板机或网络一律拒连，
      * 不再像过去那样把被删除的跳板机静默当成直连。
      */
-    private fun routeOf(hostId: String): Route = resolveRoute(hostId, hostsState.value, networksState.value)
+    private fun routeOf(hostId: String): Route = resolveRoute(hostId, hostsState.value, networksState.value, keysState.value)
 
     private suspend fun storedRouteOf(hostId: String): Route = withContext(Dispatchers.IO) {
-        resolveRoute(hostId, store.state.first(), networkStore.state.first())
+        resolveRoute(hostId, store.state.first(), networkStore.state.first(), keyStore.state.first())
     }
 
     fun closeSession(id: String) {
@@ -1318,6 +1371,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         }.launchIn(viewModelScope)
         repairLegacyTmuxLoginCommands()
         clearDanglingJumpsOnce()
+        migrateInlineKeys()
         checkUpdateSilently()
     }
 

@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -125,10 +126,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.PaddingValues
 import com.briqt.moke.LocaleManager
 import com.briqt.moke.R
+import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.KeyEntry
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.ListState
+import com.briqt.moke.data.usesKeyStore
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
 import com.briqt.moke.data.NetworkEntry
@@ -189,6 +193,9 @@ fun HomeScreen(
     networks: List<NetworkEntry> = emptyList(),
     networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
     onOpenNetworks: () -> Unit = {},
+    keys: List<KeyEntry> = emptyList(),
+    keyState: ListState<KeyEntry> = ListState.Ready(keys),
+    onOpenKeys: () -> Unit = {},
     onOpenSync: () -> Unit = {},
     syncSubtitle: String = "",
     /** 点主机连接前的本地检查（已删除的网络/跳板机、从没登录的 tailnet），见 [MokeViewModel.preflight]。 */
@@ -202,7 +209,7 @@ fun HomeScreen(
     onRecover: (Host, NetworkRecovery) -> Unit = { host, recovery ->
         when (recovery.kind) {
             RecoveryKind.LOGIN_NETWORK, RecoveryKind.VIEW_NETWORK, RecoveryKind.EDIT_NETWORK -> recovery.network?.let(onLoginNetwork)
-            RecoveryKind.EDIT_HOST -> onEditHost(host)
+            RecoveryKind.EDIT_HOST -> onEditHost(recovery.targetHostId?.let { id -> hosts.firstOrNull { it.id == id } } ?: host)
             RecoveryKind.RETRY -> onRetryReads()
         }
     },
@@ -366,11 +373,11 @@ fun HomeScreen(
             label = "homeTab",
         ) { currentTab ->
             when (currentTab) {
-                HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, onRetryReads, addHostFabTop.takeIf { showAddHostFab })
+                HomeTab.Connections -> ConnectionsContent(padding, (hostsState as? ListState.Ready)?.items ?: hosts, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, connect, networks, networkLive, hostsState, networkState, keys, keyState, onRetryReads, addHostFabTop.takeIf { showAddHostFab })
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
-                    networks, networkLive, onOpenNetworks, networkState, onOpenSync, syncSubtitle,
+                    networks, networkLive, onOpenNetworks, networkState, keys, keyState, onOpenKeys, onOpenSync, syncSubtitle,
                 )
             }
         }
@@ -402,7 +409,7 @@ fun HomeScreen(
             is MokeViewModel.Preflight.Refused -> ConfirmDialog(
                 title = stringResource(R.string.preflight_refused_title),
                 message = p.reason,
-                confirmLabel = stringResource(p.recovery?.let { recoveryActionLabel(it.kind) } ?: R.string.action_ok),
+                confirmLabel = stringResource(p.recovery?.let(::recoveryActionLabel) ?: R.string.action_ok),
                 onConfirm = { pendingPreflight = null; p.recovery?.let { onRecover(host, it) } },
                 onDismiss = { pendingPreflight = null },
             )
@@ -463,17 +470,23 @@ private fun ConnectionsContent(
     networkLive: MokeViewModel.NetworkLive,
     hostsState: ListState<Host>,
     networkState: ListState<NetworkEntry>,
+    keys: List<KeyEntry>,
+    keyState: ListState<KeyEntry>,
     onRetryReads: () -> Unit,
     fabTop: Float?,
 ) {
     // 主机卡片上的路由徽标：选了网络显示网络名；本地就能知道的问题（引用已删除、tailnet 从没登录）用错误色。
     val availableNetworks = (networkState as? ListState.Ready)?.items ?: networks
+    val availableKeys = (keyState as? ListState.Ready)?.items ?: keys
+    val keysById = remember(availableKeys) { availableKeys.associateBy { it.id } }
     val loadingNetworks = stringResource(R.string.networks_loading)
     val unreadableNetworks = stringResource(R.string.networks_unreadable)
+    val unreadableKeys = stringResource(R.string.keys_unreadable)
     val loadingHosts = stringResource(R.string.hosts_loading)
     val unreadableHosts = stringResource(R.string.hosts_unreadable_title)
     val deletedNetwork = stringResource(R.string.badge_network_deleted)
     val deletedJump = stringResource(R.string.badge_jump_deleted)
+    val deletedKey = stringResource(R.string.badge_key_deleted)
     val notLoggedIn = stringResource(R.string.net_state_not_logged_in)
     val expiredLabel = stringResource(R.string.net_state_expired)
     val errorColor = MaterialTheme.colorScheme.error
@@ -483,10 +496,15 @@ private fun ConnectionsContent(
         val jump = hosts.firstOrNull { it.id == h.jumpHostId }
         val effective = if (h.jumpHostId.isNotBlank()) jump else h
         val net = availableNetworks.firstOrNull { it.id == effective?.networkId }
+        val hostNeedsKey = h.usesKeyStore()
+        val jumpNeedsKey = jump != null && jump.jumpHostId.isBlank() && jump.usesKeyStore()
         when {
             h.jumpHostId.isNotBlank() && hostsState == ListState.Loading -> BadgeSpec(loadingHosts, neutral)
             h.jumpHostId.isNotBlank() && hostsState == ListState.Unreadable -> BadgeSpec(unreadableHosts, errorColor)
             h.jumpHostId.isNotBlank() && jump == null -> BadgeSpec(deletedJump, errorColor)
+            (jumpNeedsKey || hostNeedsKey) && keyState == ListState.Unreadable -> BadgeSpec(unreadableKeys, errorColor)
+            jump != null && jumpNeedsKey && keyState is ListState.Ready && (jump.keyId.isBlank() || keysById[jump.keyId]?.privateKeyPem.isNullOrBlank()) -> BadgeSpec(deletedKey, errorColor)
+            hostNeedsKey && keyState is ListState.Ready && (h.keyId.isBlank() || keysById[h.keyId]?.privateKeyPem.isNullOrBlank()) -> BadgeSpec(deletedKey, errorColor)
             effective == null || effective.networkId.isBlank() -> null
             networkState == ListState.Loading -> BadgeSpec(loadingNetworks, neutral)
             networkState == ListState.Unreadable -> BadgeSpec(unreadableNetworks, errorColor)
@@ -1101,6 +1119,9 @@ private fun SettingsMenuContent(
     networkLive: MokeViewModel.NetworkLive,
     onOpenNetworks: () -> Unit,
     networkState: ListState<NetworkEntry>,
+    keys: List<KeyEntry>,
+    keyState: ListState<KeyEntry>,
+    onOpenKeys: () -> Unit,
     onOpenSync: () -> Unit,
     syncSubtitle: String,
 ) {
@@ -1116,6 +1137,13 @@ private fun SettingsMenuContent(
         entries.isEmpty() -> stringResource(R.string.menu_network_empty)
         needsLogin != null -> stringResource(R.string.menu_network_needs_login, needsLogin.name)
         else -> stringResource(R.string.menu_network_summary, tailnets.size, entries.size - tailnets.size)
+    }
+    val availableKeys = (keyState as? ListState.Ready)?.items ?: keys
+    val keysSubtitle = when {
+        keyState == ListState.Loading -> stringResource(R.string.keys_loading)
+        keyState == ListState.Unreadable -> stringResource(R.string.keys_unreadable)
+        availableKeys.isEmpty() -> stringResource(R.string.menu_keys_empty)
+        else -> pluralStringResource(R.plurals.menu_keys_summary, availableKeys.size, availableKeys.size)
     }
     val langTag = LocaleManager.currentTag(context)
     val langLabel = when (langTag) {
@@ -1140,6 +1168,7 @@ private fun SettingsMenuContent(
                 onClick = onOpenTerminalSettings,
             )
             NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
+            NavRow(Icons.Filled.Key, stringResource(R.string.menu_keys), keysSubtitle, onClick = onOpenKeys)
             NavRow(Icons.Filled.CloudSync, stringResource(R.string.menu_sync), syncSubtitle, onClick = onOpenSync)
             NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })
         }

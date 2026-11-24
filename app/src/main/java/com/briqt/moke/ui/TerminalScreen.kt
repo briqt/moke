@@ -577,7 +577,7 @@ fun TerminalScreen(
                             } else if (canReconnectFromNotice(endNotice)) {
                                 // Unknown connection loss is reconnectable, but is not proof of recovered work.
                                 if (connectFailed && action != null && action.kind != RecoveryKind.RETRY) {
-                                    TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action.kind))) }
+                                    TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action))) }
                                 }
                                 if (endedInBackground && !ignoringBatteryOptimizations) {
                                     TextButton(onClick = { BackgroundKeepalive.requestIgnoreBatteryOptimizations(context) }) {

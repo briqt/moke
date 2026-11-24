@@ -43,13 +43,17 @@ fun Throwable.connectFailureText(context: Context): String =
 fun Route.refusalText(context: Context): String? = when (this) {
     is Route.Ok -> null
     Route.Loading -> context.localized(R.string.route_loading)
-    is Route.Unreadable -> context.localized(
-        if (what == UnreadableKind.HOSTS) R.string.hosts_unreadable_title else R.string.route_unreadable_networks
-    )
+    is Route.Unreadable -> context.localized(when (what) {
+        UnreadableKind.HOSTS -> R.string.hosts_unreadable_title
+        UnreadableKind.NETWORKS -> R.string.route_unreadable_networks
+        UnreadableKind.KEYS -> R.string.route_unreadable_keys
+    })
     is Route.Missing -> context.localized(when (what) {
         MissingKind.HOST -> R.string.route_missing_host
         MissingKind.JUMP_HOST -> R.string.route_missing_jump
         MissingKind.NETWORK -> R.string.route_missing_network
         MissingKind.JUMP_CHAIN -> R.string.route_jump_chain
+        MissingKind.KEY -> R.string.route_missing_key
+        MissingKind.JUMP_KEY -> R.string.route_missing_jump_key
     })
 }

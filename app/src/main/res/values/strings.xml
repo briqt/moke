@@ -167,7 +167,6 @@
     <string name="field_password">Password</string>
     <string name="auth_key">Private key</string>
     <string name="field_private_key">Private key</string>
-    <string name="field_passphrase">Key passphrase</string>
     <string name="label_protocol">Protocol</string>
     <string name="field_jump_host">Jump host</string>
     <string name="jump_none">None</string>
@@ -618,6 +617,7 @@
     <string name="transfer_overwrite_required">A file with this name exists remotely. Upload it again from Files and confirm replacement.</string>
     <string name="hosts_loading">Loading saved hosts…</string>
     <string name="action_edit_host">Edit host</string>
+    <string name="action_edit_jump_host">Edit jump host</string>
     <!-- Draft editors and recoverable failures -->
     <string name="action_saving">Saving…</string>
     <string name="action_working">Working…</string>
@@ -637,7 +637,7 @@
     <string name="store_failure_io">Couldn\'t write to storage. Check available space and try again.</string>
     <string name="store_failure_missing">This item was deleted. Go back and add it again if needed.</string>
     <string name="store_failure_conflict">This item changed elsewhere. Go back and reopen it before saving.</string>
-    <string name="store_failure_duplicate_name">This type of network already has an entry with this name. Choose another name.</string>
+    <string name="store_failure_duplicate_name">An entry with this name already exists. Choose another name.</string>
     <string name="store_failure_tailnet_limit">The Tailscale network limit has been reached. Remove an unused network first.</string>
     <string name="store_failure_invalid">Check the highlighted fields and try again.</string>
     <string name="networks_loading">Loading saved networks…</string>
@@ -659,10 +659,6 @@
     <string name="net_waiting_approval_hint">An administrator must approve this device before it can connect.</string>
     <string name="net_return_after_login">Complete authorization in the browser, then return to Moke.</string>
     <string name="net_logged_in_hint">Select this network under Network when editing a host.</string>
-    <plurals name="private_key_summary">
-        <item quantity="one">•••••••• %1$s · %2$d character</item>
-        <item quantity="other">•••••••• %1$s · %2$d characters</item>
-    </plurals>
     <string name="terminal_keyboard_space_hidden">Not enough space. Keyboard hidden.</string>
     <string name="tmux_name_invalid">Enter a session name without dots, colons or control characters.</string>
     <string name="tmux_rename_title">Rename tmux session</string>

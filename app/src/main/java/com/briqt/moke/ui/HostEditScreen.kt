@@ -1,13 +1,5 @@
 package com.briqt.moke.ui
 
-import androidx.compose.foundation.layout.size
-
-import androidx.compose.foundation.layout.width
-
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -18,8 +10,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenuItem
@@ -35,14 +32,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -53,6 +53,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.KeyEntry
 import com.briqt.moke.data.ListState
 import com.briqt.moke.data.MAX_TAILNET_ENTRIES
 import com.briqt.moke.data.NetworkEntry
@@ -60,15 +61,16 @@ import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.data.StoreFailure
 import com.briqt.moke.data.StoreResult
-import com.briqt.moke.terminal.KnownHosts
-import com.briqt.moke.terminal.PortForwards
+import com.briqt.moke.data.usesKeyStore
 import com.briqt.moke.net.TailnetDevice
 import com.briqt.moke.net.selectTailnetDevice
+import com.briqt.moke.terminal.KnownHosts
+import com.briqt.moke.terminal.PortForwards
+import com.briqt.moke.ui.theme.MokeMono
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import com.briqt.moke.ui.theme.mokeTextFieldColors
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,12 +84,16 @@ fun HostEditScreen(
     networks: List<NetworkEntry> = emptyList(),
     networkLive: MokeViewModel.NetworkLive = MokeViewModel.NetworkLive(),
     networkEditor: @Composable (kind: NetworkKind, initial: NetworkEntry?, onClose: (String?) -> Unit) -> Unit = { _, _, _ -> },
+    keys: List<KeyEntry> = emptyList(),
+    keyState: ListState<KeyEntry> = ListState.Ready(keys),
+    keyEditor: @Composable (initial: KeyEntry?, mode: KeyCreateMode, onClose: (String?) -> Unit) -> Unit = { _, _, _ -> },
     loadDevices: suspend (NetworkEntry) -> List<TailnetDevice> = { emptyList() },
     onSaved: () -> Unit = {},
     networkState: ListState<NetworkEntry> = ListState.Ready(networks),
     hostStoreState: ListState<Host> = ListState.Ready(allHosts),
     onRetryNetworks: () -> Unit = {},
 ) {
+    val context = LocalContext.current
     // In-memory only: stable IDs survive recomposition, not process recreation or saved-state serialization.
     val base = remember(initial?.id) { initial ?: Host() }
     var label by remember(base.id) { mutableStateOf(base.label) }
@@ -96,11 +102,9 @@ fun HostEditScreen(
     var username by remember(base.id) { mutableStateOf(base.username) }
     var authType by remember(base.id) { mutableStateOf(base.authType) }
     var password by remember(base.id) { mutableStateOf(base.password) }
-    var privateKey by remember(base.id) { mutableStateOf(base.privateKeyPem) }
-    var passphrase by remember(base.id) { mutableStateOf(base.passphrase) }
+    var keyId by remember(base.id) { mutableStateOf(base.keyId) }
+    var creatingKeyMode by remember(base.id) { mutableStateOf<KeyCreateMode?>(null) }
     var showPassword by remember(base.id) { mutableStateOf(false) }
-    var showPassphrase by remember(base.id) { mutableStateOf(false) }
-    var showPrivateKey by remember(base.id) { mutableStateOf(base.privateKeyPem.isBlank()) }
     var useMosh by remember(base.id) { mutableStateOf(base.useMosh) }
     var jumpHostId by remember(base.id) { mutableStateOf(base.jumpHostId) }
     var networkId by remember(base.id) { mutableStateOf(base.networkId) }
@@ -119,12 +123,29 @@ fun HostEditScreen(
     var failure by remember(base.id) { mutableStateOf<StoreFailure?>(null) }
     val scope = rememberCoroutineScope()
     val targets = remember(base.id) { List(8) { EditorTarget() } }
+
     val loadedHosts = (hostStoreState as? ListState.Ready)?.items ?: allHosts
     val loadedNetworks = (networkState as? ListState.Ready)?.items ?: networks
+    val loadedKeys = (keyState as? ListState.Ready)?.items ?: keys
+    var adoptedMigratedKeyId by remember(base.id) { mutableStateOf("") }
+    LaunchedEffect(loadedHosts, loadedKeys) {
+        if (initial != null && !authenticationChosen && keyId.isEmpty() && base.privateKeyPem.isNotBlank()) {
+            val migratedId = loadedHosts.firstOrNull { it.id == base.id }?.keyId.orEmpty()
+            if (migratedId.isNotEmpty() && loadedKeys.any { it.id == migratedId }) {
+                keyId = migratedId
+                adoptedMigratedKeyId = migratedId
+            }
+        }
+    }
     val jumpHost = loadedHosts.firstOrNull { it.id == jumpHostId && it.id != base.id }
     val selectedNetwork = loadedNetworks.firstOrNull { it.id == networkId }
+    val selectedKey = loadedKeys.firstOrNull { it.id == keyId }
     val jumpMissing = hostStoreState is ListState.Ready && jumpHostId.isNotEmpty() && jumpHost == null
     val networkMissing = networkState is ListState.Ready && networkId.isNotEmpty() && selectedNetwork == null && jumpHostId.isEmpty()
+    val keyMissing = keyState is ListState.Ready && keyId.isNotEmpty() && (selectedKey == null || selectedKey.privateKeyPem.isBlank())
+    val keepLegacyInline = authType == AuthType.KEY && keyId.isEmpty()
+    val legacyPem = if (keepLegacyInline) base.privateKeyPem else ""
+    val legacyPass = if (keepLegacyInline) base.passphrase else ""
     val moshNoUdp = useMosh && jumpHostId.isEmpty() && selectedNetwork?.kind == NetworkKind.PROXY && !selectedNetwork.proxyType.carriesUdp
     val validPort = FormValidation.port(port)
     val forwardInvalid = PortForwards.parsePorts(forwardPorts).invalid
@@ -132,16 +153,26 @@ fun HostEditScreen(
     val portError = if (validPort == null) stringResource(R.string.form_port_invalid) else null
     val usernameError = if (username.isBlank() || username.any { it.isISOControl() }) stringResource(R.string.form_username_invalid) else null
     val keyError = when {
-        authType == AuthType.KEY && privateKey.isBlank() -> stringResource(R.string.form_private_key_required)
+        authType == AuthType.KEY && keyState == ListState.Loading -> stringResource(R.string.keys_loading)
+        authType == AuthType.KEY && keyState == ListState.Unreadable -> stringResource(R.string.keys_unreadable)
+        authType == AuthType.KEY && keyMissing -> stringResource(R.string.key_missing_error)
+        authType == AuthType.KEY && keyId.isBlank() && legacyPem.isBlank() -> stringResource(R.string.form_key_required)
         authType == AuthType.TAILSCALE_SSH && (jumpHostId.isNotEmpty() || selectedNetwork?.kind != NetworkKind.TAILSCALE || validPort != 22) ->
             stringResource(R.string.tailnet_ssh_route_hint)
         else -> null
     }
+    val showKeyDropdownError = keyError != null && keyState is ListState.Ready && (submitted || keyMissing)
+    val jumpNeedsKey = jumpHost != null && jumpHost.jumpHostId.isEmpty() && jumpHost.usesKeyStore()
+    val jumpKeyMissing = jumpNeedsKey && keyState is ListState.Ready &&
+        (jumpHost!!.keyId.isBlank() || loadedKeys.none { it.id == jumpHost.keyId && it.privateKeyPem.isNotBlank() })
     val jumpError = when {
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Loading -> stringResource(R.string.route_loading)
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Unreadable -> stringResource(R.string.hosts_unreadable_title)
         jumpMissing -> stringResource(R.string.route_missing_jump)
         jumpHost?.jumpHostId?.isNotEmpty() == true -> stringResource(R.string.route_jump_chain)
+        jumpNeedsKey && keyState == ListState.Loading -> stringResource(R.string.keys_loading)
+        jumpNeedsKey && keyState == ListState.Unreadable -> stringResource(R.string.keys_unreadable)
+        jumpKeyMissing -> stringResource(R.string.route_missing_jump_key)
         else -> null
     }
     val networkError = when {
@@ -154,12 +185,15 @@ fun HostEditScreen(
     }
     val errors = listOf(hostError, portError, usernameError, keyError, jumpError, networkError,
         if (forwardInvalid.isNotEmpty()) stringResource(R.string.field_forward_ports_invalid, forwardInvalid.joinToString(", ")) else null)
-    fun rawDraft() = listOf(label, host, port, username, authType, password, privateKey, passphrase, useMosh,
-        jumpHostId, networkId, startupCommand, loginCommand, forwardPorts, group, persistence)
+    fun rawDraft(): List<Any?> {
+        val draftKeyId = if (adoptedMigratedKeyId.isNotEmpty() && keyId == adoptedMigratedKeyId) base.keyId else keyId
+        return listOf(label, host, port, username, authType, password, draftKeyId, useMosh,
+            jumpHostId, networkId, startupCommand, loginCommand, forwardPorts, group, persistence)
+    }
     val baseline = remember(base.id) { rawDraft() }
     fun current(): Host = base.copy(
         label = label.trim(), host = host.trim(), port = requireNotNull(validPort), username = username.trim(),
-        authType = authType, password = password, privateKeyPem = privateKey, passphrase = passphrase,
+        authType = authType, password = password, keyId = keyId, privateKeyPem = legacyPem, passphrase = legacyPass,
         useMosh = useMosh, jumpHostId = jumpHostId, networkId = networkId, startupCommand = startupCommand.trim(),
         loginCommand = loginCommand.trim(), forwardPorts = PortForwards.parsePorts(forwardPorts).ports.joinToString(", "),
         group = group.trim(), persistence = persistence,
@@ -170,8 +204,7 @@ fun HostEditScreen(
         submitted = true
         val first = errors.indexOfFirst { it != null }
         if (first >= 0) {
-            if (first == 3) showPrivateKey = true
-            scope.launch { targets[first].reveal(first !in 4..5) }
+            scope.launch { targets[first].reveal(first !in 3..5) }
             return
         }
         val draft = current()
@@ -204,6 +237,23 @@ fun HostEditScreen(
     }
     val networkOptions = listOf(DropdownOption("", stringResource(R.string.network_direct), stringResource(R.string.network_direct_desc))) + loadedNetworks.sortedBy { it.kind }.map {
         DropdownOption(it.id, it.name, networkSubtitle(it), tags = if (it.kind == NetworkKind.TAILSCALE && networkLive.loggedIn[it.id] == false) listOf(BadgeSpec(notLoggedIn, errorColor)) else emptyList())
+    }
+    val keyOptions = loadedKeys.map { k ->
+        val sub = buildAnnotatedString {
+            if (k.algorithmLabel.isNotBlank()) append(k.algorithmLabel)
+            if (k.fingerprint.isNotBlank()) {
+                if (length > 0) append(" · ")
+                pushStyle(SpanStyle(fontFamily = MokeMono))
+                append(k.fingerprint)
+                pop()
+            }
+        }
+        DropdownOption(
+            id = k.id,
+            title = k.name,
+            subtitle = sub.text.ifEmpty { null },
+            annotatedSubtitle = sub.takeIf { it.isNotEmpty() },
+        )
     }
     EditorScaffold(
         title = stringResource(if (initial == null) R.string.add_host else R.string.host_edit_title),
@@ -288,23 +338,47 @@ fun HostEditScreen(
                     visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = { RevealToggle(showPassword) { showPassword = !showPassword } })
             } else if (authType == AuthType.KEY) {
-                if (!showPrivateKey && privateKey.isNotBlank()) {
-                    androidx.compose.material3.OutlinedTextField(
-                        colors = mokeTextFieldColors(),
-                        value = keySummary(privateKey), onValueChange = {}, readOnly = true, singleLine = true,
-                        label = { Text(stringResource(R.string.field_private_key)) }, modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = { RevealToggle(false) { showPrivateKey = true } },
+                Column(modifier = Modifier.editorTarget(targets[3])) {
+                    RichDropdown(
+                        label = stringResource(R.string.field_private_key),
+                        options = keyOptions,
+                        selectedId = keyId,
+                        onSelect = { keyId = it; authenticationChosen = true },
+                        enabled = !submitting && keyState is ListState.Ready,
+                        isError = showKeyDropdownError,
+                        missingTitle = when {
+                            keyMissing -> stringResource(R.string.badge_key_deleted)
+                            else -> stringResource(R.string.key_select_placeholder)
+                        },
+                        supportingText = keyError.takeIf { showKeyDropdownError },
+                        footer = { dismiss ->
+                            if (keyOptions.isNotEmpty()) androidx.compose.material3.HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.key_new_generate_item)) },
+                                onClick = { dismiss(); creatingKeyMode = KeyCreateMode.GENERATE },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.key_new_import_item)) },
+                                onClick = { dismiss(); creatingKeyMode = KeyCreateMode.IMPORT },
+                            )
+                        },
                     )
-                } else {
-                    FormTextField(privateKey, { privateKey = it; authenticationChosen = true }, stringResource(R.string.field_private_key), enabled = !submitting,
-                        error = keyError, submitted = submitted, singleLine = false, minLines = 3, maxLines = 6,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.editorTarget(targets[3]),
-                        trailingIcon = if (privateKey.isNotBlank()) { { RevealToggle(true) { showPrivateKey = false } } } else null)
+                    if (keyState == ListState.Loading) InfoNote(stringResource(R.string.keys_loading))
+                    if (keyState == ListState.Unreadable) {
+                        InfoNote(stringResource(R.string.keys_unreadable), error = true)
+                        TextButton(onClick = onRetryNetworks) { Text(stringResource(R.string.action_retry)) }
+                    }
+                    if (selectedKey != null && selectedKey.publicKey.isNotBlank()) {
+                        TextButton(
+                            onClick = { copyPublicKey(context, selectedKey.publicKey) },
+                            enabled = !submitting,
+                            contentPadding = PaddingValues(horizontal = 0.dp),
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text(stringResource(R.string.key_copy_public), modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
                 }
-                FormTextField(passphrase, { passphrase = it }, stringResource(R.string.field_passphrase), enabled = !submitting,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-                    visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { RevealToggle(showPassphrase) { showPassphrase = !showPassphrase } })
             } else {
                 Column(Modifier.editorTarget(targets[3])) {
                     InfoNote(keyError ?: stringResource(R.string.tailnet_ssh_hint), error = keyError != null && submitted)
@@ -329,13 +403,13 @@ fun HostEditScreen(
                 Icon(if (showMore) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
             }
             if (showMore) {
-            FormTextField(startupCommand, { startupCommand = it }, stringResource(R.string.field_startup_command),
-                enabled = !submitting && persistence != SessionPersistence.TMUX,
-                hint = stringResource(if (persistence == SessionPersistence.TMUX) R.string.startup_command_tmux_note else R.string.startup_command_hint))
-            FormTextField(loginCommand, { loginCommand = it }, stringResource(R.string.field_login_command), enabled = !submitting,
-                hint = stringResource(R.string.login_command_hint), singleLine = false, maxLines = 6)
-            FormTextField(forwardPorts, { forwardPorts = it }, stringResource(R.string.field_forward_ports), enabled = !submitting,
-                error = errors[6], submitted = submitted, hint = stringResource(R.string.field_forward_ports_hint), modifier = Modifier.editorTarget(targets[6]))
+                FormTextField(startupCommand, { startupCommand = it }, stringResource(R.string.field_startup_command),
+                    enabled = !submitting && persistence != SessionPersistence.TMUX,
+                    hint = stringResource(if (persistence == SessionPersistence.TMUX) R.string.startup_command_tmux_note else R.string.startup_command_hint))
+                FormTextField(loginCommand, { loginCommand = it }, stringResource(R.string.field_login_command), enabled = !submitting,
+                    hint = stringResource(R.string.login_command_hint), singleLine = false, maxLines = 6)
+                FormTextField(forwardPorts, { forwardPorts = it }, stringResource(R.string.field_forward_ports), enabled = !submitting,
+                    error = errors[6], submitted = submitted, hint = stringResource(R.string.field_forward_ports_hint), modifier = Modifier.editorTarget(targets[6]))
             }
             if (host.isNotBlank()) {
                 TextButton(onClick = { confirmFingerprint = fingerprintTarget }, enabled = fingerprintTarget != null && fingerprint != null && !fingerprintCleared && !submitting, contentPadding = PaddingValues(0.dp)) {
@@ -363,13 +437,15 @@ fun HostEditScreen(
             onSelect = select@{ device ->
                 if (!choosingDevice || networkId != chosenNetwork.id || jumpHostId.isNotEmpty()) return@select
                 val draft = base.copy(label = label, host = host, port = validPort ?: base.port, username = username,
-                    authType = authType, password = password, privateKeyPem = privateKey, networkId = networkId)
+                    authType = authType, password = password, keyId = keyId, privateKeyPem = legacyPem, networkId = networkId)
                 val selected = selectTailnetDevice(draft, chosenNetwork.id, device, initial == null, automaticLabel, authenticationChosen)
                 val generated = label.isBlank() || label == automaticLabel
                 host = selected.host
                 label = selected.label
                 if (generated) automaticLabel = selected.label
-                if (initial == null && !authenticationChosen && draft.password.isEmpty() && draft.privateKeyPem.isBlank() && device.tailscaleSsh) port = selected.port.toString()
+                if (initial == null && !authenticationChosen && draft.password.isEmpty() && draft.keyId.isBlank() && draft.privateKeyPem.isBlank() && device.tailscaleSsh) {
+                    port = selected.port.toString()
+                }
                 authType = selected.authType
                 choosingDevice = false
             },
@@ -387,6 +463,19 @@ fun HostEditScreen(
             }
         }
     }
+    creatingKeyMode?.let { mode ->
+        Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnBackPress = false, dismissOnClickOutside = false)) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                keyEditor(null, mode) { savedId ->
+                    creatingKeyMode = null
+                    if (savedId != null) {
+                        keyId = savedId
+                        authenticationChosen = true
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -395,19 +484,4 @@ private fun RevealToggle(revealed: Boolean, onToggle: () -> Unit) {
         Icon(if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
             contentDescription = stringResource(if (revealed) R.string.action_hide else R.string.action_reveal))
     }
-}
-
-@Composable
-private fun keySummary(pem: String): String {
-    val kind = when {
-        pem.contains("OPENSSH PRIVATE KEY") -> "OpenSSH"
-        pem.contains("RSA PRIVATE KEY") -> "RSA"
-        pem.contains("EC PRIVATE KEY") -> "EC"
-        pem.contains("DSA PRIVATE KEY") -> "DSA"
-        pem.contains("ENCRYPTED PRIVATE KEY") -> "PKCS#8"
-        pem.contains("PRIVATE KEY") -> "PKCS#8"
-        else -> "?"
-    }
-    val length = pem.trim().length
-    return pluralStringResource(R.plurals.private_key_summary, length, kind, length)
 }

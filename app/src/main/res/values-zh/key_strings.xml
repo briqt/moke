@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_keys">密钥</string>
+    <string name="menu_keys_empty">SSH 私钥与生成</string>
+    <plurals name="menu_keys_summary">
+        <item quantity="other">%1$d 把密钥</item>
+    </plurals>
+    <string name="keys_loading">正在读取已保存的密钥…</string>
+    <string name="keys_unreadable">无法读取已保存的密钥。原数据已保留。</string>
+    <string name="route_unreadable_keys">无法读取已保存的密钥。原数据已保留，请重试。</string>
+    <string name="route_missing_key">这台主机的密钥已被删除，请编辑主机另选。</string>
+    <string name="route_missing_jump_key">跳板机的密钥已被删除，请编辑跳板机另选。</string>
+    <string name="badge_key_deleted">密钥已删除</string>
+
+    <string name="keys_empty_title">还没有 SSH 密钥</string>
+    <string name="keys_empty_hint">在本机生成或导入私钥，可在多台主机间共用。</string>
+    <string name="key_action_generate">生成新密钥</string>
+    <string name="key_action_import">导入已有密钥</string>
+    <string name="key_copy_public">复制公钥</string>
+    <string name="key_public_copied">已复制公钥</string>
+    <plurals name="key_used_by_hosts">
+        <item quantity="other">%1$d 台主机</item>
+    </plurals>
+
+    <string name="key_generate_title">生成新密钥</string>
+    <string name="key_import_title">导入已有密钥</string>
+    <string name="key_edit_title">编辑密钥</string>
+    <string name="key_generating">正在生成…</string>
+    <string name="key_algorithm">算法</string>
+    <string name="key_name_generate_hint">留空则命名为 %1$s</string>
+    <string name="key_name_import_hint">留空则自动取密钥注释或算法</string>
+    <string name="key_name_duplicate">已有同名密钥。</string>
+    <string name="key_passphrase_optional">私钥口令（可选）</string>
+    <string name="field_key_passphrase">私钥口令</string>
+    <string name="key_import_file">从文件导入</string>
+    <string name="key_private_pem_hint">支持 OpenSSH、PEM（RSA / ECDSA）或 PPK（.ppk）</string>
+    <string name="form_private_key_invalid">无法识别或暂不支持此私钥格式。</string>
+    <string name="form_key_passphrase_required">此私钥受口令保护，请填写口令。</string>
+    <string name="form_key_passphrase_wrong">私钥口令不正确，或文件已损坏。</string>
+    <string name="key_file_empty">所选文件为空。</string>
+    <string name="key_file_too_large">所选文件过大。</string>
+    <string name="key_file_read_failed">无法读取所选文件。</string>
+    <string name="key_label_fingerprint">指纹</string>
+    <string name="key_label_public">公钥（authorized_keys）</string>
+    <string name="key_public_unavailable">无法从该旧版记录提取公钥。</string>
+    <string name="key_legacy_passphrase_hint">此私钥受口令保护，填写口令并保存即可提取公钥与指纹。</string>
+    <string name="key_replace_private">更换私钥</string>
+    <string name="key_cancel_replace">取消更换</string>
+    <string name="key_delete">删除密钥</string>
+    <string name="key_delete_title">删除「%1$s」？</string>
+    <plurals name="key_delete_hosts">
+        <item quantity="other">有 %1$d 台主机的连接使用这把密钥，删除后需修改相关主机或跳板机的密钥设置。</item>
+    </plurals>
+
+    <string name="key_select_placeholder">选择密钥</string>
+    <string name="key_new_generate_item">生成新密钥…</string>
+    <string name="key_new_import_item">导入已有密钥…</string>
+    <string name="key_missing_error">选用的密钥已被删除，请另选。</string>
+    <string name="form_key_required">请选择密钥。</string>
+</resources>

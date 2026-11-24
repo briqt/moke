@@ -20,6 +20,8 @@ data class Host(
     val username: String = "",
     val authType: AuthType = AuthType.PASSWORD,
     val password: String = "",
+    /** 独立密钥库条目 [KeyEntry.id]（空=未选，或旧记录尚未迁移）。 */
+    val keyId: String = "",
     val privateKeyPem: String = "",
     val passphrase: String = "",
     /** 是否偏好 mosh。 */
@@ -98,6 +100,7 @@ data class Host(
         put("username", username)
         put("authType", authType.name)
         put("password", password)
+        put("keyId", keyId)
         put("privateKeyPem", privateKeyPem)
         put("passphrase", passphrase)
         put("useMosh", useMosh)
@@ -123,6 +126,7 @@ data class Host(
             authType = runCatching { AuthType.valueOf(o.optString("authType", "PASSWORD")) }
                 .getOrDefault(AuthType.PASSWORD),
             password = o.optString("password", ""),
+            keyId = o.optString("keyId", ""),
             privateKeyPem = o.optString("privateKeyPem", ""),
             passphrase = o.optString("passphrase", ""),
             useMosh = o.optBoolean("useMosh", false),

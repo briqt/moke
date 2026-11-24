@@ -2,7 +2,7 @@
     <string name="menu_sync">Sync</string>
     <string name="menu_sync_off">Not set up</string>
     <string name="sync_empty_title">Back up your setup to your own WebDAV</string>
-    <string name="sync_empty_hint">Backups are end-to-end encrypted with your sync password, so the storage provider cannot read them. On a new or another device, pick a backup to restore hosts, networks, fingerprints and preferences.</string>
+    <string name="sync_empty_hint">Backups are end-to-end encrypted with your sync password, so the storage provider cannot read them. On a new or another device, pick a backup to restore hosts, keys, networks, fingerprints and preferences.</string>
     <string name="sync_setup_webdav">Set up WebDAV</string>
     <string name="sync_upload">Upload this device\'s setup</string>
     <string name="sync_uploading">Encrypting and uploading…</string>
@@ -43,7 +43,7 @@
     <string name="sync_err_server">Server error (%1$d)</string>
     <string name="sync_err_protocol">The server returned an unexpected response</string>
     <string name="sync_err_too_large">The file is too large</string>
-    <string name="sync_err_local_unreadable">Host or network data on this device cannot be read right now, so upload and restore are unavailable</string>
+    <string name="sync_err_local_unreadable">Host, key or network data on this device cannot be read right now, so upload and restore are unavailable</string>
     <string name="sync_err_not_configured">WebDAV is not set up</string>
     <string name="sync_err_storage">Could not save the settings</string>
 
@@ -56,6 +56,7 @@
     <string name="sync_backup_corrupt">The file is damaged and cannot be read</string>
     <string name="sync_restore_what">What to restore</string>
     <string name="sync_cat_hosts">Hosts</string>
+    <string name="sync_cat_keys">SSH keys</string>
     <string name="sync_cat_networks">Networks</string>
     <string name="sync_cat_fingerprints">Host fingerprints</string>
     <string name="sync_cat_settings">Preferences</string>
@@ -72,6 +73,7 @@
     <string name="sync_mode_replace">Replace</string>
     <string name="sync_mode_merge_hint">Adds or updates what is in the backup and keeps what only this device has.</string>
     <string name="sync_mode_replace_hint">Makes the selected items match the backup exactly. Items that exist only on this device are removed.</string>
+    <string name="sync_auto_keys">\"SSH keys\" was selected too, because some hosts use keys from this backup.</string>
     <string name="sync_auto_networks">\"Networks\" was selected too, because some hosts use networks from this backup.</string>
     <string name="sync_preview">Changes</string>
     <!-- 一句里有三个计数，不适合拆成复数资源；英文用「2 added」这种不变形写法。 -->
@@ -84,6 +86,10 @@
     <string name="sync_preview_none">Nothing to change</string>
     <string name="sync_preview_relogin">%1$s will use a different control server and must sign in again on this device</string>
     <string name="sync_preview_skipped">Over the Tailscale network limit, not restored: %1$s</string>
+    <plurals name="sync_preview_dangling_keys">
+        <item quantity="one">%d host uses a key that is not on this device. Choose a key for it after restoring.</item>
+        <item quantity="other">%d hosts use keys that are not on this device. Choose a key for them after restoring.</item>
+    </plurals>
     <plurals name="sync_preview_dangling">
         <item quantity="one">%d host uses a network that is not on this device. Choose a network for it after restoring.</item>
         <item quantity="other">%d hosts use networks that are not on this device. Choose a network for them after restoring.</item>

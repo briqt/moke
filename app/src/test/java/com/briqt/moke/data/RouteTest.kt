@@ -9,9 +9,16 @@ class RouteTest {
     private val tail = NetworkEntry(id = "tail", name = "家里", kind = NetworkKind.TAILSCALE)
     private val socks = NetworkEntry(id = "socks", name = "公司", kind = NetworkKind.PROXY)
     private val nets = ListState.Ready(listOf(tail, socks))
+    private val keyA = KeyEntry(id = "k-a", name = "Key A", privateKeyPem = "PEM-A", passphrase = "pw-a")
+    private val keyJump = KeyEntry(id = "k-j", name = "Key Jump", privateKeyPem = "PEM-J", passphrase = "")
+    private val readyKeys = ListState.Ready(listOf(keyA, keyJump))
 
-    private fun route(id: String, vararg hosts: Host, networks: ListState<NetworkEntry> = nets) =
-        resolveRoute(id, ListState.Ready(hosts.toList()), networks)
+    private fun route(
+        id: String,
+        vararg hosts: Host,
+        networks: ListState<NetworkEntry> = nets,
+        keys: ListState<KeyEntry> = readyKeys,
+    ) = resolveRoute(id, ListState.Ready(hosts.toList()), networks, keys)
 
     @Test fun `direct host has no jump and no network`() {
         val h = Host(id = "a")
@@ -55,6 +62,60 @@ class RouteTest {
         // 不用网络的主机不必等网络列表。
         val direct = Host(id = "b")
         assertEquals(Route.Ok(direct, null, null), route("b", direct, networks = ListState.Loading))
+    }
+
+    @Test fun `key references hydrate onto host and jump and refuse when missing or unreadable`() {
+        val j = Host(id = "j", authType = AuthType.KEY, keyId = "k-j")
+        val h = Host(id = "a", authType = AuthType.KEY, keyId = "k-a", jumpHostId = "j")
+        assertEquals(
+            Route.Ok(
+                host = h.copy(privateKeyPem = "PEM-A", passphrase = "pw-a"),
+                jump = j.copy(privateKeyPem = "PEM-J", passphrase = ""),
+                network = null,
+            ),
+            route("a", h, j),
+        )
+
+        // Missing or blank keyId refuses without falling back.
+        assertEquals(Route.Missing(MissingKind.KEY), route("a", Host(id = "a", authType = AuthType.KEY, keyId = "")))
+        assertEquals(Route.Missing(MissingKind.KEY), route("a", Host(id = "a", authType = AuthType.KEY, keyId = "deleted")))
+        assertEquals(
+            Route.Missing(MissingKind.JUMP_KEY, targetHostId = "j"),
+            route("a", h, Host(id = "j", authType = AuthType.KEY, keyId = "deleted")),
+        )
+
+        // When keyId is non-blank, KeyStore always wins over any stale inline privateKeyPem,
+        // and a KeyEntry with blank privateKeyPem is refused.
+        val hostWithStaleInline = Host(id = "s", authType = AuthType.KEY, keyId = "deleted", privateKeyPem = "STALE-INLINE")
+        assertEquals(Route.Missing(MissingKind.KEY), route("s", hostWithStaleInline))
+        val emptyKeyEntry = KeyEntry(id = "k-empty", name = "Empty", privateKeyPem = "   ")
+        assertEquals(
+            Route.Missing(MissingKind.KEY),
+            route("e", Host(id = "e", authType = AuthType.KEY, keyId = "k-empty"), keys = ListState.Ready(listOf(emptyKeyEntry))),
+        )
+
+        // Loading / Unreadable KeyStore only blocks hosts that actually need KeyStore resolution.
+        assertEquals(Route.Loading, route("a", h, j, keys = ListState.Loading))
+        assertEquals(Route.Unreadable(UnreadableKind.KEYS), route("a", h, j, keys = ListState.Unreadable))
+        val pwHost = Host(id = "pw", authType = AuthType.PASSWORD, password = "secret")
+        assertEquals(Route.Ok(pwHost, null, null), route("pw", pwHost, keys = ListState.Unreadable))
+        val legacyInline = Host(id = "leg", authType = AuthType.KEY, privateKeyPem = "INLINE-PEM")
+        assertEquals(Route.Ok(legacyInline, null, null), route("leg", legacyInline, keys = ListState.Loading))
+    }
+
+    @Test fun `hostsUsingKey counts direct and jump-host dependencies without double counting`() {
+        val jump = Host(id = "j", authType = AuthType.KEY, keyId = "k-j", networkId = "tail")
+        val viaJumpPw = Host(id = "h1", authType = AuthType.PASSWORD, jumpHostId = "j")
+        val viaJumpSameKey = Host(id = "h2", authType = AuthType.KEY, keyId = "k-j", jumpHostId = "j")
+        val directKeyA = Host(id = "h3", authType = AuthType.KEY, keyId = "k-a", networkId = "tail")
+        val pwWithSavedKeyId = Host(id = "h4", authType = AuthType.PASSWORD, keyId = "k-a")
+        val state = ListState.Ready(listOf(jump, viaJumpPw, viaJumpSameKey, directKeyA, pwWithSavedKeyId))
+
+        assertEquals(3, hostsUsingKey("k-j", state))
+        assertEquals(1, hostsUsingKey("k-a", state))
+        assertEquals(0, hostsUsingKey("unused", state))
+        // Network usage count remains accurate even when keys are not passed or deleted.
+        assertEquals(4, hostsUsingNetwork("tail", state, nets))
     }
 
     @Test fun `dangling jumps are cleared once and valid ones kept`() {

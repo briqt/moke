@@ -122,25 +122,37 @@ class NetworkStore internal constructor(
 
     suspend fun save(list: List<NetworkEntry>): Boolean = withContext(Dispatchers.IO) {
         val encrypted = encodeNetworks(list, encrypt) ?: return@withContext false
-        var written = false
-        dataStore.edit { prefs ->
-            if (decode(prefs[key]).unreadable) return@edit
-            prefs[key] = encrypted
-            written = true
+        try {
+            var written = false
+            dataStore.edit { prefs ->
+                if (decode(prefs[key]).unreadable) return@edit
+                prefs[key] = encrypted
+                written = true
+            }
+            written
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
         }
-        written
     }
 
     suspend fun update(transform: (List<NetworkEntry>) -> List<NetworkEntry>?): Boolean = withContext(Dispatchers.IO) {
-        var written = false
-        dataStore.edit { prefs ->
-            val current = decode(prefs[key])
-            if (current.unreadable) return@edit
-            val next = transform(parseNetworks(current.json)) ?: return@edit
-            prefs[key] = encodeNetworks(next, encrypt) ?: return@edit
-            written = true
+        try {
+            var written = false
+            dataStore.edit { prefs ->
+                val current = decode(prefs[key])
+                if (current.unreadable) return@edit
+                val next = transform(parseNetworks(current.json)) ?: return@edit
+                prefs[key] = encodeNetworks(next, encrypt) ?: return@edit
+                written = true
+            }
+            written
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
         }
-        written
     }
 }
 

@@ -2,7 +2,7 @@
     <string name="menu_sync">同步</string>
     <string name="menu_sync_off">未设置</string>
     <string name="sync_empty_title">把配置备份到你自己的 WebDAV</string>
-    <string name="sync_empty_hint">备份经同步密码端到端加密，存储服务商看不到内容。在新设备或另一台设备上选一个备份，即可恢复主机、网络、指纹和偏好设置。</string>
+    <string name="sync_empty_hint">备份经同步密码端到端加密，存储服务商看不到内容。在新设备或另一台设备上选一个备份，即可恢复主机、密钥、网络、指纹和偏好设置。</string>
     <string name="sync_setup_webdav">设置 WebDAV</string>
     <string name="sync_upload">上传本机配置</string>
     <string name="sync_uploading">正在加密并上传…</string>
@@ -43,7 +43,7 @@
     <string name="sync_err_server">服务器出错（%1$d）</string>
     <string name="sync_err_protocol">服务器返回了无法识别的响应</string>
     <string name="sync_err_too_large">文件过大</string>
-    <string name="sync_err_local_unreadable">本机的主机或网络数据暂时读不出来，无法上传或恢复</string>
+    <string name="sync_err_local_unreadable">本机的主机、密钥或网络数据暂时读不出来，无法上传或恢复</string>
     <string name="sync_err_not_configured">还没有设置 WebDAV</string>
     <string name="sync_err_storage">无法保存设置</string>
 
@@ -56,6 +56,7 @@
     <string name="sync_backup_corrupt">文件已损坏，无法读取</string>
     <string name="sync_restore_what">恢复哪些内容</string>
     <string name="sync_cat_hosts">主机</string>
+    <string name="sync_cat_keys">密钥</string>
     <string name="sync_cat_networks">网络</string>
     <string name="sync_cat_fingerprints">主机指纹</string>
     <string name="sync_cat_settings">偏好设置</string>
@@ -70,6 +71,7 @@
     <string name="sync_mode_replace">替换</string>
     <string name="sync_mode_merge_hint">备份里有的新增或更新，本机独有的保留。</string>
     <string name="sync_mode_replace_hint">勾选的内容变得和备份完全一致，本机独有的会被移除。</string>
+    <string name="sync_auto_keys">已同时勾选「密钥」：有主机用到了这个备份里的密钥。</string>
     <string name="sync_auto_networks">已同时勾选「网络」：有主机用到了这个备份里的网络。</string>
     <string name="sync_preview">将要发生的变化</string>
     <string name="sync_preview_counts">%1$s：新增 %2$d · 更新 %3$d · 移除 %4$d</string>
@@ -81,6 +83,9 @@
     <string name="sync_preview_none">没有需要改变的内容</string>
     <string name="sync_preview_relogin">%1$s 的控制服务器会改变，需要在本机重新登录</string>
     <string name="sync_preview_skipped">超出 Tailscale 网络数量上限，未恢复：%1$s</string>
+    <plurals name="sync_preview_dangling_keys">
+        <item quantity="other">%d 台主机用到的密钥不在本机，恢复后需要重新为它们选择密钥。</item>
+    </plurals>
     <plurals name="sync_preview_dangling">
         <item quantity="other">%d 台主机用到的网络不在本机，恢复后需要重新为它们选择网络。</item>
     </plurals>

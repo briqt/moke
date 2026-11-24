@@ -52,7 +52,8 @@ internal fun selectTailnetDevice(
     authenticationChosen: Boolean,
 ): Host {
     require(device.address.isNotBlank())
-    val suggestSsh = newHost && !authenticationChosen && draft.password.isEmpty() && draft.privateKeyPem.isBlank() && device.tailscaleSsh
+    val suggestSsh = newHost && !authenticationChosen && draft.password.isEmpty() &&
+        draft.keyId.isBlank() && draft.privateKeyPem.isBlank() && device.tailscaleSsh
     return draft.copy(
         networkId = networkId,
         host = device.address,

@@ -42,6 +42,7 @@ class MokeApplication : Application() {
         installOomHprofDumper()
         installTerminalStatusText()
         mirrorHostKeyPolicy()
+        cleanLegacyTempKeys()
         com.briqt.moke.terminal.TerminalAlerts.cancelStale(this)
         try {
             Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME) // "BC"
@@ -66,6 +67,17 @@ class MokeApplication : Application() {
         // 终端提醒同理：回调来自终端（可能没有界面），读进程作用域的镜像。
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             settings.terminalAlerts.collect { com.briqt.moke.terminal.TerminalAlerts.enabled = it }
+        }
+    }
+
+    private fun cleanLegacyTempKeys() {
+        val dir = cacheDir
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                dir.listFiles { f -> f.isFile && f.name.startsWith("moke_key_") && f.name.endsWith(".pem") }
+                    ?.forEach { f -> try { f.delete() } catch (_: Exception) {} }
+            } catch (_: Exception) {
+            }
         }
     }
 

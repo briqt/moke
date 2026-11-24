@@ -52,10 +52,15 @@ class TailnetDevicesTest {
     }
 
     @Test fun `typed credentials keep their authentication mode even without a chip change`() {
-        for (draft in listOf(Host(password = "typed password"), Host(authType = AuthType.KEY, privateKeyPem = "typed key"))) {
+        for (draft in listOf(
+            Host(password = "typed password"),
+            Host(authType = AuthType.KEY, keyId = "selected-key"),
+            Host(authType = AuthType.KEY, privateKeyPem = "typed key"),
+        )) {
             val selected = selectTailnetDevice(draft, "tailnet", device(), true, null, false)
             assertEquals(draft.authType, selected.authType)
             assertEquals(draft.password, selected.password)
+            assertEquals(draft.keyId, selected.keyId)
             assertEquals(draft.privateKeyPem, selected.privateKeyPem)
         }
     }

@@ -10,9 +10,13 @@ import java.net.UnknownHostException
 import java.util.Collections
 import java.util.IdentityHashMap
 
-/** Recovery is data, never inferred from translated error text. The host comes from the current UI. */
+/** Recovery is data, never inferred from translated error text. The host comes from the current UI unless [targetHostId] overrides it (e.g. jump-host key missing). */
 enum class RecoveryKind { LOGIN_NETWORK, VIEW_NETWORK, EDIT_NETWORK, EDIT_HOST, RETRY }
-data class NetworkRecovery(val kind: RecoveryKind, val network: NetworkEntry? = null)
+data class NetworkRecovery(
+    val kind: RecoveryKind,
+    val network: NetworkEntry? = null,
+    val targetHostId: String? = null,
+)
 
 val NetworkException.recovery: NetworkRecovery?
     get() = when (code) {
@@ -48,6 +52,6 @@ fun Throwable.networkRecovery(): NetworkRecovery? {
 val Route.recovery: NetworkRecovery?
     get() = when (this) {
         is Route.Ok -> null
-        is Route.Missing -> NetworkRecovery(RecoveryKind.EDIT_HOST)
+        is Route.Missing -> NetworkRecovery(RecoveryKind.EDIT_HOST, targetHostId = targetHostId)
         Route.Loading, is Route.Unreadable -> NetworkRecovery(RecoveryKind.RETRY)
     }

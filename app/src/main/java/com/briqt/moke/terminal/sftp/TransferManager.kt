@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.KeyStore
 import com.briqt.moke.data.MissingKind
 import com.briqt.moke.data.NetworkStore
 import com.briqt.moke.data.Route
@@ -83,13 +84,13 @@ class TransferManager internal constructor(
     private val customExecutor: AttemptExecutor? = null,
 ) {
 
-    constructor(context: Context, hostStore: HostStore) : this(
+    constructor(context: Context, hostStore: HostStore, keyStore: KeyStore = KeyStore(context.applicationContext)) : this(
         appContext = context.applicationContext,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
         backingStore = StoreAdapter(TransferStore(context.applicationContext)),
         routeResolver = { hostId ->
             val networkStore = NetworkStore(context.applicationContext)
-            resolveRoute(hostId, hostStore.state.first(), networkStore.state.first())
+            resolveRoute(hostId, hostStore.state.first(), networkStore.state.first(), keyStore.state.first())
         },
         strings = ContextStrings(context.applicationContext),
         customExecutor = null,

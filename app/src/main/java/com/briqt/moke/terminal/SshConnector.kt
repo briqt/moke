@@ -15,7 +15,6 @@ import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.userauth.keyprovider.PKCS8KeyFile
 import net.schmizz.sshj.userauth.password.PasswordFinder
 import net.schmizz.sshj.userauth.password.PasswordUtils
-import java.io.File
 import java.io.IOException
 import java.io.StringReader
 import java.net.InetSocketAddress
@@ -26,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 终端（SSH）、mosh 引导与控制通道、SFTP 三条路径需要的是同一件事：按 [Host] 连上去并认证，
  * 必要时先连跳板机再经其 `direct-tcpip` 转发。此前这段逻辑在 `SshTransport` 与 `MoshTransport`
- * 里各有一份，加上文件功能就会变成第三份——凭据处理（私钥临时落盘）出一点差异就是安全问题。
+ * 里各有一份，加上文件功能就会变成第三份——凭据处理出一点差异就是安全问题。
  *
  * [onNotice] 收 TOFU 告警等人类可读提示：终端把它写进屏幕，没有终端的调用方（文件传输）应把它
  * 接到任务失败原因上——**不能静默吞掉**，主机密钥变更必须让人看见。
@@ -36,7 +35,6 @@ class SshConnector(
     private val onNotice: (String) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
-    private val cacheDir: File = appContext.cacheDir
 
     /**
      * 新建一个未连接的客户端（含 TOFU 校验器）。[heartbeat] 供长连接用，短连接不必。
@@ -127,7 +125,7 @@ class SshConnector(
         }
     }
 
-    /** 认证。私钥用后立即删除；Tailscale SSH 只发送 none，不尝试任何凭据或回退。 */
+    /** 认证。私钥全程在内存中加载，绝不落临时文件；Tailscale SSH 只发送 none，不尝试任何凭据或回退。 */
     fun authenticate(client: SSHClient, h: Host, authOwner: TailscaleSshAuth.Owner? = null) {
         when (h.authType) {
             AuthType.TAILSCALE_SSH -> try {
@@ -146,24 +144,21 @@ class SshConnector(
                 throw TailscaleSshAuthException(failure.kind, message)
             }
             AuthType.PASSWORD -> client.authPassword(h.username, h.password)
-            AuthType.KEY -> if (EncryptedPkcs8.matches(h.privateKeyPem)) {
-                // 加口令的 PKCS#8 不走 sshj 自己的解密（Android 上会空指针），见 EncryptedPkcs8。
-                val plain = EncryptedPkcs8.decryptToPem(h.privateKeyPem, h.passphrase.toCharArray())
-                val kp = PKCS8KeyFile().apply { init(StringReader(plain)) }
-                client.authPublickey(h.username, kp)
-            } else {
-                val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
-                try {
-                    keyFile.writeText(h.privateKeyPem)
-                    val finder = keyPasswordFinder(h.passphrase)
-                    val kp = if (finder == null) {
-                        client.loadKeys(keyFile.absolutePath)
-                    } else {
-                        client.loadKeys(keyFile.absolutePath, finder)
+            AuthType.KEY -> {
+                val normalizedPem = com.briqt.moke.data.normalizeKeyPem(h.privateKeyPem)
+                if (EncryptedPkcs8.matches(normalizedPem)) {
+                    // 加口令的 PKCS#8 不走 sshj 自己的解密（Android 上会空指针），见 EncryptedPkcs8。
+                    val passChars = h.passphrase.toCharArray()
+                    val plain = try {
+                        EncryptedPkcs8.decryptToPem(normalizedPem, passChars)
+                    } finally {
+                        passChars.fill('\u0000')
                     }
+                    val kp = PKCS8KeyFile().apply { init(StringReader(plain)) }
                     client.authPublickey(h.username, kp)
-                } finally {
-                    keyFile.delete()
+                } else {
+                    val kp = client.loadKeys(normalizedPem, null, keyPasswordFinder(h.passphrase))
+                    client.authPublickey(h.username, kp)
                 }
             }
         }

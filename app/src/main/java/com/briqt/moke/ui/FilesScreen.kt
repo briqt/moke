@@ -479,12 +479,10 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit, recovery: Networ
                     modifier = Modifier.weight(1f),
                 )
                 if (recovery != null) {
-                    val label = when (recovery.kind) {
-                        RecoveryKind.LOGIN_NETWORK -> R.string.action_login
-                        RecoveryKind.VIEW_NETWORK -> R.string.action_view_network
-                        RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
-                        RecoveryKind.EDIT_HOST -> R.string.host_edit_title
-                        RecoveryKind.RETRY -> R.string.action_retry
+                    val label = when {
+                        recovery.kind == RecoveryKind.EDIT_HOST && recovery.targetHostId != null -> R.string.action_edit_jump_host
+                        recovery.kind == RecoveryKind.EDIT_HOST -> R.string.host_edit_title
+                        else -> recoveryActionLabel(recovery)
                     }
                     TextButton(onClick = { onRecover(recovery) }) {
                         Text(stringResource(label), color = MaterialTheme.colorScheme.onErrorContainer)

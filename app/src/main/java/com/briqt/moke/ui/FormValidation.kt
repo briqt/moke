@@ -1,5 +1,6 @@
 package com.briqt.moke.ui
 
+import com.briqt.moke.data.KeyEntry
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
 import com.briqt.moke.data.ProxyType
@@ -70,6 +71,9 @@ internal object FormValidation {
 
     fun duplicateName(name: String, id: String, kind: NetworkKind, entries: List<NetworkEntry>): Boolean =
         entries.any { it.id != id && it.kind == kind && it.name.trim().equals(name.trim(), ignoreCase = true) }
+
+    fun duplicateKeyName(name: String, id: String, entries: List<KeyEntry>): Boolean =
+        entries.any { it.id != id && it.name.trim().equals(name.trim(), ignoreCase = true) }
 
     fun tmuxName(text: String): Boolean = text.trim().let { value ->
         value.isNotEmpty() && value.none { it == '.' || it == ':' || it.isISOControl() }

@@ -50,6 +50,10 @@ class NetworkRecoveryTest {
 
     @Test fun `route protection distinguishes missing references from unreadable or loading data`() {
         MissingKind.entries.forEach { assertEquals(RecoveryKind.EDIT_HOST, Route.Missing(it).recovery?.kind) }
+        assertEquals(
+            NetworkRecovery(RecoveryKind.EDIT_HOST, targetHostId = "jump-1"),
+            Route.Missing(MissingKind.JUMP_KEY, targetHostId = "jump-1").recovery,
+        )
         UnreadableKind.entries.forEach { assertEquals(RecoveryKind.RETRY, Route.Unreadable(it).recovery?.kind) }
         assertEquals(RecoveryKind.RETRY, Route.Loading.recovery?.kind)
     }

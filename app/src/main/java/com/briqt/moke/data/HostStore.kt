@@ -99,14 +99,20 @@ class HostStore internal constructor(
      */
     suspend fun save(list: List<Host>): Boolean = withContext(Dispatchers.IO) {
         val encrypted = encode(list) ?: return@withContext false
-        var written = false
-        dataStore.edit { prefs ->
-            // 在同一个事务里重新判定，避免「读到空 → 用户操作 → 写空」这条竞态。
-            if (decode(prefs[key]).unreadable) return@edit
-            prefs[key] = encrypted
-            written = true
+        try {
+            var written = false
+            dataStore.edit { prefs ->
+                // 在同一个事务里重新判定，避免「读到空 → 用户操作 → 写空」这条竞态。
+                if (decode(prefs[key]).unreadable) return@edit
+                prefs[key] = encrypted
+                written = true
+            }
+            written
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
         }
-        written
     }
 
     suspend fun upsert(host: Host, current: List<Host>): Boolean =
@@ -217,15 +223,21 @@ class HostStore internal constructor(
      * @return 是否真的落盘；false = 记录不存在，或被 [save] 的两条硬规则挡下。
      */
     suspend fun update(id: String, transform: (Host) -> Host): Boolean = withContext(Dispatchers.IO) {
-        var written = false
-        dataStore.edit { prefs ->
-            val current = decode(prefs[key])
-            if (current.unreadable) return@edit
-            val next = updateHostIn(parse(current.json), id, transform) ?: return@edit
-            prefs[key] = encode(next) ?: return@edit
-            written = true
+        try {
+            var written = false
+            dataStore.edit { prefs ->
+                val current = decode(prefs[key])
+                if (current.unreadable) return@edit
+                val next = updateHostIn(parse(current.json), id, transform) ?: return@edit
+                prefs[key] = encode(next) ?: return@edit
+                written = true
+            }
+            written
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
         }
-        written
     }
 
     /**
@@ -233,15 +245,21 @@ class HostStore internal constructor(
      * @return 存储可读（无论改没改）；false = 解不开或加密失败，什么也没写。
      */
     suspend fun updateAll(transform: (List<Host>) -> List<Host>?): Boolean = withContext(Dispatchers.IO) {
-        var ok = false
-        dataStore.edit { prefs ->
-            val current = decode(prefs[key])
-            if (current.unreadable) return@edit
-            val next = transform(parse(current.json))
-            if (next != null) prefs[key] = encode(next) ?: return@edit
-            ok = true
+        try {
+            var ok = false
+            dataStore.edit { prefs ->
+                val current = decode(prefs[key])
+                if (current.unreadable) return@edit
+                val next = transform(parse(current.json))
+                if (next != null) prefs[key] = encode(next) ?: return@edit
+                ok = true
+            }
+            ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
         }
-        ok
     }
 
     @Suppress("UNUSED_PARAMETER")

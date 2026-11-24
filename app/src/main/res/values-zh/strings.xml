@@ -161,7 +161,6 @@
     <string name="field_password">密码</string>
     <string name="auth_key">私钥</string>
     <string name="field_private_key">私钥</string>
-    <string name="field_passphrase">私钥口令</string>
     <string name="label_protocol">协议</string>
     <string name="field_jump_host">跳板机</string>
     <string name="jump_none">不使用</string>
@@ -607,6 +606,7 @@
     <string name="transfer_overwrite_required">远端已有同名文件。请从文件页重新上传并确认覆盖。</string>
     <string name="hosts_loading">正在读取已保存的主机…</string>
     <string name="action_edit_host">编辑主机</string>
+    <string name="action_edit_jump_host">编辑跳板机</string>
     <!-- 草稿编辑与可恢复错误 -->
     <string name="action_saving">保存中…</string>
     <string name="action_working">处理中…</string>
@@ -626,7 +626,7 @@
     <string name="store_failure_io">无法写入存储。请检查可用空间后重试。</string>
     <string name="store_failure_missing">此条目已被删除。请返回，需要时重新添加。</string>
     <string name="store_failure_conflict">此条目已在别处更改。请返回并重新打开后保存。</string>
-    <string name="store_failure_duplicate_name">此类型的网络已有同名条目，请另取名称。</string>
+    <string name="store_failure_duplicate_name">已有同名条目，请另取名称。</string>
     <string name="store_failure_tailnet_limit">Tailscale 网络已达上限，请先移除不再使用的网络。</string>
     <string name="store_failure_invalid">请检查标出的字段后重试。</string>
     <string name="networks_loading">正在读取已保存的网络…</string>
@@ -648,9 +648,6 @@
     <string name="net_waiting_approval_hint">管理员批准本设备后才能连接。</string>
     <string name="net_return_after_login">在浏览器完成授权后返回墨客。</string>
     <string name="net_logged_in_hint">在主机编辑页的「网络」中选择此网络。</string>
-    <plurals name="private_key_summary">
-        <item quantity="other">•••••••• %1$s · %2$d 个字符</item>
-    </plurals>
     <string name="terminal_keyboard_space_hidden">空间不足，已收起软键盘。</string>
     <string name="tmux_name_invalid">请填写会话名，不含点、冒号或控制字符。</string>
     <string name="tmux_rename_title">重命名 tmux 会话</string>

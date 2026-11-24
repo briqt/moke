@@ -1,6 +1,8 @@
 package com.briqt.moke.sync
 
+import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
+import com.briqt.moke.data.KeyEntry
 import com.briqt.moke.data.MAX_TAILNET_ENTRIES
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
@@ -20,19 +22,24 @@ class RestorePlannerTest {
     private fun proxy(id: String, name: String, port: Int = 1080, revision: Int = 1) =
         NetworkEntry(id = id, name = name, kind = NetworkKind.PROXY, proxyType = ProxyType.SOCKS5, proxyHost = "127.0.0.1", proxyPort = port, revision = revision)
 
+    private fun key(id: String, name: String, pem: String = "PEM-$id", pass: String = "", createdAt: Long = 10L) =
+        KeyEntry(id = id, name = name, privateKeyPem = pem, passphrase = pass, publicKey = "pub-$id", fingerprint = "SHA256:$id", algorithmLabel = "Ed25519", createdAt = createdAt)
+
     private fun bundle(
         hosts: List<Host> = emptyList(),
         networks: List<NetworkEntry> = emptyList(),
         known: Map<String, String> = emptyMap(),
         order: List<String> = emptyList(),
-    ) = SyncBundle(BundleMeta("0.2.2", "android", "a", ""), hosts, order, emptyList(), networks, known, emptyMap(), null)
+        keys: List<KeyEntry> = emptyList(),
+    ) = SyncBundle(BundleMeta("0.2.4", "android", "a", ""), hosts, order, emptyList(), networks, known, emptyMap(), null, keys)
 
     private fun local(
         hosts: List<Host> = emptyList(),
         networks: List<NetworkEntry> = emptyList(),
         known: Map<String, String> = emptyMap(),
         order: List<String> = emptyList(),
-    ) = LocalState(hosts, networks, known, order, emptyList())
+        keys: List<KeyEntry> = emptyList(),
+    ) = LocalState(hosts, networks, known, order, emptyList(), keys)
 
     private fun plan(b: SyncBundle, l: LocalState, mode: RestoreMode, cats: Set<RestoreCategory> = all) =
         RestorePlanner.plan(b, l, cats, mode, "moke-this")
@@ -80,6 +87,89 @@ class RestorePlannerTest {
         assertTrue(p.hosts!!.diff.isEmpty)
         assertFalse(p.hasChanges)
         assertTrue(plan(bundle(), local(), RestoreMode.MERGE, setOf(RestoreCategory.SETTINGS)).hasChanges)
+    }
+
+    @Test
+    fun `同私钥同口令的条目视为同一把密钥：保留本机 id，主机引用改指过去，不同密钥重名加序号`() {
+        val localKey = key("local-k", "My Key", pem = "SAME-PEM", pass = "p", createdAt = 777L)
+        val localOther = key("local-2", "Work", pem = "LOCAL-ONLY")
+        val fileSame = localKey.copy(id = "file-k", privateKeyPem = "  SAME-PEM\n", createdAt = 111L)
+        val fileCollision = key("file-2", "Work", pem = "DIFFERENT-PEM")
+
+        val b = bundle(
+            hosts = listOf(Host(id = "h", authType = AuthType.KEY, keyId = "file-k")),
+            keys = listOf(fileSame, fileCollision),
+        )
+        val merged = plan(b, local(keys = listOf(localKey, localOther)), RestoreMode.MERGE)
+        val mergedKeys = merged.keys!!
+        assertEquals(listOf("local-k", "local-2", "file-2"), mergedKeys.result.map { it.id })
+        assertEquals(listOf("My Key", "Work", "Work (2)"), mergedKeys.result.map { it.name })
+        assertEquals(777L, mergedKeys.result.first().createdAt)
+        assertTrue(mergedKeys.diff.updated.isEmpty()) // createdAt 差异不算同步变更
+        assertEquals(listOf("file-2"), mergedKeys.diff.added.map { it.id })
+        assertEquals("local-k", merged.hosts!!.result.single().keyId)
+        assertEquals(0, merged.danglingKeyRefs)
+
+        val replaced = plan(b, local(keys = listOf(localKey, localOther)), RestoreMode.REPLACE)
+        val replacedKeys = replaced.keys!!
+        assertEquals(listOf("local-k", "file-2"), replacedKeys.result.map { it.id })
+        assertEquals(listOf("local-2"), replacedKeys.diff.removed.map { it.id })
+        assertTrue(replaced.hasRemovals)
+    }
+
+    @Test
+    fun `勾了主机没勾密钥时，能识别需要一起恢复的密钥；取消后计入失效引用`() {
+        val k = key("k1", "Prod Key", pem = "PEM-1")
+        val b = bundle(hosts = listOf(Host(id = "h", authType = AuthType.KEY, keyId = "k1")), keys = listOf(k))
+        assertTrue(RestorePlanner.keysRequiredByHosts(b, local()))
+        assertFalse(RestorePlanner.keysRequiredByHosts(b, local(keys = listOf(key("local-eq", "Local", pem = "PEM-1")))))
+        assertEquals(1, plan(b, local(), RestoreMode.MERGE, setOf(RestoreCategory.HOSTS)).danglingKeyRefs)
+        assertEquals(0, plan(b, local(), RestoreMode.MERGE).danglingKeyRefs)
+
+        // 密码或 Tailscale SSH 主机上保留的休眠 keyId 不应强制勾上密钥，也不计入断连失效引用。
+        val dormant = bundle(
+            hosts = listOf(
+                Host(id = "pw", authType = AuthType.PASSWORD, password = "p", keyId = "k1"),
+                Host(id = "ts", authType = AuthType.TAILSCALE_SSH, keyId = "k1"),
+            ),
+            keys = listOf(k),
+        )
+        assertFalse(RestorePlanner.keysRequiredByHosts(dormant, local()))
+        assertEquals(0, plan(dormant, local(), RestoreMode.MERGE, setOf(RestoreCategory.HOSTS)).danglingKeyRefs)
+
+        // 经一级跳板连接、且跳板机使用密钥时，跳板缺失密钥同样计入需要恢复与失效引用。
+        val jumpHost = Host(id = "j", authType = AuthType.KEY, keyId = "k1")
+        val targetViaJump = Host(id = "app", authType = AuthType.PASSWORD, password = "p", jumpHostId = "j")
+        val viaJumpBundle = bundle(hosts = listOf(jumpHost, targetViaJump), keys = listOf(k))
+        assertTrue(RestorePlanner.keysRequiredByHosts(viaJumpBundle, local()))
+        assertEquals(2, plan(viaJumpBundle, local(), RestoreMode.MERGE, setOf(RestoreCategory.HOSTS)).danglingKeyRefs)
+    }
+
+    @Test
+    fun `合并恢复时两把已有密钥互换名称保持幂等，不误加序号`() {
+        val localKeys = listOf(
+            key("k1", "Prod", pem = "PEM-1"),
+            key("k2", "Prod Old", pem = "PEM-2"),
+            key("k3", "Untouched", pem = "PEM-3"),
+        )
+        val swappedInBackup = listOf(
+            key("k1", "Prod Old", pem = "PEM-1"),
+            key("k2", "Prod", pem = "PEM-2"),
+        )
+        val p = plan(bundle(keys = swappedInBackup), local(keys = localKeys), RestoreMode.MERGE).keys!!
+        assertEquals(listOf("k1", "k2", "k3"), p.result.map { it.id })
+        assertEquals(listOf("Prod Old", "Prod", "Untouched"), p.result.map { it.name })
+    }
+
+    @Test
+    fun `写回密钥时保留本机创建时间与预览后新建的条目`() {
+        val current = listOf(key("k1", "Key 1", createdAt = 500L), key("late", "Key 2", pem = "LATE"))
+        val planned = listOf(key("k1", "Key 2", createdAt = 1L))
+        val out = SyncController.reconcileKeys(current, planned, removedIds = emptySet())
+        assertEquals(listOf("k1", "late"), out.map { it.id })
+        assertEquals(500L, out[0].createdAt)
+        assertEquals(listOf("Key 2", "Key 2 (2)"), out.map { it.name })
+        assertEquals(listOf("k1"), SyncController.reconcileKeys(current, planned, removedIds = setOf("late")).map { it.id })
     }
 
     @Test

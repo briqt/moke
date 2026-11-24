@@ -32,6 +32,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import com.briqt.moke.data.ThemeMode
+import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -330,6 +331,11 @@ fun recoveryActionLabel(kind: RecoveryKind): Int = when (kind) {
     RecoveryKind.EDIT_NETWORK -> R.string.action_edit_network
     RecoveryKind.EDIT_HOST -> R.string.action_edit_host
     RecoveryKind.RETRY -> R.string.action_retry
+}
+
+fun recoveryActionLabel(recovery: NetworkRecovery): Int = when {
+    recovery.kind == RecoveryKind.EDIT_HOST && recovery.targetHostId != null -> R.string.action_edit_jump_host
+    else -> recoveryActionLabel(recovery.kind)
 }
 
 /** 明暗主题 → 文案资源。 */

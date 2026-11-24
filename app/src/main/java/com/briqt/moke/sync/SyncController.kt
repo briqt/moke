@@ -6,6 +6,8 @@ import android.provider.Settings
 import com.briqt.moke.LocaleManager
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostStore
+import com.briqt.moke.data.KeyEntry
+import com.briqt.moke.data.KeyStore
 import com.briqt.moke.data.ListState
 import com.briqt.moke.data.NetworkEntry
 import com.briqt.moke.data.NetworkKind
@@ -15,15 +17,16 @@ import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.data.StoreResult
 import com.briqt.moke.data.proxyConnectionChanged
 import com.briqt.moke.data.sameTmuxTarget
+import com.briqt.moke.data.uniqueKeyName
 import com.briqt.moke.terminal.KnownHosts
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
-import java.time.ZoneId
 
 /** 一个远端备份：文件信息 + 从文件名解析出的元数据。 */
 data class RemoteBackup(val file: RemoteFile, val parsed: BackupName.Parsed?, val fromThisDevice: Boolean) {
@@ -35,7 +38,7 @@ data class RemoteBackup(val file: RemoteFile, val parsed: BackupName.Parsed?, va
 
 sealed interface SyncError {
     data class WebDav(val failure: WebDavFailure, val status: Int = 0) : SyncError
-    /** 本机主机或网络库解不开 / 还没读到。 */
+    /** 本机主机、密钥或网络库解不开 / 还没读到。 */
     data object LocalUnreadable : SyncError
     data object NotConfigured : SyncError
     data object Storage : SyncError
@@ -70,6 +73,7 @@ class SyncController(
     private val context: Context,
     private val configStore: SyncConfigStore,
     private val hostStore: HostStore,
+    private val keyStore: KeyStore,
     private val networkStore: NetworkStore,
     private val settingsStore: SettingsStore,
     private val knownHosts: KnownHosts,
@@ -146,9 +150,10 @@ class SyncController(
         }
     }
 
-    /** 恢复前的本机快照；主机或网络库解不开时为 null（此时不能安全写入）。 */
+    /** 恢复前的本机快照；主机、密钥或网络库解不开时为 null（此时不能安全写入）。 */
     suspend fun localState(): LocalState? {
         val hosts = hostStore.state.first() as? ListState.Ready ?: return null
+        val keys = keyStore.state.first() as? ListState.Ready ?: return null
         val networks = networkStore.state.first() as? ListState.Ready ?: return null
         return LocalState(
             hosts = hosts.items,
@@ -156,6 +161,7 @@ class SyncController(
             knownHosts = knownHosts.all(),
             hostGroupOrder = settingsStore.hostGroupOrder.first(),
             hostCollapsedGroups = settingsStore.hostCollapsedGroups.first().toList(),
+            keys = keys.items,
         )
     }
 
@@ -163,7 +169,7 @@ class SyncController(
         RestorePlanner.plan(bundle, local, categories, mode, ops.defaultDeviceName())
 
     /**
-     * 按计划写回。顺序：网络（先做身份重置与删除）→ 主机 → 指纹 → 偏好。每类在自己的事务里写，
+     * 按计划写回。顺序：网络（先做身份重置与删除）→ 密钥 → 主机 → 指纹 → 偏好。每类在自己的事务里写，
      * 写入时以存储里的**当前值**为准对齐运行态字段（预览之后可能有连接刷新了最近连接时间、tmux 记忆）。
      */
     suspend fun apply(plan: RestorePlan, bundle: SyncBundle): ApplyResult {
@@ -175,6 +181,16 @@ class SyncController(
             val removedIds = np.diff.removed.map { it.id }.toSet()
             val written = ops.withStoreLock { networkStore.update { current -> reconcileNetworks(current, np.result, removedIds) } }
             if (!ok || !written) failed += RestoreCategory.NETWORKS
+        }
+        plan.keys?.let { kp ->
+            val removedIds = kp.diff.removed.map { it.id }.toSet()
+            val written = ops.withStoreLock {
+                keyStore.update { current ->
+                    val next = reconcileKeys(current, kp.result, removedIds)
+                    next.takeIf { it != current }
+                }
+            }
+            if (!written) failed += RestoreCategory.KEYS
         }
         plan.hosts?.let { hp ->
             val removedIds = hp.diff.removed.map { it.id }.toSet()
@@ -219,6 +235,7 @@ class SyncController(
             knownHosts = local.knownHosts,
             settings = settingsStore.exportSyncable(),
             language = LocaleManager.currentTag(context),
+            keys = local.keys,
         )
     }
 
@@ -238,6 +255,26 @@ class SyncController(
     }
 
     companion object {
+        internal fun reconcileKeys(current: List<KeyEntry>, planned: List<KeyEntry>, removedIds: Set<String>): List<KeyEntry> {
+            val byId = current.associateBy { it.id }
+            val plannedIds = planned.map { it.id }.toSet()
+            val out = mutableListOf<KeyEntry>()
+            for (p in planned) {
+                val c = byId[p.id]
+                val merged = p.copy(
+                    name = uniqueKeyName(p.name, out, ignoreId = p.id),
+                    createdAt = c?.createdAt ?: p.createdAt,
+                )
+                out += merged
+            }
+            for (c in current) {
+                if (c.id !in plannedIds && c.id !in removedIds) {
+                    out += c.copy(name = uniqueKeyName(c.name, out, ignoreId = c.id))
+                }
+            }
+            return out
+        }
+
         /**
          * 计划里的网络列表对齐到存储当前值：tailnet 保留本机的版本号与设备名，代理连接参数变了才升版本；
          * 本机在预览之后新建的条目保留，计划里移除的不再写回。

@@ -63,3 +63,26 @@ internal fun prepareHostEdit(current: List<Host>, entry: Host, editing: Boolean)
     )
     return StoreResult.Saved(ListEdit(if (old == null) current + saved else current.map { if (it.id == saved.id) saved else it }, saved))
 }
+
+internal fun prepareKeyEdit(
+    current: List<KeyEntry>,
+    entry: KeyEntry,
+    editing: Boolean,
+): StoreResult<ListEdit<KeyEntry>> {
+    val old = current.firstOrNull { it.id == entry.id }
+    if (editing && old == null) return StoreResult.Failed(StoreFailure.MISSING)
+    if (!editing && old != null) return StoreResult.Failed(StoreFailure.CONFLICT)
+    val name = entry.name.trim()
+    if (entry.id.isBlank() || name.isEmpty() || entry.privateKeyPem.isBlank()) {
+        return StoreResult.Failed(StoreFailure.INVALID)
+    }
+    if (current.any { it.id != entry.id && it.name.trim().equals(name, ignoreCase = true) }) {
+        return StoreResult.Failed(StoreFailure.DUPLICATE_NAME)
+    }
+    val saved = entry.copy(
+        name = name,
+        createdAt = old?.createdAt ?: entry.createdAt,
+    )
+    val next = if (old == null) current + saved else current.map { if (it.id == saved.id) saved else it }
+    return StoreResult.Saved(ListEdit(next, saved))
+}

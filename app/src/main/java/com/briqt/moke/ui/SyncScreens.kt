@@ -526,6 +526,7 @@ private fun RestoreForm(
     }
     var categories by remember { mutableStateOf(RestoreCategory.entries.toSet()) }
     var mode by remember { mutableStateOf(RestoreMode.MERGE) }
+    var autoKeys by remember { mutableStateOf(false) }
     var autoNetworks by remember { mutableStateOf(false) }
     var applying by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
@@ -533,10 +534,17 @@ private fun RestoreForm(
 
     fun toggle(c: RestoreCategory, on: Boolean) {
         var next = if (on) categories + c else categories - c
+        autoKeys = false
         autoNetworks = false
-        if (on && c == RestoreCategory.HOSTS && RestoreCategory.NETWORKS !in next && RestorePlanner.networksRequiredByHosts(bundle, local)) {
-            next = next + RestoreCategory.NETWORKS
-            autoNetworks = true
+        if (on && c == RestoreCategory.HOSTS) {
+            if (RestoreCategory.KEYS !in next && RestorePlanner.keysRequiredByHosts(bundle, local)) {
+                next = next + RestoreCategory.KEYS
+                autoKeys = true
+            }
+            if (RestoreCategory.NETWORKS !in next && RestorePlanner.networksRequiredByHosts(bundle, local)) {
+                next = next + RestoreCategory.NETWORKS
+                autoNetworks = true
+            }
         }
         categories = next
     }
@@ -545,6 +553,8 @@ private fun RestoreForm(
     SettingsGroup {
         CategoryRow(stringResource(R.string.sync_cat_hosts), pluralStringResource(R.plurals.sync_items, bundle.hosts.size, bundle.hosts.size),
             RestoreCategory.HOSTS in categories, !applying) { toggle(RestoreCategory.HOSTS, it) }
+        CategoryRow(stringResource(R.string.sync_cat_keys), pluralStringResource(R.plurals.sync_items, bundle.keys.size, bundle.keys.size),
+            RestoreCategory.KEYS in categories, !applying) { toggle(RestoreCategory.KEYS, it) }
         CategoryRow(stringResource(R.string.sync_cat_networks), pluralStringResource(R.plurals.sync_items, bundle.networks.size, bundle.networks.size),
             RestoreCategory.NETWORKS in categories, !applying) { toggle(RestoreCategory.NETWORKS, it) }
         CategoryRow(stringResource(R.string.sync_cat_fingerprints), pluralStringResource(R.plurals.sync_items, bundle.knownHosts.size, bundle.knownHosts.size),
@@ -552,6 +562,7 @@ private fun RestoreForm(
         CategoryRow(stringResource(R.string.sync_cat_settings), pluralStringResource(R.plurals.sync_items, bundle.settings.size, bundle.settings.size),
             RestoreCategory.SETTINGS in categories, !applying) { toggle(RestoreCategory.SETTINGS, it) }
     }
+    if (autoKeys) InfoNote(stringResource(R.string.sync_auto_keys))
     if (autoNetworks) InfoNote(stringResource(R.string.sync_auto_networks))
 
     SectionTitle(stringResource(R.string.sync_mode))
@@ -575,14 +586,25 @@ private fun RestoreForm(
     }
 
     if (confirm) {
-        val removedNames = plan.hosts?.diff?.removed.orEmpty().map { it.displayName } + plan.networks?.diff?.removed.orEmpty().map { it.name }
+        val removedNames = plan.hosts?.diff?.removed.orEmpty().map { it.displayName } +
+            plan.keys?.diff?.removed.orEmpty().map { it.name } +
+            plan.networks?.diff?.removed.orEmpty().map { it.name }
         val fpRemoved = plan.fingerprints?.removed ?: 0
         val removalText = (removedNames + if (fpRemoved > 0) listOf(pluralStringResource(R.plurals.sync_fingerprints, fpRemoved, fpRemoved)) else emptyList())
             .joinToString(stringResource(R.string.sync_list_separator))
+        val confirmLines = buildList {
+            if (plan.hasRemovals) {
+                add(stringResource(R.string.sync_restore_confirm_removal, removalText))
+            } else {
+                add(stringResource(R.string.sync_restore_confirm_message))
+            }
+            if (plan.hasRemovals && plan.danglingKeyRefs > 0) {
+                add(pluralStringResource(R.plurals.sync_preview_dangling_keys, plan.danglingKeyRefs, plan.danglingKeyRefs))
+            }
+        }
         ConfirmDialog(
             title = stringResource(R.string.sync_restore_confirm_title),
-            message = if (plan.hasRemovals) stringResource(R.string.sync_restore_confirm_removal, removalText)
-                else stringResource(R.string.sync_restore_confirm_message),
+            message = confirmLines.joinToString("\n"),
             confirmLabel = stringResource(R.string.sync_restore),
             destructive = plan.hasRemovals,
             onConfirm = {
@@ -624,6 +646,11 @@ private fun PlanPreview(plan: RestorePlan) {
     fun counts(category: Int, added: Int, updated: Int, removed: Int): String =
         if (added == 0 && updated == 0 && removed == 0) stringResource(R.string.sync_preview_unchanged, stringResource(category))
         else stringResource(R.string.sync_preview_counts, stringResource(category), added, updated, removed)
+    plan.keys?.let { kp ->
+        lines += counts(R.string.sync_cat_keys, kp.diff.added.size, kp.diff.updated.size, kp.diff.removed.size) to false
+        if (kp.diff.added.isNotEmpty()) lines += stringResource(R.string.sync_preview_added, names(kp.diff.added.map { it.name })) to false
+        if (kp.diff.removed.isNotEmpty()) lines += stringResource(R.string.sync_preview_removed, names(kp.diff.removed.map { it.name })) to true
+    }
     plan.networks?.let { np ->
         lines += counts(R.string.sync_cat_networks, np.diff.added.size, np.diff.updated.size, np.diff.removed.size) to false
         if (np.diff.added.isNotEmpty()) lines += stringResource(R.string.sync_preview_added, names(np.diff.added.map { it.name })) to false
@@ -640,6 +667,7 @@ private fun PlanPreview(plan: RestorePlan) {
         lines += counts(R.string.sync_cat_fingerprints, fp.added, fp.updated, fp.removed) to false
     }
     if (plan.settings) lines += stringResource(R.string.sync_preview_settings) to false
+    if (plan.danglingKeyRefs > 0) lines += pluralStringResource(R.plurals.sync_preview_dangling_keys, plan.danglingKeyRefs, plan.danglingKeyRefs) to true
     if (plan.danglingNetworkRefs > 0) lines += pluralStringResource(R.plurals.sync_preview_dangling, plan.danglingNetworkRefs, plan.danglingNetworkRefs) to true
     if (!plan.hasChanges) lines.clear()
     if (lines.isEmpty()) {
@@ -671,6 +699,7 @@ private fun RestoreResultView(
         val names = result.failed.map { c ->
             stringResource(when (c) {
                 RestoreCategory.HOSTS -> R.string.sync_cat_hosts
+                RestoreCategory.KEYS -> R.string.sync_cat_keys
                 RestoreCategory.NETWORKS -> R.string.sync_cat_networks
                 RestoreCategory.FINGERPRINTS -> R.string.sync_cat_fingerprints
                 RestoreCategory.SETTINGS -> R.string.sync_cat_settings

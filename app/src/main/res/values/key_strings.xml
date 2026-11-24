@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_keys">Keys</string>
+    <string name="menu_keys_empty">SSH keys and generation</string>
+    <plurals name="menu_keys_summary">
+        <item quantity="one">%1$d key</item>
+        <item quantity="other">%1$d keys</item>
+    </plurals>
+    <string name="keys_loading">Loading saved keys…</string>
+    <string name="keys_unreadable">Couldn\'t read saved keys. The stored data has been kept.</string>
+    <string name="route_unreadable_keys">Couldn\'t read saved keys. The stored data has been kept. Try again.</string>
+    <string name="route_missing_key">This host\'s SSH key was deleted. Edit the host to choose another.</string>
+    <string name="route_missing_jump_key">The jump host\'s SSH key was deleted. Edit the jump host to choose another.</string>
+    <string name="badge_key_deleted">Key deleted</string>
+
+    <string name="keys_empty_title">No SSH keys yet</string>
+    <string name="keys_empty_hint">Generate or import an SSH key on this device to reuse across hosts.</string>
+    <string name="key_action_generate">Generate new key</string>
+    <string name="key_action_import">Import existing key</string>
+    <string name="key_copy_public">Copy public key</string>
+    <string name="key_public_copied">Public key copied</string>
+    <plurals name="key_used_by_hosts">
+        <item quantity="one">%1$d host</item>
+        <item quantity="other">%1$d hosts</item>
+    </plurals>
+
+    <string name="key_generate_title">Generate key</string>
+    <string name="key_import_title">Import key</string>
+    <string name="key_edit_title">Edit key</string>
+    <string name="key_generating">Generating…</string>
+    <string name="key_algorithm">Algorithm</string>
+    <string name="key_name_generate_hint">Leave empty to use %1$s</string>
+    <string name="key_name_import_hint">Leave empty to use key comment or algorithm</string>
+    <string name="key_name_duplicate">A key with this name already exists.</string>
+    <string name="key_passphrase_optional">Key passphrase (optional)</string>
+    <string name="field_key_passphrase">Key passphrase</string>
+    <string name="key_import_file">Import from file</string>
+    <string name="key_private_pem_hint">OpenSSH, PEM (RSA / ECDSA) or PPK (.ppk)</string>
+    <string name="form_private_key_invalid">Unrecognized or unsupported private key.</string>
+    <string name="form_key_passphrase_required">This key is encrypted. Enter its passphrase.</string>
+    <string name="form_key_passphrase_wrong">Incorrect passphrase, or the key is corrupted.</string>
+    <string name="key_file_empty">The selected file is empty.</string>
+    <string name="key_file_too_large">The selected file is too large.</string>
+    <string name="key_file_read_failed">Cannot read the selected file.</string>
+    <string name="key_label_fingerprint">Fingerprint</string>
+    <string name="key_label_public">Public key (authorized_keys)</string>
+    <string name="key_public_unavailable">Public key cannot be derived from this legacy key.</string>
+    <string name="key_legacy_passphrase_hint">This key is encrypted. Enter its passphrase and save to unlock its public key and fingerprint.</string>
+    <string name="key_replace_private">Replace private key</string>
+    <string name="key_cancel_replace">Cancel replacement</string>
+    <string name="key_delete">Delete key</string>
+    <string name="key_delete_title">Delete “%1$s”?</string>
+    <plurals name="key_delete_hosts">
+        <item quantity="one">Connections to %1$d host use this key. After deletion, update the key settings on the affected host or jump host.</item>
+        <item quantity="other">Connections to %1$d hosts use this key. After deletion, update the key settings on the affected hosts or jump hosts.</item>
+    </plurals>
+
+    <string name="key_select_placeholder">Select key</string>
+    <string name="key_new_generate_item">Generate new key…</string>
+    <string name="key_new_import_item">Import existing key…</string>
+    <string name="key_missing_error">The selected key was deleted. Choose another.</string>
+    <string name="form_key_required">Select an SSH key.</string>
+</resources>
