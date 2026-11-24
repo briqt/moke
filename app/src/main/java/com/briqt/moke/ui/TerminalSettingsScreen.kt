@@ -1,19 +1,16 @@
 package com.briqt.moke.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.SwipeVertical
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwipeVertical
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,17 +23,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
+import com.briqt.moke.terminal.BackgroundKeepalive
 import com.briqt.moke.ui.theme.MokeDimens
 
 /**
- * 「终端与输入」设置页：终端行为 + 输入相关的开关都归到这里。
- * 一级设置只留分组入口，具体项集中在本页——后续加「会话持久化 / 滚屏行数 / 附加键布局」等也落这儿。
+ * 「终端与输入」设置页：按输入、会话与后台、安全三组分段组织。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,8 +54,10 @@ fun TerminalSettingsScreen(
     onAutoTrustNewHostKey: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     var kbDialog by remember { mutableStateOf(false) }
     var keysDialog by remember { mutableStateOf(false) }
+    val ignoringBatteryOptimizations = rememberIgnoringBatteryOptimizations()
 
     Scaffold(
         topBar = {
@@ -96,13 +95,31 @@ fun TerminalSettingsScreen(
                     stringResource(R.string.menu_extra_keys),
                     onClick = { keysDialog = true },
                 )
-            }
-            SettingsGroup {
                 SwitchRow(
                     icon = Icons.Filled.SwipeVertical,
                     title = stringResource(R.string.menu_tmux_scroll_setup),
                     checked = tmuxScrollSetup,
                     onCheckedChange = onTmuxScrollSetup,
+                )
+            }
+            SettingsGroup {
+                NavRow(
+                    Icons.Filled.BatterySaver,
+                    stringResource(R.string.ignore_battery_optimizations),
+                    stringResource(if (ignoringBatteryOptimizations) R.string.status_enabled else R.string.status_disabled),
+                    onClick = {
+                        if (!ignoringBatteryOptimizations) {
+                            BackgroundKeepalive.requestIgnoreBatteryOptimizations(context)
+                        } else {
+                            BackgroundKeepalive.openAppDetailsSettings(context)
+                        }
+                    },
+                )
+                SwitchRow(
+                    icon = Icons.Filled.NotificationsActive,
+                    title = stringResource(R.string.menu_terminal_alerts),
+                    checked = terminalAlerts,
+                    onCheckedChange = onTerminalAlerts,
                 )
                 SwitchRow(
                     icon = Icons.Filled.LightMode,
@@ -116,12 +133,8 @@ fun TerminalSettingsScreen(
                     checked = confirmClose,
                     onCheckedChange = onConfirmClose,
                 )
-                SwitchRow(
-                    icon = Icons.Filled.NotificationsActive,
-                    title = stringResource(R.string.menu_terminal_alerts),
-                    checked = terminalAlerts,
-                    onCheckedChange = onTerminalAlerts,
-                )
+            }
+            SettingsGroup {
                 SwitchRow(
                     icon = Icons.Filled.Key,
                     title = stringResource(R.string.menu_auto_trust_hostkey),

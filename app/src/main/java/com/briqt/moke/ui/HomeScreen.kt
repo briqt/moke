@@ -1127,8 +1127,18 @@ private fun SettingsMenuContent(
         // 一级设置只放「分组入口」，具体开关都在二级页 —— 功能变多时靠加/扩分组消化，
         // 而不是继续往这一屏平铺（那样很快就乱）。
         SettingsGroup {
-            NavRow(Icons.Filled.Palette, stringResource(R.string.menu_appearance), onClick = onOpenAppearance)
-            NavRow(Icons.Filled.Terminal, stringResource(R.string.menu_terminal_input), onClick = onOpenTerminalSettings)
+            NavRow(
+                Icons.Filled.Palette,
+                stringResource(R.string.menu_appearance),
+                stringResource(R.string.menu_appearance_subtitle),
+                onClick = onOpenAppearance,
+            )
+            NavRow(
+                Icons.Filled.Terminal,
+                stringResource(R.string.menu_terminal_input),
+                stringResource(R.string.menu_terminal_input_subtitle),
+                onClick = onOpenTerminalSettings,
+            )
             NavRow(Icons.Filled.Hub, stringResource(R.string.menu_network), networkSubtitle, onClick = onOpenNetworks, showDot = needsLogin != null)
             NavRow(Icons.Filled.CloudSync, stringResource(R.string.menu_sync), syncSubtitle, onClick = onOpenSync)
             NavRow(Icons.Filled.Language, stringResource(R.string.menu_language), langLabel, onClick = { langDialog = true })

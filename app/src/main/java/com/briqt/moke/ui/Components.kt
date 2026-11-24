@@ -68,8 +68,17 @@ import com.briqt.moke.ui.theme.extra
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.briqt.moke.terminal.BackgroundKeepalive
+import kotlinx.coroutines.delay
 
 /** 徽标 / 能力标签规格：文案 + 强调色（背景取该色的淡版）。 */
 data class BadgeSpec(val text: String, val color: Color)
@@ -641,4 +650,37 @@ fun SliderSettingRow(
             modifier = Modifier.widthIn(min = 36.dp),
         )
     }
+}
+
+/**
+ * Observes battery-optimization whitelist status across system settings/dialog returns, including
+ * short delayed re-checks (`250ms` and `800ms`) for asynchronous PowerManager state propagation.
+ */
+@Composable
+fun rememberIgnoringBatteryOptimizations(extraTrigger: Any? = Unit): Boolean {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var ignoring by remember(context) {
+        mutableStateOf(BackgroundKeepalive.isIgnoringBatteryOptimizations(context))
+    }
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(lifecycleOwner, context, extraTrigger) {
+        ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            delay(250)
+            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            delay(550)
+            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+        }
+    }
+    return ignoring
 }

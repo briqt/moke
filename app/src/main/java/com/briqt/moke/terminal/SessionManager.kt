@@ -1,6 +1,7 @@
 package com.briqt.moke.terminal
 
 import android.content.Context
+import android.os.SystemClock
 import com.briqt.moke.R
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.NetworkEntry
@@ -54,6 +55,7 @@ class TermSession(
     val copyMark: String? = null,
     @Volatile var rememberEpoch: Long = 0L,
     val customPrefix: MutableStateFlow<String?> = MutableStateFlow(null),
+    val keepAliveEligible: Boolean = true,
 ) {
     private val metadata = SessionMetadata(scopeKey, SessionDirectoryTarget(scopeKey, host.host, host.displayName))
     val directory: StateFlow<SessionDirectory?> = metadata.directory
@@ -66,8 +68,13 @@ class TermSession(
     @Volatile var lastActivityAt: Long = startedAt
     val tmuxState = MutableStateFlow(TmuxUiState())
     val dataReady = MutableStateFlow(false)
+    @Volatile internal var dataReadyAtElapsedMs: Long = -1L
     val negotiatedTerm = MutableStateFlow<String?>(null)
     val connectFailed = MutableStateFlow(false)
+    val endedInBackground = MutableStateFlow(false)
+    @Volatile private var closedByUser = false
+    internal val isClosedByUser: Boolean get() = closedByUser
+    internal fun markUserClosed() { closedByUser = true }
     val recovery = MutableStateFlow<NetworkRecovery?>(null)
     val loginNetwork = MutableStateFlow<NetworkEntry?>(null)
     val forwards: PortForwards? = (transport as? ForwardCapable)?.let { PortForwards(it) }
@@ -146,6 +153,7 @@ class SessionManager(context: Context) {
         tmuxIntent: TmuxIntent = TmuxIntent.None,
         rememberEpoch: Long = 0L,
         observeTmux: Boolean = false,
+        ephemeral: Boolean = false,
     ): TermSession {
         val id = UUID.randomUUID().toString()
         val nonce = id.replace("-", "")
@@ -168,13 +176,28 @@ class SessionManager(context: Context) {
         val prefix = MutableStateFlow(overrides.prefix)
         val display = MutableStateFlow(SessionTitlePolicy.display(prefix.value, custom.value, "", base))
         val alive = MutableStateFlow(true)
+        val keepAliveEligible = refusal == null && !ephemeral
         var created: TermSession? = null
         val controller = TerminalController(
             context = appContext,
-            onFinished = {
+            onFinished = { exitCode ->
+                val session = created
+                if (session != null && BackgroundKeepalive.shouldMarkEndedInBackground(
+                        dataReady = session.dataReady.value,
+                        closedByUser = session.isClosedByUser,
+                        exitCode = exitCode,
+                        appVisible = TerminalAlerts.appVisible,
+                        dataReadyAtElapsedMs = session.dataReadyAtElapsedMs,
+                        lastBackgroundedAtElapsedMs = TerminalAlerts.lastBackgroundedAtElapsedMs,
+                        lastResumedAtElapsedMs = TerminalAlerts.lastResumedAtElapsedMs,
+                        nowElapsedMs = SystemClock.elapsedRealtime(),
+                    )
+                ) {
+                    session.endedInBackground.value = true
+                }
                 alive.value = false
-                created?.endMetadata()
-                created?.tmuxCoordinator?.dataEnded()
+                session?.endMetadata()
+                session?.tmuxCoordinator?.dataEnded()
             },
             // An empty OSC clears the dynamic title; it must not freeze an obsolete fallback name.
             onTitle = { if (alive.value) title.value = it.orEmpty() },
@@ -211,7 +234,7 @@ class SessionManager(context: Context) {
             startedAt = System.currentTimeMillis(), scripts = scripts,
             problemText = { appContext.tmuxProblemText(it) },
             copyMark = carryFrom?.takeIf { sameTarget }?.let { nextCopyMark(host.id) }, rememberEpoch = rememberEpoch,
-            customPrefix = prefix,
+            customPrefix = prefix, keepAliveEligible = keepAliveEligible,
         )
         created = ts
         session.sessionStatusText = object : TerminalSession.StatusText {
@@ -224,6 +247,7 @@ class SessionManager(context: Context) {
         }
         val autoPorts = PortForwards.parsePorts(host.forwardPorts).ports
         val onUp: () -> Unit = {
+            ts.dataReadyAtElapsedMs = SystemClock.elapsedRealtime()
             ts.dataReady.value = true
             if (observer != null) scope.launch {
                 ts.tmuxCoordinator.refresh()
@@ -240,6 +264,9 @@ class SessionManager(context: Context) {
         controller.onAlert = { text, body -> TerminalAlerts.post(appContext, ts.id, ts.displayTitle.value, text, body) }
         controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }
+        if (ts.keepAliveEligible) {
+            MokeSessionService.ensureRunning(appContext)
+        }
         titleJobs[id] = merge(title.map { Unit }, custom.map { Unit }, prefix.map { Unit },
             ts.tmuxState.map { Unit }, alive.map { Unit }, ts.directory.map { Unit })
             .onEach { ts.refreshAutomaticTitle(); refreshDisplayTitles() }.launchIn(scope)
@@ -328,6 +355,7 @@ class SessionManager(context: Context) {
 
     fun close(id: String) {
         val session = get(id) ?: return
+        session.markUserClosed()
         session.endMetadata()
         session.tmuxCoordinator.close()
         titleJobs.remove(id)?.cancel()

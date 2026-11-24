@@ -63,6 +63,7 @@ class SshConnector(
         return client.apply {
             connectTimeout = CONNECT_TIMEOUT_MS
             if (awaitsTrust) transport.timeoutMs = TRUST_PROMPT_TIMEOUT_MS
+            if (heartbeat) configureClientHeartbeat(this)
             if (network != null) {
                 socketFactory = NetworkSocketFactory((appContext as MokeApplication).networks, network)
             }
@@ -109,6 +110,10 @@ class SshConnector(
             authenticateTarget = { authenticate(it, host, authOwner) },
             disconnect = { it.disconnect() },
         )
+        if (heartbeat) {
+            configureClientHeartbeat(client)
+            jump?.let(::configureClientHeartbeat)
+        }
         return Connected(client, jump)
     }
 
@@ -187,9 +192,25 @@ class SshConnector(
 
     companion object {
         const val CONNECT_TIMEOUT_MS = 15000
+        const val HEARTBEAT_INTERVAL_SECONDS = 30
 
         /** 首连等用户确认指纹时的握手超时（略大于 HostKeyPrompt 自己的 120s）。 */
         private const val TRUST_PROMPT_TIMEOUT_MS = 150_000
+    }
+}
+
+/**
+ * Sets the SSH keepalive interval before `connect()` so `SSHClient.onConnect()` starts its
+ * keepalive daemon thread on both jump and target connections, and starts it defensively if
+ * called on an already-connected client.
+ */
+internal fun configureClientHeartbeat(client: SSHClient) {
+    runCatching {
+        val ka = client.connection.keepAlive
+        ka.keepAliveInterval = SshConnector.HEARTBEAT_INTERVAL_SECONDS
+        if (client.isConnected && !ka.isAlive && ka.state == Thread.State.NEW) {
+            ka.start()
+        }
     }
 }
 

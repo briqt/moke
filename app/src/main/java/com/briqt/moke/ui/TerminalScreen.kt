@@ -106,6 +106,7 @@ import com.briqt.moke.data.ScrollMode
 import com.briqt.moke.data.SessionPersistence
 import com.briqt.moke.net.NetworkRecovery
 import com.briqt.moke.net.RecoveryKind
+import com.briqt.moke.terminal.BackgroundKeepalive
 import com.briqt.moke.terminal.KeyId
 import com.briqt.moke.terminal.ModKind
 import com.briqt.moke.terminal.ModState
@@ -174,6 +175,7 @@ fun TerminalScreen(
     val alive by ts.alive.collectAsState()
     val dataReady by ts.dataReady.collectAsState()
     val connectFailed by ts.connectFailed.collectAsState()
+    val endedInBackground by ts.endedInBackground.collectAsState()
     val loginNetwork by ts.loginNetwork.collectAsState()
     val recovery by ts.recovery.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
@@ -245,6 +247,7 @@ fun TerminalScreen(
     val imeFallback = remember(ts.id) { TerminalImeFallback() }
     val composeView = LocalView.current
     var windowFocused by remember(ts.id, composeView) { mutableStateOf(composeView.hasWindowFocus()) }
+    val ignoringBatteryOptimizations = rememberIgnoringBatteryOptimizations(windowFocused)
     var inputBudget by remember(ts.id) { mutableStateOf(TerminalInputBudget(0, 0, 0)) }
     var inputAttempt by remember(ts.id) { mutableIntStateOf(0) }
     val requestKeyboard = {
@@ -575,6 +578,11 @@ fun TerminalScreen(
                                 // Unknown connection loss is reconnectable, but is not proof of recovered work.
                                 if (connectFailed && action != null && action.kind != RecoveryKind.RETRY) {
                                     TextButton(onClick = { onRecover(action) }) { Text(stringResource(recoveryActionLabel(action.kind))) }
+                                }
+                                if (endedInBackground && !ignoringBatteryOptimizations) {
+                                    TextButton(onClick = { BackgroundKeepalive.requestIgnoreBatteryOptimizations(context) }) {
+                                        Text(stringResource(R.string.action_allow_background))
+                                    }
                                 }
                                 TextButton(onClick = onReconnect) {
                                     Icon(Icons.Filled.Refresh, contentDescription = null)

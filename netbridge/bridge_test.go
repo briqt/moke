@@ -918,3 +918,54 @@ func TestConcurrentDialsAndStopsAreRaceFree(t *testing.T) {
 	wg.Wait()
 	waitUntil(t, func() bool { return tb.leaseCount("home") == 0 })
 }
+
+func TestTailnetUDPRelayReopensEndedNodeSocket(t *testing.T) {
+	tb := newTestBridge(t)
+	first, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		first.Close()
+		second.Close()
+		tb.relays.CloseAll()
+	})
+	var opens atomic.Int32
+	tb.startFake(t, "home", &fakeNode{state: "Running", packet: func() (net.PacketConn, error) {
+		if opens.Add(1) == 1 {
+			return first, nil
+		}
+		return second, nil
+	}})
+	info, err := tb.openUDPRelay(`{"id":"r-reopen","networkID":"home","targetHost":"100.64.0.2"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "AAAAAAAAAAAAAAAAAAAAAA"
+	if err := tb.startUDPRelay("r-reopen", 60001, key); err != nil {
+		t.Fatal(err)
+	}
+	if info.LocalPort == 0 || tb.leaseCount("home") != 1 {
+		t.Fatalf("info %+v leases %d", info, tb.leaseCount("home"))
+	}
+	// Simulate the tailnet packet listener ending across a network transition.
+	first.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for tb.relays.Reopens() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if tb.relays.Reopens() != 1 || opens.Load() != 2 || tb.leaseCount("home") != 1 {
+		t.Fatalf("reopens=%d opens=%d leases=%d", tb.relays.Reopens(), opens.Load(), tb.leaseCount("home"))
+	}
+	if err := tb.closeUDPRelay("r-reopen"); err != nil {
+		t.Fatal(err)
+	}
+	if tb.leaseCount("home") != 0 {
+		t.Fatalf("leases after close: %d", tb.leaseCount("home"))
+	}
+}

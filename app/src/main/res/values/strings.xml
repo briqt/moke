@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 默认语言 = English（兜底）；中文见 values-zh/strings.xml。 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Moke</string>
     <string name="app_title">Moke · 墨客</string>
 
@@ -147,6 +147,8 @@
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">Appearance</string>
+    <string name="menu_appearance_subtitle">Theme, colors and fonts</string>
+    <string name="menu_terminal_input_subtitle">Shortcuts, sessions and background</string>
     <string name="menu_about">About</string>
     <string name="menu_language">Language</string>
 
@@ -282,7 +284,8 @@
     <!-- 后台会话通知 -->
     <string name="notif_channel_name">Session keep-alive</string>
     <string name="notif_channel_desc">Keeps SSH / mosh sessions alive in the background</string>
-    <string name="notif_sessions_active">%1$d session(s) kept in the background</string>
+    <string name="notif_session_single">Active · %1$s</string>
+    <string name="notif_sessions_summary" tools:ignore="PluralsCandidate">%1$d active · %2$s</string>
     <string name="notif_transfer_channel_name">File transfers</string>
     <string name="notif_transfer_channel_desc">Keeps uploads and downloads running in the background</string>
     <string name="notif_transfer_title">Transferring files</string>
@@ -397,6 +400,10 @@
 
     <!-- 设置分组 -->
     <string name="menu_terminal_input">Terminal &amp; input</string>
+    <string name="ignore_battery_optimizations">Ignore battery optimizations</string>
+    <string name="action_allow_background">Allow background</string>
+    <string name="status_enabled">On</string>
+    <string name="status_disabled">Off</string>
     <string name="section_ui">Interface</string>
     <string name="menu_tmux_scroll_setup">tmux scrolling</string>
     <string name="menu_keep_screen_on">Keep screen on</string>

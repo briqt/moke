@@ -54,7 +54,12 @@ type Config struct {
 	resolver *net.Resolver
 }
 
-const handshakeTimeout = 15 * time.Second
+const (
+	handshakeTimeout  = 15 * time.Second
+	keepAliveIdle     = 15 * time.Second
+	keepAliveInterval = 10 * time.Second
+	keepAliveCount    = 3
+)
 
 func ParseConfig(data string) (Config, error) {
 	var c Config
@@ -118,7 +123,17 @@ func (c Config) dialProxy(ctx context.Context) (net.Conn, error) {
 	// even if the caller supplied a context without a deadline.
 	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{Timeout: handshakeTimeout, Resolver: c.resolver}).DialContext(ctx, "tcp", c.address())
+	dialer := &net.Dialer{
+		Timeout:  handshakeTimeout,
+		Resolver: c.resolver,
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     keepAliveIdle,
+			Interval: keepAliveInterval,
+			Count:    keepAliveCount,
+		},
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", c.address())
 	if err != nil {
 		code := codes.ProxyUnreachable
 		if codes.Classify(err, code) == codes.Timeout {

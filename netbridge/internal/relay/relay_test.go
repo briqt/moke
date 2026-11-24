@@ -729,3 +729,144 @@ func TestReopensAnEndedBackendSocket(t *testing.T) {
 	sendPacket(second, []byte("reply"), "198.51.100.7:60020")
 	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
 }
+
+func TestReopensAssignedSourceBackendSocket(t *testing.T) {
+	m := NewManager()
+	defer m.CloseAll()
+	local := fakeConn("127.0.0.1:32006")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
+	first, second := fakeConn("100.64.0.1:33010"), fakeConn("100.64.0.1:33011")
+	var binds []string
+	var bindMu sync.Mutex
+	opens := atomic.Int32{}
+	node := Network{
+		ID:     "tailnet",
+		IPs:    []netip.Addr{netip.MustParseAddr("fd7a:115c:a1e0::1"), netip.MustParseAddr("100.64.0.1")},
+		Reopen: true,
+		ListenPacket: func(network, address string) (net.PacketConn, error) {
+			bindMu.Lock()
+			binds = append(binds, network+"/"+address)
+			bindMu.Unlock()
+			switch opens.Add(1) {
+			case 1:
+				return first, nil
+			case 2:
+				return nil, errors.New("temporary rebind failure")
+			default:
+				return second, nil
+			}
+		},
+	}
+	if _, err := m.Open(Config{ID: "t", NetworkID: "tailnet", TargetHost: "100.64.0.2"}, node); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start("t", 60030, testKey); err != nil {
+		t.Fatal(err)
+	}
+	d0 := moshDatagram(t, testKey, 0, false, "before")
+	sendPacket(local, d0, "127.0.0.1:40000")
+	receivePacket(t, first, d0, "100.64.0.2:60030")
+
+	// Close the assigned-source socket; sends while reopening drop datagrams without ending the session.
+	first.Close()
+	sendPacket(local, moshDatagram(t, testKey, 1, false, "during-reopen"), "127.0.0.1:40000")
+
+	deadline := time.Now().Add(8 * time.Second)
+	for m.Reopens() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if m.Reopens() != 1 || opens.Load() != 3 || m.Count() != 1 {
+		t.Fatalf("reopens = %d, opens = %d, relays = %d", m.Reopens(), opens.Load(), m.Count())
+	}
+	bindMu.Lock()
+	gotBinds := append([]string(nil), binds...)
+	bindMu.Unlock()
+	for _, b := range gotBinds {
+		if b != "udp/100.64.0.1:0" {
+			t.Fatalf("unexpected bind %q in %v", b, gotBinds)
+		}
+	}
+
+	d2 := moshDatagram(t, testKey, 2, false, "after")
+	sendPacket(local, d2, "127.0.0.1:40000")
+	receivePacket(t, second, d2, "100.64.0.2:60030")
+	sendPacket(second, []byte("reply"), "100.64.0.2:60030")
+	receivePacket(t, local, []byte("reply"), "127.0.0.1:40000")
+}
+
+func TestCloseCancelsReopenBackoffAndClosesLateReopenedSocket(t *testing.T) {
+	// 1. Close while reopenRemote is sleeping in its backoff timer (< reopenMin).
+	m := NewManager()
+	t.Cleanup(func() { m.CloseAll() })
+	local := fakeConn("127.0.0.1:32007")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local, nil }
+	first := fakeConn("100.64.0.1:33020")
+	opens := atomic.Int32{}
+	node := Network{
+		ID:     "tailnet",
+		IPs:    []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+		Reopen: true,
+		ListenPacket: func(string, string) (net.PacketConn, error) {
+			opens.Add(1)
+			return first, nil
+		},
+	}
+	if _, err := m.Open(Config{ID: "backoff", NetworkID: "tailnet", TargetHost: "100.64.0.2"}, node); err != nil {
+		t.Fatal(err)
+	}
+	first.Close() // Triggers fromRemote -> reopenRemote backoff sleep (reopenMin = 1s).
+	time.Sleep(40 * time.Millisecond)
+
+	start := time.Now()
+	if err := m.Close("backoff"); err != nil {
+		t.Fatalf("Close during reopen backoff: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= reopenMin/2 {
+		t.Fatalf("Close waited for reopen backoff timer: %v >= %v", elapsed, reopenMin/2)
+	}
+	if opens.Load() != 1 || first.closeCount.Load() != 1 || local.closeCount.Load() != 1 {
+		t.Fatalf("unexpected socket counts: opens=%d firstCloses=%d localCloses=%d",
+			opens.Load(), first.closeCount.Load(), local.closeCount.Load())
+	}
+
+	// 2. Close while ListenPacket itself is in flight inside reopenRemote: zero leaked PacketConn.
+	local2 := fakeConn("127.0.0.1:32008")
+	m.listenLocal = func(string, string) (net.PacketConn, error) { return local2, nil }
+	initial := fakeConn("100.64.0.1:33021")
+	late := fakeConn("100.64.0.1:33022")
+	enteredReopen := make(chan struct{})
+	releaseReopen := make(chan struct{})
+	calls := atomic.Int32{}
+	inFlightNode := Network{
+		ID:     "tailnet",
+		IPs:    []netip.Addr{netip.MustParseAddr("100.64.0.1")},
+		Reopen: true,
+		ListenPacket: func(string, string) (net.PacketConn, error) {
+			if calls.Add(1) == 1 {
+				return initial, nil
+			}
+			close(enteredReopen)
+			<-releaseReopen
+			return late, nil
+		},
+	}
+	if _, err := m.Open(Config{ID: "inflight", NetworkID: "tailnet", TargetHost: "100.64.0.2"}, inFlightNode); err != nil {
+		t.Fatal(err)
+	}
+	initial.Close()
+	select {
+	case <-enteredReopen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reopen ListenPacket never entered")
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- m.Close("inflight") }()
+	time.Sleep(20 * time.Millisecond) // Let s.shutdown() cancel s.ctx before ListenPacket returns.
+	close(releaseReopen)
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close during in-flight reopen: %v", err)
+	}
+	if late.closeCount.Load() != 1 {
+		t.Fatalf("late reopened socket leaked: closeCount=%d", late.closeCount.Load())
+	}
+}

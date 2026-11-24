@@ -19,7 +19,7 @@ import com.termux.view.TerminalViewClient
  */
 class TerminalController(
     context: Context,
-    private val onFinished: () -> Unit = {},
+    private val onFinished: (Int) -> Unit = {},
     private val onTitle: (String?) -> Unit = {},
     private val onDirectory: (String) -> Unit = {},
 ) : TerminalViewClient, TerminalSessionClient {
@@ -56,7 +56,7 @@ class TerminalController(
     override fun onTextChanged(changedSession: TerminalSession) { onActivity?.invoke(); view?.onScreenUpdated() }
     override fun onTitleChanged(changedSession: TerminalSession) { onTitle(changedSession.title) }
     override fun onDirectoryChanged(session: TerminalSession, uri: String) { onDirectory(uri) }
-    override fun onSessionFinished(finishedSession: TerminalSession) { onFinished() }
+    override fun onSessionFinished(finishedSession: TerminalSession) { onFinished(finishedSession.exitStatus) }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
         if (!text.isNullOrEmpty()) {

@@ -68,9 +68,10 @@ type Network struct {
 	// AnySource: the backend picks its own source (e.g. a SOCKS5 UDP association);
 	// IPs are ignored and ListenPacket receives an empty address.
 	AnySource bool
-	// Reopen: the backend socket can end on its own (a SOCKS5 association whose
-	// control connection dropped, typically on a network change). The relay then
-	// opens a new one instead of ending the session.
+	// Reopen: the backend socket can end on its own (for example a SOCKS5
+	// association whose control connection dropped, or a tailnet packet listener
+	// closed across a network transition). The relay then opens a new one instead
+	// of ending the session.
 	Reopen bool
 	// Closed returns the owner's lease once, after an explicitly removed session
 	// has shut down. It runs outside the registry lock, for both single and bulk
@@ -382,7 +383,7 @@ func (m *Manager) Rejected() int64 {
 	return total
 }
 
-// Reopens counts backend sockets reopened after they ended (SOCKS5 re-association).
+// Reopens counts backend sockets reopened after they ended (SOCKS5 re-association or tailnet rebind).
 func (m *Manager) Reopens() int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()

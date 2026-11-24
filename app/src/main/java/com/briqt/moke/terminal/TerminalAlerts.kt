@@ -29,6 +29,27 @@ object TerminalAlerts {
 
     /** 应用界面是否在前台（`MainActivity` 的 onStart / onStop 维护）。 */
     @Volatile var appVisible: Boolean = false
+        private set
+
+    /** 最近一次进入后台的单调时间戳（`SystemClock.elapsedRealtime()`）；未发生过为 -1。 */
+    @Volatile var lastBackgroundedAtElapsedMs: Long = -1L
+        private set
+
+    /** 最近一次从后台回到前台的单调时间戳（`SystemClock.elapsedRealtime()`）；未发生过为 -1。 */
+    @Volatile var lastResumedAtElapsedMs: Long = -1L
+        private set
+
+    fun onAppStarted(nowElapsedMs: Long = SystemClock.elapsedRealtime()) {
+        if (lastBackgroundedAtElapsedMs >= 0L && !appVisible) {
+            lastResumedAtElapsedMs = nowElapsedMs
+        }
+        appVisible = true
+    }
+
+    fun onAppStopped(nowElapsedMs: Long = SystemClock.elapsedRealtime()) {
+        appVisible = false
+        lastBackgroundedAtElapsedMs = nowElapsedMs
+    }
 
     /** 当前正在看的会话（终端页显示时设置，离开时清空）。 */
     @Volatile var visibleSessionId: String? = null

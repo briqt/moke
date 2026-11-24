@@ -66,8 +66,8 @@ class SftpSession(
         return n
     }
 
-    private var conn: SshConnector.Connected? = null
-    private var sftp: SFTPClient? = null
+    @Volatile private var conn: SshConnector.Connected? = null
+    @Volatile private var sftp: SFTPClient? = null
     @Volatile private var closed = false
 
     /** 首次使用时才建连（打开文件页即连，失败有明确报错）。 */
@@ -75,12 +75,27 @@ class SftpSession(
         check(!closed) { "session closed" }
         sftp?.let { return it }
         val connector = SshConnector(appContext) { notice = it }
+        // heartbeat=true 由 SshConnector 统一为目标与跳板开启心跳，防止停留浏览时连接被静默掐断。
         val c = connector.connect(host, jumpHost, network, heartbeat = true, authOwner = authenticationOwner)
-        // 心跳间隔必须显式给：只设 KeepAliveProvider.HEARTBEAT 而不给间隔等于没开，
-        // 浏览连接会在用户看着列表发呆几分钟后被中间设备静默掐断（真机实测）。
-        runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
+        if (closed) {
+            c.close()
+            throw java.io.IOException("session closed")
+        }
         conn = c
-        return c.client.newSFTPClient().also { sftp = it }
+        if (closed) {
+            conn = null
+            c.close()
+            throw java.io.IOException("session closed")
+        }
+        return c.client.newSFTPClient().also { created ->
+            sftp = created
+            if (closed) {
+                sftp = null
+                runCatching { created.close() }
+                runCatching { c.close() }
+                throw java.io.IOException("session closed")
+            }
+        }
     }
 
     /**
@@ -193,6 +208,21 @@ class SftpSession(
 
     /** Metadata only: page retirement must not wait for its IO cleanup job. */
     internal fun cancelAuthentication() = authenticationOwner.cancel()
+
+    /** Non-blocking abort safe to invoke from any thread: cancels pending auth and aborts sockets off-thread. */
+    fun abort() {
+        closed = true
+        cancelAuthentication()
+        val activeSftp = sftp
+        val activeConn = conn
+        if (activeSftp != null || activeConn != null) {
+            Thread({
+                activeConn?.abortSockets()
+                runCatching { activeSftp?.close() }
+                runCatching { activeConn?.close() }
+            }, "moke-sftp-abort").start()
+        }
+    }
 
     override fun close() {
         closed = true

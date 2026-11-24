@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.data.ThemeMode
+import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.TerminalAlerts
 import com.briqt.moke.ui.MokeApp
 import com.briqt.moke.ui.MokeViewModel
@@ -80,10 +81,10 @@ class MainActivity : ComponentActivity() {
             }
             // 把解析好的明暗回灌 VM：终端配色的「随明暗联动」据此选用哪一套。
             LaunchedEffect(dark) { vm.setAppIsDark(dark) }
-            // 开出第一个会话时才问后台通知权限（见 requestNotifPermissionOnce）。
+            // 开出第一个活动会话时才问后台通知权限（见 requestNotifPermissionOnce）。
             val hasSession by vm.sessions.sessions.collectAsState()
-            LaunchedEffect(hasSession.isNotEmpty()) {
-                if (hasSession.isNotEmpty()) requestNotifPermissionOnce()
+            LaunchedEffect(hasSession) {
+                if (hasSession.any { it.keepAliveEligible && it.alive.value }) requestNotifPermissionOnce()
             }
             // 系统栏图标明暗随主题：浅色主题下必须切 light 样式，否则白底上的白图标看不见。
             // 运行中切换系统深浅色时，系统处理配置变化会在我们之后再按窗口主题重置一次栏样式（时序竞争，
@@ -130,13 +131,14 @@ class MainActivity : ComponentActivity() {
     // 终端提醒只在"用户不在场"时发：界面是否在前台由这里告诉 TerminalAlerts。
     override fun onStart() {
         super.onStart()
-        TerminalAlerts.appVisible = true
+        TerminalAlerts.onAppStarted()
+        MokeSessionService.ensureRunning(this)
         // 从后台切回来时终端页并未重新进入组合，"进入会话即收起提醒"要在这里补上。
         TerminalAlerts.visibleSessionId?.let { TerminalAlerts.cancel(this, it) }
     }
 
     override fun onStop() {
-        TerminalAlerts.appVisible = false
+        TerminalAlerts.onAppStopped()
         super.onStop()
     }
 

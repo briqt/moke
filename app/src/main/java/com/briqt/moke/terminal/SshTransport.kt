@@ -126,7 +126,6 @@ class SshTransport(
                     connect = { connector.connect(host, jumpHost, network, heartbeat = true, authOwner = authenticationOwner).also { connected = it } },
                     disconnect = { it.close() },
                     startSession = { conn ->
-                        runCatching { conn.client.connection.keepAlive.keepAliveInterval = 30 }
                         selectedStartup = sshTmuxStartup(
                             startupCommand, effectiveStartup, observerNonce, tmuxScripts,
                             observeDefaultShell = observeDefaultShell,

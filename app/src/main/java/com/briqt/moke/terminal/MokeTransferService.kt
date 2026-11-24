@@ -5,13 +5,16 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.briqt.moke.MainActivity
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
 import com.briqt.moke.localized
 import com.briqt.moke.terminal.sftp.RemotePath
+import com.briqt.moke.terminal.sftp.TransferState
 import com.briqt.moke.terminal.sftp.TransferTask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +33,7 @@ import kotlinx.coroutines.flow.onEach
 class MokeTransferService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var started = false
+    private val fgsState = ForegroundServiceState()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,45 +43,49 @@ class MokeTransferService : Service() {
         val transfers = (application as MokeApplication).transfers
         transfers.tasks.onEach { list ->
             val active = list.filter { it.active }
-            if (active.isEmpty()) {
-                stopForegroundCompat()
-                stopSelf()
-            } else if (started) {
-                notificationManager().notify(NOTIF_ID, build(active))
+            when (fgsState.onWorkChanged(active.isNotEmpty(), ::stopSelfResult)) {
+                FgsUpdateAction.NOTIFY -> notificationManager().notify(NOTIF_ID, build(active))
+                FgsUpdateAction.STOP_FOREGROUND -> stopForegroundCompat()
+                FgsUpdateAction.NONE -> Unit
             }
         }.launchIn(scope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val active = (application as MokeApplication).transfers.tasks.value.filter { it.active }
-        startForeground(NOTIF_ID, build(active))
-        started = true
-        if (active.isEmpty()) {
+        ServiceCompat.startForeground(
+            this,
+            NOTIF_ID,
+            build(active),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
+        if (fgsState.onStartCommand(startId, active.isNotEmpty(), ::stopSelfResult)) {
             stopForegroundCompat()
-            stopSelf()
         }
         // 传输无法凭空恢复（凭据与 SAF 授权都要 app 进程在），被杀后由用户在应用内「继续」。
         return START_NOT_STICKY
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        fgsState.onStop()
+        scope.cancel()
+        (application as? MokeApplication)?.transfers?.interruptActive()
+        stopForegroundCompat()
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
+        fgsState.onStop()
         scope.cancel()
         super.onDestroy()
     }
 
     private fun build(active: List<TransferTask>): android.app.Notification {
-        val running = active.firstOrNull { it.state == com.briqt.moke.terminal.sftp.TransferState.RUNNING }
-            ?: active.first()
-        val text = if (active.size > 1) {
-            localized(R.string.notif_transfer_multi, running.name, active.size)
-        } else {
-            running.name
-        }
+        val running = active.firstOrNull { it.state == TransferState.RUNNING }
+            ?: active.firstOrNull()
         val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(localized(R.string.notif_transfer_title))
-            .setContentText(text)
-            .setSubText(RemotePath.formatSize(running.done) + (if (running.total > 0) " / " + RemotePath.formatSize(running.total) else ""))
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(
@@ -88,8 +95,20 @@ class MokeTransferService : Service() {
                 )
             )
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        val fraction = running.fraction
-        if (fraction != null) b.setProgress(100, (fraction * 100).toInt(), false) else b.setProgress(0, 0, true)
+        if (running != null) {
+            val text = if (active.size > 1) {
+                localized(R.string.notif_transfer_multi, running.name, active.size)
+            } else {
+                running.name
+            }
+            b.setContentText(text)
+            b.setSubText(
+                RemotePath.formatSize(running.done) +
+                    (if (running.total > 0) " / " + RemotePath.formatSize(running.total) else "")
+            )
+            val fraction = running.fraction
+            if (fraction != null) b.setProgress(100, (fraction * 100).toInt(), false) else b.setProgress(0, 0, true)
+        }
         return b.build()
     }
 

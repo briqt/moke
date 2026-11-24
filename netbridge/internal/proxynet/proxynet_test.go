@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"golang.org/x/net/dns/dnsmessage"
 	"testing"
@@ -795,5 +796,60 @@ func TestDialHonoursCancellation(t *testing.T) {
 	}
 	if time.Since(began) > 3*time.Second {
 		t.Fatal("handshake ignored cancellation")
+	}
+}
+
+func TestDialProxySetsTCPKeepAlive(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			defer c.Close()
+			io.Copy(io.Discard, c)
+		}
+	}()
+	host, port := hostPort(t, ln.Addr().String())
+	conn, err := (Config{Type: "socks5", Host: host, Port: port}).dialProxy(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		t.Fatalf("dialProxy returned %T, want *net.TCPConn", conn)
+	}
+	raw, err := tcpConn.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var enabled, idle, interval, count int
+	var sockErr error
+	if err := raw.Control(func(fd uintptr) {
+		enabled, sockErr = syscall.GetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_KEEPALIVE)
+		if sockErr != nil {
+			return
+		}
+		idle, sockErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE)
+		if sockErr != nil {
+			return
+		}
+		interval, sockErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL)
+		if sockErr != nil {
+			return
+		}
+		count, sockErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sockErr != nil {
+		t.Fatal(sockErr)
+	}
+	if enabled == 0 || idle != int(keepAliveIdle/time.Second) || interval != int(keepAliveInterval/time.Second) || count != keepAliveCount {
+		t.Fatalf("TCP keepalive = (enabled=%d idle=%ds interval=%ds count=%d), want (1, %ds, %ds, %d)",
+			enabled, idle, interval, count, int(keepAliveIdle/time.Second), int(keepAliveInterval/time.Second), keepAliveCount)
 	}
 }

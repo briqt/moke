@@ -12,7 +12,6 @@ import com.briqt.moke.data.Host
 import com.briqt.moke.terminal.HostKeyChangePrompt
 import com.briqt.moke.terminal.HostKeyPrompt
 import com.briqt.moke.terminal.KnownHosts
-import com.briqt.moke.terminal.MokeSessionService
 import com.briqt.moke.terminal.MokeTransferService
 import com.briqt.moke.terminal.TermSession
 import com.briqt.moke.terminal.RefusedTransport
@@ -868,7 +867,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         sessions.openTmux(
             source, target, route.jump, route.network, detachOthers = detachOthers,
             host = route.host, rememberEpoch = epoch,
-        ).also { trackTmux(it); ensureSessionService() }
+        ).also { trackTmux(it) }
     }
 
     private suspend fun rememberCurrentTmux(ts: TermSession) {
@@ -894,7 +893,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 if (sessions.get(source.id) !== source || routeForTmuxOpen(source) == null) return@withTmuxOpening null
                 sessions.open(
                     host = route.host.copy(persistence = SessionPersistence.NONE, loginCommand = "", forwardPorts = ""),
-                    jumpHost = route.jump, network = route.network, observeTmux = true,
+                    jumpHost = route.jump, network = route.network, observeTmux = true, ephemeral = true,
                     startupCommand = "sh -c 'while IFS= read -r moke_unused; do :; done'",
                 ).also { temporary = it; it.session.updateSize(80, 24, 0, 0) }
             }
@@ -952,7 +951,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
                 it.setTitleOverrides(source.customPrefix.value, source.customTitle.value)
             }
             trackTmux(session)
-            ensureSessionService()
             if (picker) tmuxSheets.prepareSelection(session.scopeKey)
             session.id
         }
@@ -983,7 +981,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             rememberEpoch = epoch, observeTmux = picker,
         ).also { it.recovery.value = route.recovery }
         trackTmux(ts)
-        ensureSessionService()
         if (picker) tmuxSheets.prepareSelection(ts.scopeKey)
         return ts.id
     }
@@ -1021,7 +1018,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             refusal = route.refusalText(getApplication()), carryFrom = source.takeIf { routeMatches(it, route) },
         ).also { it.recovery.value = route.recovery }
         trackTmux(ts)
-        ensureSessionService()
         ts.id
     }
 
@@ -1033,12 +1029,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun storedRouteOf(hostId: String): Route = withContext(Dispatchers.IO) {
         resolveRoute(hostId, store.state.first(), networkStore.state.first())
-    }
-
-    /** 拉起前台服务：退后台/关屏时保活会话（服务在会话归零时自行停止）。 */
-    private fun ensureSessionService() {
-        val ctx = getApplication<Application>()
-        runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, MokeSessionService::class.java)) }
     }
 
     fun closeSession(id: String) {

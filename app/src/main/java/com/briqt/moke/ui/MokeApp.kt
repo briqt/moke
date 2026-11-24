@@ -277,14 +277,16 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     LaunchedEffect(openSessionsRequest, screen) {
         val req = openSessionsRequest ?: return@LaunchedEffect
         // Queue notification navigation until editing finishes instead of discarding a draft.
-        if (screen is Screen.Edit || screen is Screen.NetworkEdit) return@LaunchedEffect
+        if (screen is Screen.Edit || screen is Screen.NetworkEdit || screen is Screen.SyncSetup) return@LaunchedEffect
         if (screen is Screen.Files) vm.closeFiles()
         val list = vm.sessions.sessions.value
-        val target = req.sessionId?.takeIf { id -> list.any { it.id == id } }
+        val target = com.briqt.moke.terminal.BackgroundKeepalive.resolveOpenSessionTarget(
+            requestedSessionId = req.sessionId,
+            allSessionIds = list.map { it.id },
+            liveSessionIds = list.filter { it.alive.value }.map { it.id },
+        )
         if (target != null) {
             screen = Screen.Terminal(target)
-        } else if (list.size == 1) {
-            screen = Screen.Terminal(list.first().id)
         } else {
             screen = Screen.Home
             homeTab = HomeTab.Sessions

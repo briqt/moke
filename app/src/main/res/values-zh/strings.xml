@@ -141,6 +141,8 @@
 
     <!-- 设置菜单 -->
     <string name="menu_appearance">外观</string>
+    <string name="menu_appearance_subtitle">主题、配色与字体</string>
+    <string name="menu_terminal_input_subtitle">快捷键、会话与后台</string>
     <string name="menu_about">关于</string>
     <string name="menu_language">语言</string>
 
@@ -276,7 +278,8 @@
     <!-- 后台会话通知 -->
     <string name="notif_channel_name">会话保持</string>
     <string name="notif_channel_desc">在后台保持活动的 SSH / mosh 会话</string>
-    <string name="notif_sessions_active">%1$d 个会话在后台保持</string>
+    <string name="notif_session_single">正在保持 · %1$s</string>
+    <string name="notif_sessions_summary">%1$d 个活动会话 · %2$s</string>
     <string name="notif_transfer_channel_name">文件传输</string>
     <string name="notif_transfer_channel_desc">在后台继续上传与下载</string>
     <string name="notif_transfer_title">正在传输文件</string>
@@ -391,6 +394,10 @@
 
     <!-- 设置分组 -->
     <string name="menu_terminal_input">终端与输入</string>
+    <string name="ignore_battery_optimizations">忽略电池优化</string>
+    <string name="action_allow_background">忽略电池优化</string>
+    <string name="status_enabled">已开启</string>
+    <string name="status_disabled">未开启</string>
     <string name="section_ui">界面</string>
     <string name="menu_tmux_scroll_setup">tmux 滚屏</string>
     <string name="menu_keep_screen_on">屏幕常亮</string>

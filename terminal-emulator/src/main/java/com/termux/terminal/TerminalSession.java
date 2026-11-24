@@ -90,6 +90,9 @@ public class TerminalSession extends TerminalOutput {
     /** 传输是否已结束。 */
     private volatile boolean mFinished = false;
 
+    /** 结束退出码（>0 退出码，<0 信号或建连失败，0 正常退出）。 */
+    private volatile int mExitStatus = 0;
+
     private static final String LOG_TAG = "TerminalSession";
 
     /** [moke] 见 {@link TerminalEmulator#setMokeIgnoreAltScreen(boolean)}；emulator 惰性创建，先存在会话上。 */
@@ -288,6 +291,10 @@ public class TerminalSession extends TerminalOutput {
         return !mFinished;
     }
 
+    public int getExitStatus() {
+        return mExitStatus;
+    }
+
     @Override
     public void onCopyTextToClipboard(String text) {
         if (mClient != null) mClient.onCopyTextToClipboard(this, text);
@@ -342,6 +349,7 @@ public class TerminalSession extends TerminalOutput {
                 }
 
                 int exitCode = (msg.obj instanceof Integer) ? (Integer) msg.obj : 0;
+                mExitStatus = (msg.obj == CONNECT_FAILED) ? -1 : exitCode;
                 StatusText text = sessionStatusText != null ? sessionStatusText : statusText;
                 String desc = msg.obj == CONNECT_FAILED ? "" : "\r\n" + text.sessionEnded(exitCode) + "\r\n";
                 byte[] b = desc.getBytes(StandardCharsets.UTF_8);

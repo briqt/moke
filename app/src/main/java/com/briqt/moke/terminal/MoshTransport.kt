@@ -400,7 +400,6 @@ class MoshTransport(
             closeControl()
             error("transport closed during control connection")
         }
-        runCatching { c.client.connection.keepAlive.keepAliveInterval = 30 }
         return c.client
     }
 

@@ -5,20 +5,22 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
-import android.provider.MediaStore
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.briqt.moke.R
-import com.briqt.moke.localized
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.HostStore
 import com.briqt.moke.data.MissingKind
 import com.briqt.moke.data.NetworkStore
 import com.briqt.moke.data.Route
 import com.briqt.moke.data.resolveRoute
+import com.briqt.moke.localized
 import com.briqt.moke.net.connectFailureText
 import com.briqt.moke.net.refusalText
-import net.schmizz.sshj.sftp.SFTPException
+import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,52 +29,171 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.getAndUpdate
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
-import java.io.InputStream
+import net.schmizz.sshj.sftp.SFTPException
+
+internal enum class AttemptAbort {
+    CANCELLED,
+    INTERRUPTED,
+}
+
+internal class TransferAttempt(
+    val taskId: String,
+    val attemptId: Long,
+) {
+    val abortReason = AtomicReference<AttemptAbort?>(null)
+    private val closeable = AtomicReference<AutoCloseable?>(null)
+
+    val isAborted: Boolean get() = abortReason.get() != null
+
+    fun attach(resource: AutoCloseable, abortAsync: (AutoCloseable) -> Unit) {
+        closeable.set(resource)
+        if (isAborted && closeable.compareAndSet(resource, null)) {
+            abortAsync(resource)
+        }
+    }
+
+    fun detach(resource: AutoCloseable) {
+        closeable.compareAndSet(resource, null)
+    }
+
+    fun abort(reason: AttemptAbort, abortAsync: (AutoCloseable) -> Unit) {
+        if (!abortReason.compareAndSet(null, reason) && reason == AttemptAbort.CANCELLED) {
+            abortReason.set(AttemptAbort.CANCELLED)
+        }
+        closeable.getAndSet(null)?.let(abortAsync)
+    }
+}
 
 /**
  * 传输队列：**串行**执行，一次一个文件。
- *
- * 为什么串行：手机上行带宽有限，并发只会让每条都慢、进度更难读，还成倍放大失败面；
- * 真要提速也该是单文件多通道，而不是多文件并发。
  *
  * 生存期与 app 进程一致（挂在 Application 上），配合 [com.briqt.moke.terminal.MokeTransferService]
  * 的前台通知在退后台/关屏时继续传。任务表持久化在 [TransferStore]：进程被杀后重进应用，
  * 中断的任务会以「已中断」出现。下载可继续；上传目标/覆盖授权仅留内存，重启后须从文件页重新选择，
  * 不能按可能已更改的主机配置续写未知目标。
  */
-class TransferManager(context: Context, private val hostStore: HostStore) {
+class TransferManager internal constructor(
+    private val appContext: Context?,
+    private val scope: CoroutineScope,
+    private val backingStore: BackingStore,
+    private val routeResolver: suspend (String) -> Route,
+    private val strings: Strings,
+    private val customExecutor: AttemptExecutor? = null,
+) {
 
-    private val appContext = context.applicationContext
-    private val resolver: ContentResolver get() = appContext.contentResolver
-    private val store = TransferStore(appContext)
-    private val networkStore = NetworkStore(appContext)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    constructor(context: Context, hostStore: HostStore) : this(
+        appContext = context.applicationContext,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        backingStore = StoreAdapter(TransferStore(context.applicationContext)),
+        routeResolver = { hostId ->
+            val networkStore = NetworkStore(context.applicationContext)
+            resolveRoute(hostId, hostStore.state.first(), networkStore.state.first())
+        },
+        strings = ContextStrings(context.applicationContext),
+        customExecutor = null,
+    )
+
+    internal interface BackingStore {
+        suspend fun load(): List<TransferTask>
+        suspend fun save(list: List<TransferTask>)
+    }
+
+    internal interface Strings {
+        fun interrupted(): String
+        fun hostGone(): String
+        fun routeRefusal(route: Route): String
+        fun destinationUnverified(): String
+        fun destinationChanged(): String
+        fun remoteMissing(): String
+        fun localUnwritable(): String
+        fun overwriteRequired(): String
+        fun localUnreadable(): String
+        fun localSeekFailed(): String
+        fun createFailed(): String
+        fun describeFailure(t: Throwable, notice: String?): String
+    }
+
+    internal interface AttemptCallbacks {
+        val isAborted: Boolean
+        fun attachCloseable(resource: AutoCloseable, abortAsync: (AutoCloseable) -> Unit)
+        fun detachCloseable(resource: AutoCloseable)
+        fun updateTask(transform: (TransferTask) -> TransferTask)
+        fun reportProgress(done: Long)
+        fun currentTask(): TransferTask?
+    }
+
+    internal fun interface AttemptExecutor {
+        suspend fun execute(
+            task: TransferTask,
+            route: Route.Ok,
+            allowOverwrite: Boolean,
+            callbacks: AttemptCallbacks,
+        ): Pair<Long, String?>
+    }
+
+    private class StoreAdapter(private val delegate: TransferStore) : BackingStore {
+        override suspend fun load(): List<TransferTask> = delegate.load()
+        override suspend fun save(list: List<TransferTask>) = delegate.save(list)
+    }
+
+    private class ContextStrings(private val context: Context) : Strings {
+        override fun interrupted(): String = context.localized(R.string.transfer_interrupted)
+        override fun hostGone(): String = context.localized(R.string.transfer_host_gone)
+        override fun routeRefusal(route: Route): String = route.refusalText(context).orEmpty()
+        override fun destinationUnverified(): String = context.localized(R.string.transfer_destination_unverified)
+        override fun destinationChanged(): String = context.localized(R.string.transfer_destination_changed)
+        override fun remoteMissing(): String = context.localized(R.string.transfer_remote_missing)
+        override fun localUnwritable(): String = context.localized(R.string.transfer_local_unwritable)
+        override fun overwriteRequired(): String = context.localized(R.string.transfer_overwrite_required)
+        override fun localUnreadable(): String = context.localized(R.string.transfer_local_unreadable)
+        override fun localSeekFailed(): String = context.localized(R.string.transfer_local_seek_failed)
+        override fun createFailed(): String = context.localized(R.string.transfer_create_failed)
+        override fun describeFailure(t: Throwable, notice: String?): String {
+            val base = t.connectFailureText(context).takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
+            return if (notice.isNullOrBlank()) base else "$notice\n$base"
+        }
+    }
+
+    private val resolver: ContentResolver
+        get() = checkNotNull(appContext) { "ContentResolver requires Android Context" }.contentResolver
 
     private val _tasks = MutableStateFlow<List<TransferTask>>(emptyList())
     val tasks: StateFlow<List<TransferTask>> = _tasks.asStateFlow()
 
-    /** 已请求取消的任务 id（工作线程按块检查）。 */
-    private val cancelling = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /**
+     * Protects in-memory state transitions of [_tasks], [generations], and [activeAttempts]
+     * without side effects inside CAS lambdas. Lock order: `pumpLock` -> `stateLock`; never perform I/O inside either.
+     */
+    private val stateLock = Any()
+    private val generations = HashMap<String, Long>()
+    private val activeAttempts = HashMap<String, TransferAttempt>()
+
     private var pump: Job? = null
     private val pumpLock = Any()
     private data class UploadPermission(val destination: UploadDestination, val allowOverwrite: Boolean)
     // A restored task has no implicit overwrite permission. Existing task JSON stays unchanged.
     private val uploadPermissions = ConcurrentHashMap<String, UploadPermission>()
 
+    private data class ClaimedAttempt(val task: TransferTask, val attempt: TransferAttempt)
+
     init {
         scope.launch {
             // 恢复上次的任务表：上次还在跑的（RUNNING/QUEUED）说明进程被杀了，标成「已中断」等用户决定，
             // 不自动重开——自动重传可能在计费网络上偷跑流量。
-            val restored = store.load().map {
-                if (it.active) it.copy(state = TransferState.FAILED, error = appContext.localized(R.string.transfer_interrupted))
+            val restored = backingStore.load().map {
+                if (it.active) it.copy(state = TransferState.FAILED, error = strings.interrupted())
                 else it
             }
-            _tasks.value = restored
+            if (restored.isNotEmpty()) {
+                synchronized(stateLock) {
+                    val existingIds = _tasks.value.mapTo(HashSet()) { it.id }
+                    val nonConflicting = restored.filterNot { it.id in existingIds }
+                    nonConflicting.forEach { generations[it.id] = 1L }
+                    _tasks.value = nonConflicting + _tasks.value
+                }
+            }
         }
     }
 
@@ -128,49 +249,103 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         )
     }
 
+    internal fun enqueueTasksForTest(list: List<TransferTask>, uploadDestination: UploadDestination? = null, allowOverwrite: Boolean = false) {
+        if (uploadDestination != null) {
+            list.filter { it.direction == TransferDirection.UPLOAD }.forEach {
+                uploadPermissions[it.id] = UploadPermission(uploadDestination, allowOverwrite)
+            }
+        }
+        addAll(list)
+    }
+
     private fun addAll(list: List<TransferTask>) {
         if (list.isEmpty()) return
-        _tasks.update { it + list }
+        synchronized(stateLock) {
+            list.forEach { generations[it.id] = 1L }
+            _tasks.value = _tasks.value + list
+        }
         persist()
         start()
     }
 
     // ---------- 控制 ----------
 
-    fun cancel(id: String) {
-        cancelling += id
-        update(id) { it.copy(state = TransferState.CANCELLED) }
+    private fun abortResourceOffMain(resource: AutoCloseable) {
+        if (resource is SftpSession) {
+            resource.abort()
+        } else {
+            scope.launch(Dispatchers.IO) { runCatching { resource.close() } }
+        }
     }
 
-    /** 继续/重试：回到队列，由工作线程判断能不能续。 */
+    fun cancel(id: String) {
+        val attempt = synchronized(stateLock) {
+            _tasks.value = _tasks.value.map {
+                if (it.id == id) it.copy(state = TransferState.CANCELLED) else it
+            }
+            activeAttempts.remove(id)
+        }
+        attempt?.abort(AttemptAbort.CANCELLED, ::abortResourceOffMain)
+        persist()
+    }
+
+    /** 系统前台服务配额用尽时优雅暂停活动任务，保留断点供后续继续。 */
+    fun interruptActive() {
+        val message = strings.interrupted()
+        val aborts = mutableListOf<TransferAttempt>()
+        synchronized(stateLock) {
+            _tasks.value = _tasks.value.map { task ->
+                when (task.state) {
+                    TransferState.RUNNING, TransferState.QUEUED -> {
+                        activeAttempts.remove(task.id)?.let(aborts::add)
+                        task.copy(state = TransferState.FAILED, error = message)
+                    }
+                    else -> task
+                }
+            }
+        }
+        aborts.forEach { it.abort(AttemptAbort.INTERRUPTED, ::abortResourceOffMain) }
+        persist()
+    }
+
+    /** 继续/重试：递增代际并回到队列，正在收尾的旧尝试不得覆盖新尝试。 */
     fun retry(id: String) {
-        cancelling -= id
-        update(id) { it.copy(state = TransferState.QUEUED, error = "") }
+        val stale = synchronized(stateLock) {
+            generations[id] = (generations[id] ?: 1L) + 1L
+            _tasks.value = _tasks.value.map {
+                if (it.id == id) it.copy(state = TransferState.QUEUED, error = "") else it
+            }
+            activeAttempts.remove(id)
+        }
+        stale?.abort(AttemptAbort.INTERRUPTED, ::abortResourceOffMain)
+        persist()
         start()
     }
 
     fun remove(id: String) {
-        cancelling += id
-        _tasks.update { list -> list.filterNot { it.id == id } }
+        val stale = synchronized(stateLock) {
+            generations[id] = (generations[id] ?: 1L) + 1L
+            _tasks.value = _tasks.value.filterNot { it.id == id }
+            activeAttempts.remove(id)
+        }
         uploadPermissions.remove(id)
+        stale?.abort(AttemptAbort.CANCELLED, ::abortResourceOffMain)
         persist()
     }
 
     fun clearFinished() {
-        val before = _tasks.getAndUpdate { list -> list.filter { it.active || it.state == TransferState.FAILED } }
-        before.filterNot { it.active || it.state == TransferState.FAILED }.forEach { uploadPermissions.remove(it.id) }
+        val removed = synchronized(stateLock) {
+            val before = _tasks.value
+            val kept = before.filter { it.active || it.state == TransferState.FAILED }
+            _tasks.value = kept
+            before.filterNot { it.active || it.state == TransferState.FAILED }
+        }
+        removed.forEach { uploadPermissions.remove(it.id) }
         persist()
     }
 
     // ---------- 执行 ----------
 
-    /**
-     * 起（或复用）唯一的串行工作协程。
-     *
-     * `pump` 的置空与判空都在同一把锁里：只判 `isActive` 会有一个真实的窗口——工作协程刚看到
-     * 队列为空、还没真正返回时，新入队的任务看它"还活着"就不再起新的，那条任务会永远停在
-     * 「排队中」。窗口很窄，但卡住的是用户的文件。
-     */
     private fun start() {
         synchronized(pumpLock) {
             if (pump != null) return
@@ -178,93 +353,212 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
         }
     }
 
-    /**
-     * `pump` 的清空必须走 finally。
-     *
-     * [runOne] 里取主机、置 RUNNING、建 SftpSession 都在它自己的 try 之外，任何一处抛出
-     * （DataStore 读失败之类）都会让这个协程直接结束，而 `pump` 还留着一个已死的 Job ——
-     * 之后 [start] 永远早退，队列里的任务就卡在「排队中」直到进程重启。
-     */
+    private fun claimNextQueued(): ClaimedAttempt? = synchronized(stateLock) {
+        val task = _tasks.value.firstOrNull { it.state == TransferState.QUEUED } ?: return@synchronized null
+        val gen = generations[task.id] ?: 1L
+        generations[task.id] = gen
+        val attempt = TransferAttempt(task.id, gen)
+        activeAttempts[task.id] = attempt
+        ClaimedAttempt(task, attempt)
+    }
+
     private suspend fun pumpLoop() {
         val self = kotlin.coroutines.coroutineContext[Job]
         try {
             while (true) {
-                val task = synchronized(pumpLock) {
-                    _tasks.value.firstOrNull { it.state == TransferState.QUEUED }
-                        ?: run { pump = null; null }
+                val claimed = synchronized(pumpLock) {
+                    claimNextQueued() ?: run { pump = null; null }
                 } ?: return
-                // [runOne] 里取主机、置 RUNNING、建 SftpSession 都在它自己的 try 之外，
-                // 任何一处抛出（DataStore 读失败之类）都会掀掉整个工作协程。以前那样的话
-                // `pump` 会留着一个已死的 Job，[start] 从此永远早退，队列里的文件卡在
-                // 「排队中」直到进程重启。这里兜住：这条任务算失败，队列继续往下走。
-                runCatching { runOne(task) }.onFailure { t ->
+                runCatching { runOne(claimed.task, claimed.attempt) }.onFailure { t ->
                     if (t is kotlinx.coroutines.CancellationException) throw t
-                    update(task.id) { it.copy(state = TransferState.FAILED, error = describe(t, null)) }
-                    persist()
+                    failAttempt(claimed.attempt, t, null)
                 }
             }
         } finally {
-            // 只在 `pump` 仍然是「我」时清空。正常收尾已经在上面的临界区里原子地置空了，
-            // 那之后它可能已经指向新起的工作协程，顺手抹掉会让两个 pump 并行跑。
             synchronized(pumpLock) { if (pump === self) pump = null }
         }
     }
 
-    private suspend fun runOne(task: TransferTask) {
-        // 与终端同一条路由规则：失效的跳板机或网络一律不连，绝不退回直连。
-        val route = resolveRoute(task.hostId, hostStore.state.first(), networkStore.state.first())
-        if (route !is Route.Ok) {
-            val reason = if (route == Route.Missing(MissingKind.HOST)) appContext.localized(R.string.transfer_host_gone)
-            else route.refusalText(appContext).orEmpty()
-            update(task.id) { it.copy(state = TransferState.FAILED, error = reason) }
-            return
-        }
+    private fun isCurrentAttemptLocked(attempt: TransferAttempt): Boolean =
+        generations[attempt.taskId] == attempt.attemptId
 
-        val permission = uploadPermissions[task.id]
-        if (task.direction == TransferDirection.UPLOAD && !uploadDestinationMatches(permission?.destination, route)) {
-            val message = if (permission == null) R.string.transfer_destination_unverified else R.string.transfer_destination_changed
-            update(task.id) { it.copy(state = TransferState.FAILED, error = appContext.localized(message)) }
-            persist()
-            return
+    private fun currentForAttempt(attempt: TransferAttempt): TransferTask? = synchronized(stateLock) {
+        if (!isCurrentAttemptLocked(attempt)) null else _tasks.value.firstOrNull { it.id == attempt.taskId }
+    }
+
+    private fun updateForAttempt(attempt: TransferAttempt, transform: (TransferTask) -> TransferTask) {
+        synchronized(stateLock) {
+            if (!isCurrentAttemptLocked(attempt)) return
+            _tasks.value = _tasks.value.map { if (it.id == attempt.taskId) transform(it) else it }
         }
-        if (current(task.id) == null || cancelling.contains(task.id)) {
-            if (current(task.id) != null) finish(task.id)
-            cancelling -= task.id
-            return
+    }
+
+    private fun markRunning(attempt: TransferAttempt): TransferTask? = synchronized(stateLock) {
+        if (!isCurrentAttemptLocked(attempt) || attempt.isAborted) return null
+        val current = _tasks.value.firstOrNull { it.id == attempt.taskId } ?: return null
+        if (current.state != TransferState.QUEUED) return null
+        val running = current.copy(state = TransferState.RUNNING, error = "")
+        _tasks.value = _tasks.value.map { if (it.id == attempt.taskId) running else it }
+        running
+    }
+
+    private fun failBeforeRunning(attempt: TransferAttempt, reason: String) {
+        val changed = synchronized(stateLock) {
+            if (!isCurrentAttemptLocked(attempt) || attempt.isAborted) return@synchronized false
+            val current = _tasks.value.firstOrNull { it.id == attempt.taskId } ?: return@synchronized false
+            if (current.state != TransferState.QUEUED) return@synchronized false
+            _tasks.value = _tasks.value.map {
+                if (it.id == attempt.taskId) it.copy(state = TransferState.FAILED, error = reason) else it
+            }
+            activeAttempts.remove(attempt.taskId, attempt)
+            true
         }
-        update(task.id) { it.copy(state = TransferState.RUNNING, error = "") }
-        val session = SftpSession(route.host, route.jump, appContext, route.network)
-        try {
-            when (task.direction) {
-                TransferDirection.DOWNLOAD -> runDownload(task, session)
-                TransferDirection.UPLOAD -> runUpload(task, session, permission?.allowOverwrite == true)
+        if (changed) persist()
+    }
+
+    private fun finishAttempt(attempt: TransferAttempt, pos: Long) {
+        var uploadCompleted: TransferTask? = null
+        val changed = synchronized(stateLock) {
+            if (!isCurrentAttemptLocked(attempt)) return@synchronized false
+            activeAttempts.remove(attempt.taskId, attempt)
+            val abort = attempt.abortReason.get()
+            _tasks.value = _tasks.value.map { task ->
+                if (task.id != attempt.taskId) return@map task
+                when (abort) {
+                    AttemptAbort.INTERRUPTED -> task.copy(
+                        done = pos,
+                        state = TransferState.FAILED,
+                        error = strings.interrupted(),
+                    )
+                    AttemptAbort.CANCELLED -> task.copy(
+                        done = pos,
+                        state = TransferState.CANCELLED,
+                    )
+                    null -> {
+                        val completed = task.copy(
+                            state = TransferState.DONE,
+                            done = if (task.total >= 0) task.total else pos,
+                        )
+                        if (completed.direction == TransferDirection.UPLOAD) {
+                            uploadCompleted = completed
+                        }
+                        completed
+                    }
+                }
             }
-        } catch (t: Throwable) {
-            val cancelled = cancelling.contains(task.id)
-            update(task.id) {
-                it.copy(
-                    state = if (cancelled) TransferState.CANCELLED else TransferState.FAILED,
-                    error = if (cancelled) "" else describe(t, session.consumeNotice()),
-                )
+            if (abort == null) {
+                uploadPermissions.remove(attempt.taskId)
             }
-        } finally {
-            cancelling -= task.id
-            runCatching { session.close() }
+            true
+        }
+        if (changed) {
+            uploadCompleted?.let { onUploadDone?.invoke(it.hostId, RemotePath.parent(it.remotePath)) }
             persist()
         }
     }
 
-    private fun runDownload(task: TransferTask, session: SftpSession) {
-        val remote = session.stat(task.remotePath)
-            ?: throw IllegalStateException(appContext.localized(R.string.transfer_remote_missing))
+    private fun failAttempt(attempt: TransferAttempt, t: Throwable, notice: String?) {
+        val changed = synchronized(stateLock) {
+            if (!isCurrentAttemptLocked(attempt)) return@synchronized false
+            activeAttempts.remove(attempt.taskId, attempt)
+            val abort = attempt.abortReason.get()
+            _tasks.value = _tasks.value.map { task ->
+                if (task.id != attempt.taskId) return@map task
+                when (abort) {
+                    AttemptAbort.INTERRUPTED -> task.copy(
+                        state = TransferState.FAILED,
+                        error = strings.interrupted(),
+                    )
+                    AttemptAbort.CANCELLED -> task.copy(
+                        state = TransferState.CANCELLED,
+                        error = "",
+                    )
+                    null -> task.copy(
+                        state = TransferState.FAILED,
+                        error = strings.describeFailure(t, notice),
+                    )
+                }
+            }
+            true
+        }
+        if (changed) persist()
+    }
 
-        var current = current(task.id) ?: return
+    private fun detachAttempt(attempt: TransferAttempt) {
+        synchronized(stateLock) {
+            activeAttempts.remove(attempt.taskId, attempt)
+        }
+    }
+
+    private suspend fun runOne(initialTask: TransferTask, attempt: TransferAttempt) {
+        try {
+            // 与终端同一条路由规则：失效的跳板机或网络一律不连，绝不退回直连。
+            val route = routeResolver(initialTask.hostId)
+            if (route !is Route.Ok) {
+                val reason = if (route == Route.Missing(MissingKind.HOST)) strings.hostGone()
+                else strings.routeRefusal(route)
+                failBeforeRunning(attempt, reason)
+                return
+            }
+
+            val permission = uploadPermissions[initialTask.id]
+            if (initialTask.direction == TransferDirection.UPLOAD && !uploadDestinationMatches(permission?.destination, route)) {
+                val reason = if (permission == null) strings.destinationUnverified() else strings.destinationChanged()
+                failBeforeRunning(attempt, reason)
+                return
+            }
+
+            val runningTask = markRunning(attempt) ?: return
+            val callbacks = object : AttemptCallbacks {
+                override val isAborted: Boolean
+                    get() = attempt.isAborted || currentForAttempt(attempt) == null
+                override fun attachCloseable(resource: AutoCloseable, abortAsync: (AutoCloseable) -> Unit) =
+                    attempt.attach(resource, abortAsync)
+                override fun detachCloseable(resource: AutoCloseable) = attempt.detach(resource)
+                override fun updateTask(transform: (TransferTask) -> TransferTask) =
+                    updateForAttempt(attempt, transform)
+                override fun reportProgress(done: Long) = progress(attempt, done)
+                override fun currentTask(): TransferTask? = currentForAttempt(attempt)
+            }
+
+            if (customExecutor != null) {
+                val (pos, _) = customExecutor.execute(runningTask, route, permission?.allowOverwrite == true, callbacks)
+                finishAttempt(attempt, pos)
+                return
+            }
+
+            val ctx = checkNotNull(appContext) { "SftpSession requires Android Context" }
+            val session = SftpSession(route.host, route.jump, ctx, route.network)
+            callbacks.attachCloseable(session) { (it as SftpSession).abort() }
+            try {
+                val pos = when (runningTask.direction) {
+                    TransferDirection.DOWNLOAD -> runDownload(runningTask, session, callbacks)
+                    TransferDirection.UPLOAD -> runUpload(runningTask, session, permission?.allowOverwrite == true, callbacks)
+                }
+                finishAttempt(attempt, pos)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                failAttempt(attempt, t, session.consumeNotice())
+            } finally {
+                callbacks.detachCloseable(session)
+                runCatching { session.close() }
+            }
+        } finally {
+            detachAttempt(attempt)
+        }
+    }
+
+    private fun runDownload(task: TransferTask, session: SftpSession, callbacks: AttemptCallbacks): Long {
+        val remote = session.stat(task.remotePath)
+            ?: throw IllegalStateException(strings.remoteMissing())
+
+        var current = callbacks.currentTask() ?: return task.done
         // 目标文档：第一次创建；续传时沿用上次那份。DocumentsProvider 负责重名不覆盖。
         var target = current.localUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
         if (target == null) {
             target = createTarget(current)
-            update(task.id) { it.copy(localUri = target.toString()) }
-            current = current(task.id) ?: return
+            callbacks.updateTask { it.copy(localUri = target.toString()) }
+            current = callbacks.currentTask() ?: return task.done
         }
 
         // 断点以**本地实际落盘长度**为准，不信任上次记的 done（进度是节流写的，可能落后）。
@@ -274,7 +568,7 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             runCatching { resolver.openOutputStream(target, "wa") }.getOrNull().also {
                 if (it == null) {
                     // 该 provider 不支持追加写：记下来，本任务及以后都按整传处理。
-                    update(task.id) { t -> t.copy(appendSupported = false) }
+                    callbacks.updateTask { t -> t.copy(appendSupported = false) }
                     startAt = 0L
                 }
             }
@@ -282,71 +576,67 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
             null
         }
         // 不能续就必须截断，否则新内容会写在旧内容之上，拼出一个看着正常的坏文件。
-        // 但**新建的那一次不能用 "wt"**：MediaStore 刚 insert 出来的行还没有落地文件，
-        // 截断模式会直接报 `Missing file for primary:Download/Moke`（HyperOS 实测）。
-        // 默认模式（"w"）才会创建文件与目录；只有在本地已有残留字节时才需要显式截断。
+        // 新建的那一次用默认模式（"w"）创建文件与目录；只有在本地已有残留字节时才需要显式截断。
         if (out == null) {
             out = if (existing == 0L) {
                 resolver.openOutputStream(target)
             } else {
                 runCatching { resolver.openOutputStream(target, "wt") }.getOrNull()
                     ?: resolver.openOutputStream(target)
-            } ?: throw IllegalStateException(appContext.localized(R.string.transfer_local_unwritable))
+            } ?: throw IllegalStateException(strings.localUnwritable())
         }
 
-        update(task.id) {
+        callbacks.updateTask {
             it.copy(done = startAt, total = remote.size, remoteSize = remote.size, remoteMtime = remote.mtime)
         }
-        val pos = out.use { sink ->
+        return out.use { sink ->
             session.download(
                 remote = task.remotePath,
                 sink = sink,
                 offset = startAt,
-                onProgress = { progress(task.id, it) },
-                cancelled = { cancelling.contains(task.id) },
+                onProgress = callbacks::reportProgress,
+                cancelled = { callbacks.isAborted },
             )
         }
-        // 断点必须记**真实**落点：progress 是节流的，最后那一小段没推给 UI。
-        update(task.id) { it.copy(done = pos) }
-        finish(task.id)
     }
 
-    private fun runUpload(task: TransferTask, session: SftpSession, allowOverwrite: Boolean) {
+    private fun runUpload(
+        task: TransferTask,
+        session: SftpSession,
+        allowOverwrite: Boolean,
+        callbacks: AttemptCallbacks,
+    ): Long {
         val source = Uri.parse(task.localUri)
         val localSize = queryNameSize(source).second
         val remote = session.stat(task.remotePath)
         val resume = TransferTask.canResumeUpload(task, remote?.size ?: 0L, localSize)
         val offset = if (resume) task.done else 0L
         if (offset == 0L && remote != null && !allowOverwrite) {
-            throw IllegalStateException(appContext.localized(R.string.transfer_overwrite_required))
+            throw IllegalStateException(strings.overwriteRequired())
         }
-        if (cancelling.contains(task.id)) { finish(task.id); return }
-        update(task.id) { it.copy(done = offset, total = localSize) }
+        if (callbacks.isAborted) return offset
+        callbacks.updateTask { it.copy(done = offset, total = localSize) }
         val input = resolver.openInputStream(source)
-            ?: throw IllegalStateException(appContext.localized(R.string.transfer_local_unreadable))
-        val pos = try {
+            ?: throw IllegalStateException(strings.localUnreadable())
+        return try {
             input.use { stream ->
                 if (offset > 0L) skipExactly(stream, offset)
                 session.upload(
                     source = stream,
                     remote = task.remotePath,
                     offset = offset,
-                    onProgress = { progress(task.id, it) },
-                    cancelled = { cancelling.contains(task.id) || current(task.id) == null },
+                    onProgress = callbacks::reportProgress,
+                    cancelled = { callbacks.isAborted },
                     allowOverwrite = allowOverwrite,
                 )
             }
         } catch (t: SFTPException) {
             // EXCL closes the check/open race. A newly appeared file still requires explicit consent.
             if (offset == 0L && !allowOverwrite && runCatching { session.stat(task.remotePath) != null }.getOrDefault(false)) {
-                throw IllegalStateException(appContext.localized(R.string.transfer_overwrite_required), t)
+                throw IllegalStateException(strings.overwriteRequired(), t)
             }
             throw t
         }
-        // 上传续传要求「远端已有字节数 == 我们记的 done」**完全相等**，而 progress 是节流的：
-        // 不把真实落点写回去，取消后 done 恒小于远端实际大小，续传判定必不成立 → 每次都从 0 重传。
-        update(task.id) { it.copy(done = pos) }
-        finish(task.id)
     }
 
     /**
@@ -363,24 +653,9 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
                 continue
             }
             val n = stream.read(scratch, 0, minOf(scratch.size.toLong(), left).toInt())
-            if (n <= 0) throw IllegalStateException(appContext.localized(R.string.transfer_local_seek_failed))
+            if (n <= 0) throw IllegalStateException(strings.localSeekFailed())
             left -= n
         }
-    }
-
-    private fun finish(id: String) {
-        if (cancelling.contains(id)) {
-            update(id) { it.copy(state = TransferState.CANCELLED) }
-        } else {
-            update(id) { it.copy(state = TransferState.DONE, done = if (it.total >= 0) it.total else it.done) }
-            uploadPermissions.remove(id)
-            // 上传成功要通知上层：文件页看的是一次性拉取的列表快照，不刷新的话刚传上去的文件
-            // 根本不出现，用户看不到任何痕迹，只能理解成"传失败了"。
-            current(id)
-                ?.takeIf { it.direction == TransferDirection.UPLOAD }
-                ?.let { onUploadDone?.invoke(it.hostId, RemotePath.parent(it.remotePath)) }
-        }
-        persist()
     }
 
     /** 上传成功回调（hostId, 远端目录）：上层据此刷新正在看的那个目录。 */
@@ -388,25 +663,19 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
 
     // ---------- 小工具 ----------
 
-    private fun current(id: String) = _tasks.value.firstOrNull { it.id == id }
-
-    private fun update(id: String, f: (TransferTask) -> TransferTask) {
-        _tasks.update { list -> list.map { if (it.id == id) f(it) else it } }
-    }
-
     /** 进度更新做节流：每 250ms 或每 1MB 才推一次，避免高频重组把 UI 拖垮。 */
     private var lastProgressAt = 0L
-    private fun progress(id: String, done: Long) {
+    private fun progress(attempt: TransferAttempt, done: Long) {
         val now = System.currentTimeMillis()
-        val prev = current(id)?.done ?: 0
+        val prev = currentForAttempt(attempt)?.done ?: 0
         if (now - lastProgressAt < 250 && done - prev < 1_000_000) return
         lastProgressAt = now
-        update(id) { it.copy(done = done) }
+        updateForAttempt(attempt) { it.copy(done = done) }
     }
 
     private fun persist() {
-        val snapshot = _tasks.value
-        scope.launch { store.save(snapshot) }
+        val snapshot = synchronized(stateLock) { _tasks.value }
+        scope.launch { backingStore.save(snapshot) }
     }
 
     /**
@@ -429,26 +698,25 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     private fun createInTree(tree: Uri, name: String): Uri {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         return DocumentsContract.createDocument(resolver, parent, RemotePath.guessMime(name), name)
-            ?: throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
+            ?: throw IllegalStateException(strings.createFailed())
     }
 
     /**
-     * 默认落点：系统「下载」下的 `Moke` 子目录，经 MediaStore 写入——**零存储权限、零选择器**，
-     * 与 Chrome / Telegram 等下载类应用一致。同名由 MediaStore 自己让位（`name (1).ext`），不覆盖。
+     * 默认落点：系统「下载」下的 `Moke` 子目录，经 MediaStore 写入——**零存储权限、零选择器**。
+     * 同名由 MediaStore 自己让位（`name (1).ext`），不覆盖。
      */
     private fun createInDownloads(name: String): Uri {
-        // 先试子目录；某些 ROM（HyperOS 实测）不会为 RELATIVE_PATH 里不存在的子目录建文件夹，
-        // insert 能成功但随后打开就报 `Missing file for primary:Download/Moke`。所以插入后立刻
-        // 探一次写入：不通就删掉这条无效记录，退回「下载」根目录——宁可少一层目录，也不能下载不了。
+        // 先试子目录；部分系统不会为 RELATIVE_PATH 里不存在的子目录自动建文件夹，
+        // 故插入后立即探一次写入：不通就删掉无效记录，退回「下载」根目录。
         insertDownload(name, "${Environment.DIRECTORY_DOWNLOADS}/$DEFAULT_SUBDIR")?.let { uri ->
             if (touchable(uri)) return uri
             runCatching { resolver.delete(uri, null, null) }
         }
         val fallback = insertDownload(name, Environment.DIRECTORY_DOWNLOADS)
-            ?: throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
+            ?: throw IllegalStateException(strings.createFailed())
         if (!touchable(fallback)) {
             runCatching { resolver.delete(fallback, null, null) }
-            throw IllegalStateException(appContext.localized(R.string.transfer_create_failed))
+            throw IllegalStateException(strings.createFailed())
         }
         return fallback
     }
@@ -488,11 +756,5 @@ class TransferManager(context: Context, private val hostStore: HostStore) {
     companion object {
         /** 默认下载子目录（系统「下载」之下）。 */
         const val DEFAULT_SUBDIR = "Moke"
-    }
-
-    /** 失败原因：优先 TOFU 等提示（没有终端可写，只能在这儿说），其次异常消息。 */
-    private fun describe(t: Throwable, notice: String?): String {
-        val base = t.connectFailureText(appContext).takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
-        return if (notice.isNullOrBlank()) base else "$notice\n$base"
     }
 }
