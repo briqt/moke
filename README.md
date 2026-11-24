@@ -50,6 +50,10 @@ mosh requires `mosh-server` on the remote host and a reachable UDP path. Proxy u
 
 See [CONTRIBUTING](CONTRIBUTING.md) for build instructions and contribution guidelines. Bug reports, suggestions and pull requests are welcome.
 
+## Community
+
+[学 AI，上 Linux DO](https://linux.do/)
+
 ## License
 
 The product layer (`app/`) is **GPL-3.0-or-later**; see [LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md). The vendored terminal modules are Apache-2.0, and the standalone mosh executable is GPLv3. Component sources, modifications and font licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Distributors must meet the applicable license and corresponding-source requirements.

@@ -50,6 +50,10 @@ mosh 需要远端安装 `mosh-server`，且 UDP 数据通路可达。经代理�
 
 构建条件、命令与贡献指南见 [CONTRIBUTING](CONTRIBUTING.zh-CN.md)。欢迎通过 [issue](https://github.com/briqt/moke/issues) 反馈问题、提出建议，或提交 Pull Request 参与贡献。
 
+## 社区
+
+[学 AI，上 Linux DO](https://linux.do/)
+
 ## 许可
 
 产品层（`app/`）采用 **GPL-3.0-or-later**，见 [LICENSE](LICENSE) 与 [COPYRIGHT.md](COPYRIGHT.md)。内置的终端模块为 Apache-2.0，独立运行的 mosh 可执行文件为 GPLv3。组件来源、修改说明与字体许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。分发时须遵守各组件许可及对应源码提供义务。
