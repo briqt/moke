@@ -31,6 +31,13 @@ class KeySeqTest {
         assertEquals("\r", KeySeq.encode(KeyId.Enter))
         assertEquals(e, KeySeq.encode(KeyId.Esc))
         assertEquals("\u007f", KeySeq.encode(KeyId.Backspace))
+        assertEquals("\u0008", KeySeq.encode(KeyId.Backspace, ctrl = true))
+        assertEquals("$e\u007f", KeySeq.encode(KeyId.Backspace, alt = true))
+        assertEquals("$e\u0008", KeySeq.encode(KeyId.Backspace, ctrl = true, alt = true))
+        assertEquals(
+            KeyHandler.getCode(KeyEvent.KEYCODE_DEL, KeyHandler.KEYMOD_CTRL or KeyHandler.KEYMOD_ALT, false, false),
+            KeySeq.encode(KeyId.Backspace, ctrl = true, alt = true),
+        )
     }
 
     @Test
@@ -187,13 +194,122 @@ class KeySeqTest {
     }
 
     @Test
-    fun `Ctrl 字符映射覆盖字母与符号`() {
+    fun `Ctrl 字符映射覆盖字母 符号与标准控制数字`() {
         assertEquals('\u0001', KeySeq.ctrlChar('a'))
         assertEquals('\u0001', KeySeq.ctrlChar('A'))
         assertEquals('\u001a', KeySeq.ctrlChar('z'))
         assertEquals('\u0000', KeySeq.ctrlChar(' '))
+        assertEquals('\u0000', KeySeq.ctrlChar('@'))
+        assertEquals('\u0000', KeySeq.ctrlChar('2'))
+        assertEquals('\u001b', KeySeq.ctrlChar('['))
+        assertEquals('\u001b', KeySeq.ctrlChar('3'))
         assertEquals('\u001c', KeySeq.ctrlChar('\\'))
+        assertEquals('\u001c', KeySeq.ctrlChar('4'))
+        assertEquals('\u001d', KeySeq.ctrlChar(']'))
+        assertEquals('\u001d', KeySeq.ctrlChar('5'))
+        assertEquals('\u001e', KeySeq.ctrlChar('^'))
+        assertEquals('\u001e', KeySeq.ctrlChar('~'))
+        assertEquals('\u001e', KeySeq.ctrlChar('6'))
+        assertEquals('\u001f', KeySeq.ctrlChar('_'))
+        assertEquals('\u001f', KeySeq.ctrlChar('/'))
+        assertEquals('\u001f', KeySeq.ctrlChar('-'))
+        assertEquals('\u001f', KeySeq.ctrlChar('7'))
         assertEquals('\u007f', KeySeq.ctrlChar('?'))
+        assertEquals('\u007f', KeySeq.ctrlChar('8'))
         assertNull(KeySeq.ctrlChar('1'))
+        assertNull(KeySeq.ctrlChar('9'))
+        assertNull(KeySeq.ctrlChar('0'))
+    }
+
+    @Test
+    fun `无修饰单步组合键自然继承外部粘滞修饰 带修饰单步与双步前缀保持独立`() {
+        val bareSlash = KeyId.Combo(listOf(KeyStep(KeyId.Chars("/"))))
+        assertEquals("/", KeySeq.encode(bareSlash))
+        assertEquals("\u001f", KeySeq.encode(bareSlash, ctrl = true))
+        assertEquals("$e/", KeySeq.encode(bareSlash, alt = true))
+
+        val bareLetter = KeyId.Combo(listOf(KeyStep(KeyId.Chars("a"))))
+        assertEquals("a", KeySeq.encode(bareLetter))
+        assertEquals("A", KeySeq.encode(bareLetter, shift = true))
+        assertEquals("\u0001", KeySeq.encode(bareLetter, ctrl = true, shift = true))
+        assertEquals("${e}A", KeySeq.encode(bareLetter, alt = true, shift = true))
+
+        val bareUp = KeyId.Combo(listOf(KeyStep(KeyId.Up)))
+        assertEquals("$e[1;5A", KeySeq.encode(bareUp, ctrl = true))
+
+        val tmuxDetach = KeyId.Combo(
+            listOf(
+                KeyStep(KeyId.Chars("b"), ctrl = true),
+                KeyStep(KeyId.Chars("d")),
+            ),
+        )
+        assertEquals("\u0002d", KeySeq.encode(tmuxDetach))
+        assertEquals("\u0002d", KeySeq.encode(tmuxDetach, ctrl = true, alt = true, shift = true))
+
+        val tmuxChooseDetach = KeyId.Combo(
+            listOf(
+                KeyStep(KeyId.Chars("b"), ctrl = true),
+                KeyStep(KeyId.Chars("d"), shift = true),
+            ),
+        )
+        assertEquals("\u0002D", KeySeq.encode(tmuxChooseDetach))
+
+        val emacsSave = KeyId.Combo(
+            listOf(
+                KeyStep(KeyId.Chars("x"), ctrl = true),
+                KeyStep(KeyId.Chars("s"), ctrl = true),
+            ),
+        )
+        assertEquals("\u0018\u0013", KeySeq.encode(emacsSave))
+
+        val altBackWord = KeyId.Combo(listOf(KeyStep(KeyId.Chars("b"), alt = true)))
+        val altShiftBackWord = KeyId.Combo(listOf(KeyStep(KeyId.Chars("b"), alt = true, shift = true)))
+        assertEquals("${e}b", KeySeq.encode(altBackWord))
+        assertEquals("${e}b", KeySeq.encode(altBackWord, ctrl = true, shift = true))
+        assertEquals("${e}B", KeySeq.encode(altShiftBackWord))
+
+        val tmuxPaneUp = KeyId.Combo(
+            listOf(
+                KeyStep(KeyId.Chars("b"), ctrl = true),
+                KeyStep(KeyId.Up),
+            ),
+        )
+        assertEquals("\u0002$e[A", KeySeq.encode(tmuxPaneUp, cursorKeysApplication = false))
+        assertEquals("\u0002${e}OA", KeySeq.encode(tmuxPaneUp, cursorKeysApplication = true))
+    }
+
+    @Test
+    fun `连发判定覆盖导航删除及单步组合但不对双步前缀连发`() {
+        listOf(
+            KeyId.Up, KeyId.Down, KeyId.Left, KeyId.Right,
+            KeyId.Backspace, KeyId.Delete, KeyId.PageUp, KeyId.PageDown,
+            KeyId.Combo(listOf(KeyStep(KeyId.Left, ctrl = true))),
+            KeyId.Combo(listOf(KeyStep(KeyId.Backspace, alt = true))),
+        ).forEach { repeatable ->
+            org.junit.Assert.assertTrue("$repeatable should repeat", KeySeq.isRepeatable(repeatable))
+        }
+
+        listOf(
+            KeyId.Esc, KeyId.Tab, KeyId.Enter, KeyId.Home, KeyId.End, KeyId.Insert,
+            KeyId.Fn(1), KeyId.Chars("a"), KeyId.Macro("\u0003"),
+            KeyId.Combo(listOf(KeyStep(KeyId.Chars("b"), ctrl = true), KeyStep(KeyId.Up))),
+            KeyId.Combo(listOf(KeyStep(KeyId.Chars("d"), alt = true))),
+        ).forEach { nonRepeatable ->
+            org.junit.Assert.assertFalse("$nonRepeatable should not repeat", KeySeq.isRepeatable(nonRepeatable))
+        }
+    }
+
+    @Test
+    fun `序列可读回显覆盖控制码 CSI序列与末尾裸ESC加左括号`() {
+        assertEquals("ESC[1;5D", KeySeq.describeBytes("$e[1;5D"))
+        assertEquals("ESCOA", KeySeq.describeBytes("${e}OA"))
+        assertEquals("ESC [", KeySeq.describeBytes("$e["))
+        assertEquals("ESC O", KeySeq.describeBytes("${e}O"))
+        assertEquals("^B ESC [", KeySeq.describeBytes("\u0002$e["))
+        assertEquals("ESC [ ^\\", KeySeq.describeBytes("$e[\u001c"))
+        assertEquals("^B d", KeySeq.describeBytes("\u0002d"))
+        assertEquals("^X ^S", KeySeq.describeBytes("\u0018\u0013"))
+        assertEquals("ESC b", KeySeq.describeBytes("${e}b"))
+        assertEquals("^@ TAB CR DEL \u2423", KeySeq.describeBytes("\u0000\t\r\u007f "))
     }
 }

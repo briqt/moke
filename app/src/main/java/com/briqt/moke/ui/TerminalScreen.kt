@@ -219,6 +219,8 @@ fun TerminalScreen(
     }
     // 修饰键三态（一次性/锁定/关）：附加键与面板共用一份状态，并同步给 controller 供 IME 输入使用。
     var mods by remember(ts.id) { mutableStateOf(Modifiers()) }
+    val extraKeyConfig = remember(extraKeysLayout) { ExtraKeyLayout.parseConfig(extraKeysLayout) }
+    val extraKeyRows = remember(extraKeyConfig) { ExtraKeyLayout.rows(extraKeyConfig) }
     // 全键盘面板是否展开（浮在终端之上，不挤压终端 → 不触发远端 resize）。
     var panelOpen by remember(ts.id) { mutableStateOf(false) }
 
@@ -502,6 +504,7 @@ fun TerminalScreen(
                         visible = panelOpen && extraKeysVisible && !showComposer,
                         sections = remember(extraKeysLayout) { panelSections(extraKeysLayout) },
                         mods = mods,
+                        keyHeight = extraKeyConfig.height,
                         onKey = { key -> mods = sendKey(ts, controller, mods, key) },
                         onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
                         onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
@@ -623,15 +626,19 @@ fun TerminalScreen(
                     },
                 )
                 extraKeysVisible -> ExtraKeys(
-                    rows = ExtraKeyLayout.rows(extraKeysLayout),
+                    rows = extraKeyRows,
                     mods = mods,
                     panelOpen = panelOpen,
+                    keyHeight = extraKeyConfig.height,
                     onKey = { key -> mods = sendKey(ts, controller, mods, key) },
                     onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
                     onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
                     onAction = { id ->
                         when (id) {
-                            ACTION_COMPOSER -> showComposer = true
+                            ACTION_COMPOSER -> {
+                                panelOpen = false
+                                showComposer = true
+                            }
                             ACTION_PANEL -> panelOpen = !panelOpen
                         }
                     },
@@ -731,6 +738,7 @@ private fun KeyboardPanelOverlay(
     visible: Boolean,
     sections: List<KeySection>,
     mods: Modifiers,
+    keyHeight: ExtraKeyHeight,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
@@ -746,6 +754,7 @@ private fun KeyboardPanelOverlay(
         KeyboardPanel(
             sections = sections,
             mods = mods,
+            keyHeight = keyHeight,
             onKey = onKey,
             onToggleMod = onToggleMod,
             onHoldMod = onHoldMod,

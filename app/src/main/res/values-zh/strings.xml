@@ -184,8 +184,8 @@
     <string name="show_extra_keys">显示底部快捷键</string>
     <string name="menu_extra_keys">底部快捷键</string>
     <string name="extra_keys_reset">恢复默认</string>
-    <string name="extra_keys_reset_title">恢复默认键位？</string>
-    <string name="extra_keys_reset_message">当前自定义键位将被替换。</string>
+    <string name="extra_keys_reset_title">恢复默认快捷键？</string>
+    <string name="extra_keys_reset_message">当前键位、组合键与显示设置将恢复默认。</string>
     <string name="extra_keys_pick">选择按键</string>
     <string name="key_mod_once">%1$s，下一次按键</string>
     <string name="key_mod_locked">%1$s，已锁定</string>

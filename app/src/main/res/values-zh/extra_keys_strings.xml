@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="key_with_secondary">%1$s，上滑触发 %2$s</string>
+    <string name="extra_keys_summary_format">2 × %1$d · %2$s</string>
+
+    <string name="extra_keys_preview_title">实时试按</string>
+    <string name="extra_keys_preview_idle">点按、按住或上滑下方按键</string>
+    <string name="extra_keys_preview_swipe">上滑：%1$s</string>
+    <string name="extra_keys_mod_off">%1$s，已关闭</string>
+
+    <string name="extra_keys_section_slots">键位编排</string>
+    <string name="extra_keys_slots_hint">点按编辑单键，长按拖动互换位置</string>
+    <string name="extra_keys_section_layout">布局与外观</string>
+
+    <string name="extra_keys_columns">每排列数</string>
+    <string name="extra_keys_columns_6">6 列（宽键）</string>
+    <string name="extra_keys_columns_7">7 列（默认）</string>
+    <string name="extra_keys_columns_8">8 列（紧凑）</string>
+
+    <string name="extra_keys_height">按键高度</string>
+    <string name="extra_keys_height_compact">紧凑（28 dp）</string>
+    <string name="extra_keys_height_standard">标准（34 dp）</string>
+    <string name="extra_keys_height_comfortable">舒适（40 dp）</string>
+
+    <string name="extra_keys_compact_symbols">精简按键符号</string>
+
+    <string name="extra_keys_slot_editor_title">第 %1$d 排 · 第 %2$d 格</string>
+    <string name="extra_keys_done">完成</string>
+    <string name="extra_keys_tab_primary">主动作</string>
+    <string name="extra_keys_tab_secondary">上滑副动作</string>
+    <string name="extra_keys_secondary_none">无</string>
+    <string name="extra_keys_secondary_none_hint">上滑此键不触发额外动作。</string>
+
+    <string name="extra_keys_type_builtin">内置按键</string>
+    <string name="extra_keys_type_combo">组合键</string>
+
+    <string name="extra_keys_combo_single">单步组合</string>
+    <string name="extra_keys_combo_prefix">双步前缀</string>
+    <string name="extra_keys_combo_sends">发送序列：%1$s</string>
+    <string name="extra_keys_combo_step1">第 1 步 · 前缀</string>
+    <string name="extra_keys_combo_step2">第 2 步 · 按键</string>
+    <string name="extra_keys_combo_modifiers">修饰键</string>
+    <string name="extra_keys_combo_target">目标按键</string>
+    <string name="extra_keys_combo_custom_ctrl">Ctrl + …</string>
+
+    <string name="extra_keys_cat_common">常用符号</string>
+    <string name="extra_keys_cat_nav">方向与编辑</string>
+    <string name="extra_keys_cat_letters">A–Z</string>
+    <string name="extra_keys_cat_digits">0–9</string>
+    <string name="extra_keys_cat_fn">F1–F12</string>
+
+    <string name="extra_keys_display_section">键面显示</string>
+    <string name="extra_keys_display_default">默认</string>
+    <string name="extra_keys_display_text">文字</string>
+    <string name="extra_keys_display_icon">图标</string>
+    <string name="extra_keys_display_text_hint">最多 4 个字符</string>
+
+    <string name="extra_keys_icon_return">回车</string>
+    <string name="extra_keys_icon_backspace">退格</string>
+    <string name="extra_keys_icon_tab">制表键</string>
+    <string name="extra_keys_icon_space">空格</string>
+    <string name="extra_keys_icon_first_page">行首</string>
+    <string name="extra_keys_icon_last_page">行尾</string>
+    <string name="extra_keys_icon_top">顶部</string>
+    <string name="extra_keys_icon_bottom">底部</string>
+    <string name="extra_keys_icon_split_v">左右分屏</string>
+    <string name="extra_keys_icon_split_h">上下分屏</string>
+    <string name="extra_keys_icon_add">新建</string>
+    <string name="extra_keys_icon_close">关闭</string>
+    <string name="extra_keys_icon_stop">中断</string>
+    <string name="extra_keys_icon_search">搜索</string>
+    <string name="extra_keys_icon_history">历史</string>
+    <string name="extra_keys_icon_terminal">终端</string>
+    <string name="extra_keys_icon_swap_h">切换</string>
+    <string name="extra_keys_icon_window">窗口</string>
+</resources>

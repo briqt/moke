@@ -79,4 +79,43 @@ class KeySectionsTest {
         val labels = allKeys(fnSection.rows).map { it.label }
         assertEquals((1..12).map { "F$it" }, labels)
     }
+
+    @Test
+    fun `动态面板在放置SHIFT 切换6列与8列时与常驻两排零重复`() {
+        val configs = listOf(
+            ExtraKeyConfig.DEFAULT.assignPrimary(0, 0, ExtraKeySpec.Builtin("shift")),
+            ExtraKeyConfig.DEFAULT.resizeColumns(8),
+            ExtraKeyConfig.DEFAULT.resizeColumns(8).copy(compactSymbols = true),
+            ExtraKeyConfig.DEFAULT.resizeColumns(6),
+            ExtraKeyConfig.DEFAULT.resizeColumns(6).copy(compactSymbols = true),
+            // 把编辑分组全部 7 个键都放到底部 8 列栏时，空分组自动省略
+            ExtraKeyConfig.DEFAULT
+                .resizeColumns(8)
+                .assignPrimary(0, 0, ExtraKeySpec.Builtin("shift"))
+                .assignPrimary(0, 4, ExtraKeySpec.Builtin("ins"))
+                .assignPrimary(0, 5, ExtraKeySpec.Builtin("del"))
+                .assignPrimary(0, 6, ExtraKeySpec.Builtin("pgup"))
+                .assignPrimary(1, 0, ExtraKeySpec.Builtin("bs"))
+                .assignPrimary(1, 5, ExtraKeySpec.Builtin("enter"))
+                .assignPrimary(1, 6, ExtraKeySpec.Builtin("pgdn")),
+        )
+
+        for (cfg in configs) {
+            val stored = ExtraKeyLayout.encodeConfig(cfg)
+            val bottomKeys = allKeys(ExtraKeyLayout.rows(stored))
+            val panelRows = panelSections(stored).flatMap { it.rows }
+            val panelKeys = allKeys(panelRows)
+
+            panelRows.forEach { row ->
+                assertTrue("面板行长度异常：${row.size}", row.size in 1..7)
+            }
+
+            val allMods = (bottomKeys + panelKeys).filterIsInstance<ExtraKey.Mod>().map { it.kind }
+            assertEquals("修饰键重复：$allMods", allMods.distinct().size, allMods.size)
+
+            val residentKeyIds = bottomKeys.filterIsInstance<ExtraKey.Key>().map { it.key }.toSet()
+            val dupKeys = panelKeys.filterIsInstance<ExtraKey.Key>().filter { it.key in residentKeyIds }
+            assertTrue("面板与底部常驻键重复：${dupKeys.map { it.label }}", dupKeys.isEmpty())
+        }
+    }
 }

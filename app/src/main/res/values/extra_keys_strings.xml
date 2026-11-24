@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="key_with_secondary">%1$s, swipe up for %2$s</string>
+    <string name="extra_keys_summary_format">2 × %1$d · %2$s</string>
+
+    <string name="extra_keys_preview_title">Live preview</string>
+    <string name="extra_keys_preview_idle">Tap, hold, or swipe up to test</string>
+    <string name="extra_keys_preview_swipe">Swipe: %1$s</string>
+    <string name="extra_keys_mod_off">%1$s, off</string>
+
+    <string name="extra_keys_section_slots">Key slots</string>
+    <string name="extra_keys_slots_hint">Tap a slot to edit; touch and hold to drag and swap</string>
+    <string name="extra_keys_section_layout">Layout &amp; appearance</string>
+
+    <string name="extra_keys_columns">Columns per row</string>
+    <string name="extra_keys_columns_6">6 columns (wide)</string>
+    <string name="extra_keys_columns_7">7 columns (default)</string>
+    <string name="extra_keys_columns_8">8 columns (dense)</string>
+
+    <string name="extra_keys_height">Key height</string>
+    <string name="extra_keys_height_compact">Compact (28 dp)</string>
+    <string name="extra_keys_height_standard">Standard (34 dp)</string>
+    <string name="extra_keys_height_comfortable">Comfortable (40 dp)</string>
+
+    <string name="extra_keys_compact_symbols">Compact key symbols</string>
+
+    <string name="extra_keys_slot_editor_title">Row %1$d · Key %2$d</string>
+    <string name="extra_keys_done">Done</string>
+    <string name="extra_keys_tab_primary">Primary</string>
+    <string name="extra_keys_tab_secondary">Swipe up</string>
+    <string name="extra_keys_secondary_none">None</string>
+    <string name="extra_keys_secondary_none_hint">Swiping up on this key performs no secondary action.</string>
+
+    <string name="extra_keys_type_builtin">Built-in</string>
+    <string name="extra_keys_type_combo">Key combo</string>
+
+    <string name="extra_keys_combo_single">Single combo</string>
+    <string name="extra_keys_combo_prefix">Two-step prefix</string>
+    <string name="extra_keys_combo_sends">Sends: %1$s</string>
+    <string name="extra_keys_combo_step1">Step 1 · Prefix</string>
+    <string name="extra_keys_combo_step2">Step 2 · Key</string>
+    <string name="extra_keys_combo_modifiers">Modifiers</string>
+    <string name="extra_keys_combo_target">Target key</string>
+    <string name="extra_keys_combo_custom_ctrl">Ctrl + …</string>
+
+    <string name="extra_keys_cat_common">Symbols</string>
+    <string name="extra_keys_cat_nav">Navigation</string>
+    <string name="extra_keys_cat_letters">A–Z</string>
+    <string name="extra_keys_cat_digits">0–9</string>
+    <string name="extra_keys_cat_fn">F1–F12</string>
+
+    <string name="extra_keys_display_section">Display</string>
+    <string name="extra_keys_display_default">Default</string>
+    <string name="extra_keys_display_text">Label</string>
+    <string name="extra_keys_display_icon">Icon</string>
+    <string name="extra_keys_display_text_hint">Up to 4 characters</string>
+
+    <string name="extra_keys_icon_return">Return</string>
+    <string name="extra_keys_icon_backspace">Backspace</string>
+    <string name="extra_keys_icon_tab">Tab</string>
+    <string name="extra_keys_icon_space">Space</string>
+    <string name="extra_keys_icon_first_page">Start</string>
+    <string name="extra_keys_icon_last_page">End</string>
+    <string name="extra_keys_icon_top">Top</string>
+    <string name="extra_keys_icon_bottom">Bottom</string>
+    <string name="extra_keys_icon_split_v">Split vertically</string>
+    <string name="extra_keys_icon_split_h">Split horizontally</string>
+    <string name="extra_keys_icon_add">New</string>
+    <string name="extra_keys_icon_close">Close</string>
+    <string name="extra_keys_icon_stop">Interrupt</string>
+    <string name="extra_keys_icon_search">Search</string>
+    <string name="extra_keys_icon_history">History</string>
+    <string name="extra_keys_icon_terminal">Terminal</string>
+    <string name="extra_keys_icon_swap_h">Switch</string>
+    <string name="extra_keys_icon_window">Window</string>
+</resources>

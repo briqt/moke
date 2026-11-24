@@ -63,6 +63,7 @@ sealed interface Screen {
     data class Terminal(val sessionId: String, val visit: Any = Any()) : Screen
     data object Appearance : Screen
     data object TerminalSettings : Screen
+    data object ExtraKeysSettings : Screen
     data object Fonts : Screen
     data object About : Screen
 
@@ -329,6 +330,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     BackHandler(enabled = backEnabled) {
         when (screen) {
             is Screen.Fonts -> screen = Screen.Appearance
+            is Screen.ExtraKeysSettings -> screen = Screen.TerminalSettings
             is Screen.Appearance -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.TerminalSettings -> { screen = Screen.Home; homeTab = HomeTab.Settings }
             is Screen.About -> { screen = Screen.Home; homeTab = HomeTab.Settings }
@@ -727,8 +729,14 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onConfirmClose = { vm.setConfirmCloseSession(it) },
             onAutoTrustNewHostKey = { vm.setAutoTrustNewHostKey(it) },
             extraKeysLayout = extraKeysLayout,
-            onExtraKeysLayout = { vm.setExtraKeysLayout(it) },
+            onOpenExtraKeys = { screen = Screen.ExtraKeysSettings },
             onBack = { screen = Screen.Home; homeTab = HomeTab.Settings },
+        )
+
+        is Screen.ExtraKeysSettings -> ExtraKeysSettingsScreen(
+            stored = extraKeysLayout,
+            onChange = { vm.setExtraKeysLayout(it) },
+            onBack = { screen = Screen.TerminalSettings },
         )
 
         is Screen.Files -> {

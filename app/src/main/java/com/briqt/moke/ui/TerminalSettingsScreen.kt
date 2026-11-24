@@ -69,7 +69,7 @@ fun TerminalSettingsScreen(
     autoTrustNewHostKey: Boolean,
     terminalAlerts: Boolean,
     extraKeysLayout: String,
-    onExtraKeysLayout: (String) -> Unit,
+    onOpenExtraKeys: () -> Unit,
     onTerminalAlerts: (Boolean) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onTmuxScrollSetup: (Boolean) -> Unit,
@@ -81,7 +81,7 @@ fun TerminalSettingsScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var kbDialog by remember { mutableStateOf(false) }
-    var keysDialog by remember { mutableStateOf(false) }
+    val extraKeyConfig = remember(extraKeysLayout) { ExtraKeyLayout.parseConfig(extraKeysLayout) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var pendingEnableAlerts by rememberSaveable { mutableStateOf(false) }
     var wasRationaleBefore by rememberSaveable { mutableStateOf(false) }
@@ -207,7 +207,12 @@ fun TerminalSettingsScreen(
                 NavRow(
                     Icons.Filled.Keyboard,
                     stringResource(R.string.menu_extra_keys),
-                    onClick = { keysDialog = true },
+                    stringResource(
+                        R.string.extra_keys_summary_format,
+                        extraKeyConfig.columns,
+                        stringResource(extraKeyHeightLabelRes(extraKeyConfig.height)),
+                    ),
+                    onClick = onOpenExtraKeys,
                 )
                 SwitchRow(
                     icon = Icons.Filled.SwipeVertical,
@@ -293,14 +298,6 @@ fun TerminalSettingsScreen(
                 )
             }
         }
-    }
-
-    if (keysDialog) {
-        ExtraKeysLayoutDialog(
-            stored = extraKeysLayout,
-            onChange = onExtraKeysLayout,
-            onDismiss = { keysDialog = false },
-        )
     }
 
     if (kbDialog) {

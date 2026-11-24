@@ -30,7 +30,18 @@ sealed interface KeyId {
 
     /** 宏：已经是完整字节序列（如 Ctrl+C），不再叠加当前修饰。 */
     data class Macro(val bytes: String) : KeyId
+
+    /** 可视化组合键序列：无修饰单步键跟随当前修饰，带修饰单步或双步前缀按步骤自带修饰编码。 */
+    data class Combo(val steps: List<KeyStep>) : KeyId
 }
+
+/** 组合键中的单步按键与修饰状态。 */
+data class KeyStep(
+    val key: KeyId,
+    val ctrl: Boolean = false,
+    val alt: Boolean = false,
+    val shift: Boolean = false,
+)
 
 /**
  * 按 xterm 惯例把 [KeyId] + 修饰键编码为终端字节序列。纯逻辑、无 Android 依赖，便于单测。
@@ -55,6 +66,45 @@ object KeySeq {
     ): String {
         // 宏自带完整序列（Ctrl+C 等），叠加修饰只会把它拆坏。
         if (key is KeyId.Macro) return key.bytes
+        if (key is KeyId.Combo) {
+            if (key.steps.size == 1) {
+                val step = key.steps[0]
+                val inheritMods = !step.ctrl && !step.alt && !step.shift
+                val effCtrl = if (inheritMods) ctrl else step.ctrl
+                val effAlt = if (inheritMods) alt else step.alt
+                val effShift = if (inheritMods) shift else step.shift
+                val stepKey = if (effShift && !effCtrl && step.key is KeyId.Chars && step.key.text.length == 1) {
+                    KeyId.Chars(step.key.text[0].uppercaseChar().toString())
+                } else {
+                    step.key
+                }
+                return encode(
+                    stepKey,
+                    ctrl = effCtrl,
+                    alt = effAlt,
+                    shift = effShift,
+                    cursorKeysApplication = cursorKeysApplication,
+                )
+            }
+            return buildString {
+                for (step in key.steps) {
+                    val stepKey = if (step.shift && !step.ctrl && step.key is KeyId.Chars && step.key.text.length == 1) {
+                        KeyId.Chars(step.key.text[0].uppercaseChar().toString())
+                    } else {
+                        step.key
+                    }
+                    append(
+                        encode(
+                            stepKey,
+                            ctrl = step.ctrl,
+                            alt = step.alt,
+                            shift = step.shift,
+                            cursorKeysApplication = cursorKeysApplication,
+                        ),
+                    )
+                }
+            }
+        }
 
         val mod = modifier(ctrl, alt, shift)
         return when (key) {
@@ -66,13 +116,12 @@ object KeySeq {
                 else -> "\t"
             }
             // Shift+Enter 无通行编码（各终端自定义）；Alt+Enter 发 ESC+CR，
-            // 是 claude code / codex 这类行编辑 TUI 里"换行但不提交"的常见约定。
+            // 是行编辑型 TUI 里"换行但不提交"的常见约定。
             KeyId.Enter -> if (alt) "$ESC\r" else "\r"
-            // 退格默认发 DEL(0x7f)（与 stty erase 的常规配置一致）；Ctrl 发 BS(0x08)。
-            KeyId.Backspace -> when {
-                ctrl -> BS
-                alt -> "$ESC$DEL"
-                else -> DEL
+            // 退格默认发 DEL(0x7f)（与 stty erase 的常规配置一致）；Ctrl 发 BS(0x08)，Alt 加 ESC 前缀。
+            KeyId.Backspace -> {
+                val base = if (ctrl) BS else DEL
+                if (alt) "$ESC$base" else base
             }
             KeyId.Up -> cursor('A', mod, cursorKeysApplication)
             KeyId.Down -> cursor('B', mod, cursorKeysApplication)
@@ -87,7 +136,65 @@ object KeySeq {
             is KeyId.Fn -> function(key.n, mod)
             is KeyId.Chars -> chars(key.text, ctrl, alt)
             is KeyId.Macro -> key.bytes   // 已在上面返回，此分支仅为穷尽
+            is KeyId.Combo -> ""          // 已在上面返回，此分支仅为穷尽
         }
+    }
+
+    /** 按住原地时允许自动连发的按键（方向、退格、删除、翻页，及基底为这些键的单步组合）。 */
+    fun isRepeatable(key: KeyId): Boolean = when (key) {
+        KeyId.Up, KeyId.Down, KeyId.Left, KeyId.Right,
+        KeyId.Backspace, KeyId.Delete, KeyId.PageUp, KeyId.PageDown -> true
+        is KeyId.Combo -> key.steps.size == 1 && isRepeatable(key.steps[0].key)
+        else -> false
+    }
+
+    /** 把终端字节序列格式化为紧凑可读标识（供实时试按预览与组合键回显使用）。 */
+    fun describeBytes(bytes: String): String {
+        if (bytes.isEmpty()) return ""
+        val out = StringBuilder()
+        var i = 0
+        while (i < bytes.length) {
+            if (out.isNotEmpty()) out.append(' ')
+            val c = bytes[i]
+            when {
+                c == '\u001b' -> {
+                    val next = bytes.getOrNull(i + 1)
+                    if (next == '[') {
+                        var end = i + 2
+                        while (end < bytes.length && bytes[end].code in 0x30..0x3F) {
+                            end++
+                        }
+                        if (end < bytes.length && bytes[end].code in 0x40..0x7E) {
+                            out.append("ESC[")
+                            out.append(bytes, i + 2, end + 1)
+                            i = end + 1
+                        } else {
+                            out.append("ESC")
+                            i++
+                        }
+                    } else if (next == 'O' && i + 2 < bytes.length && bytes[i + 2].code in 0x40..0x7E) {
+                        out.append("ESCO").append(bytes[i + 2])
+                        i += 3
+                    } else {
+                        out.append("ESC")
+                        i++
+                    }
+                }
+                c == '\r' -> { out.append("CR"); i++ }
+                c == '\n' -> { out.append("LF"); i++ }
+                c == '\t' -> { out.append("TAB"); i++ }
+                c == '\u007f' -> { out.append("DEL"); i++ }
+                c == '\u0000' -> { out.append("^@"); i++ }
+                c.code in 1..26 -> { out.append('^').append((c.code + 64).toChar()); i++ }
+                c == '\u001c' -> { out.append("^\\"); i++ }
+                c == '\u001d' -> { out.append("^]"); i++ }
+                c == '\u001e' -> { out.append("^^"); i++ }
+                c == '\u001f' -> { out.append("^_"); i++ }
+                c == ' ' -> { out.append('\u2423'); i++ }
+                else -> { out.append(c); i++ }
+            }
+        }
+        return out.toString()
     }
 
     /** xterm 修饰参数；1 表示"无修饰"。 */
@@ -131,13 +238,13 @@ object KeySeq {
     fun ctrlChar(c: Char): Char? = when (c) {
         in 'a'..'z' -> (c.code - 96).toChar()
         in 'A'..'Z' -> (c.code - 64).toChar()
-        ' ', '@' -> '\u0000'
-        '[' -> '\u001b'
-        '\\' -> '\u001c'
-        ']' -> '\u001d'
-        '^' -> '\u001e'
-        '_' -> '\u001f'
-        '?' -> '\u007f'
+        ' ', '@', '2' -> '\u0000'
+        '[', '3' -> '\u001b'
+        '\\', '4' -> '\u001c'
+        ']', '5' -> '\u001d'
+        '^', '~', '6' -> '\u001e'
+        '_', '/', '-', '7' -> '\u001f'
+        '?', '8' -> '\u007f'
         else -> null
     }
 }
