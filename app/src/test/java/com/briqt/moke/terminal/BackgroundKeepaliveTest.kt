@@ -9,20 +9,6 @@ import org.junit.Test
 class BackgroundKeepaliveTest {
 
     @Test
-    fun `singleLiveSessionId returns session id only when exactly one live session exists`() {
-        assertNull(BackgroundKeepalive.singleLiveSessionId(emptyList()))
-        assertEquals(
-            "s1",
-            BackgroundKeepalive.singleLiveSessionId(listOf(LiveSessionInfo("s1", "prod"))),
-        )
-        assertNull(
-            BackgroundKeepalive.singleLiveSessionId(
-                listOf(LiveSessionInfo("s1", "prod"), LiveSessionInfo("s2", "staging")),
-            ),
-        )
-    }
-
-    @Test
     fun `resolveOpenSessionTarget prefers valid requested session then single live session over dead scrollback`() {
         assertEquals(
             "s2",
@@ -76,29 +62,168 @@ class BackgroundKeepaliveTest {
     }
 
     @Test
-    fun `liveSessionSummary truncates overly long individual titles when multiple sessions are shown`() {
-        assertEquals("", BackgroundKeepalive.liveSessionSummary(emptyList()))
-        assertEquals("prod", BackgroundKeepalive.liveSessionSummary(listOf(" prod ", "")))
-        assertEquals("prod, staging", BackgroundKeepalive.liveSessionSummary(listOf("prod", "staging")))
-        assertEquals(
-            "prod, staging…",
-            BackgroundKeepalive.liveSessionSummary(listOf("prod", "staging", "db")),
+    fun `effectiveTerminalAlertsChecked and decideAlertToggle enforce permission and channel readiness`() {
+        assertTrue(
+            BackgroundKeepalive.effectiveTerminalAlertsChecked(
+                prefEnabled = true,
+                appNotificationsAllowed = true,
+                alertChannelEnabled = true,
+            ),
+        )
+        assertFalse(
+            BackgroundKeepalive.effectiveTerminalAlertsChecked(
+                prefEnabled = true,
+                appNotificationsAllowed = false,
+                alertChannelEnabled = true,
+            ),
+        )
+        assertFalse(
+            BackgroundKeepalive.effectiveTerminalAlertsChecked(
+                prefEnabled = true,
+                appNotificationsAllowed = true,
+                alertChannelEnabled = false,
+            ),
         )
 
-        val longFirst = "build-server:/srv/workspace/very-long-project-directory-name"
-        val summary = BackgroundKeepalive.liveSessionSummary(listOf(longFirst, "db-primary"))
-        assertEquals("build-server:/srv/worksp…, db-primary", summary)
+        assertEquals(
+            AlertToggleAction.DISABLE,
+            BackgroundKeepalive.decideAlertToggle(
+                wantChecked = false,
+                permissionGranted = false,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = false,
+            ),
+        )
+        assertEquals(
+            AlertToggleAction.REQUEST_PERMISSION,
+            BackgroundKeepalive.decideAlertToggle(
+                wantChecked = true,
+                permissionGranted = false,
+                systemNotificationsEnabled = true,
+                alertChannelEnabled = true,
+            ),
+        )
+        assertEquals(
+            AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS,
+            BackgroundKeepalive.decideAlertToggle(
+                wantChecked = true,
+                permissionGranted = true,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = true,
+            ),
+        )
+        assertEquals(
+            AlertToggleAction.OPEN_ALERT_CHANNEL_SETTINGS,
+            BackgroundKeepalive.decideAlertToggle(
+                wantChecked = true,
+                permissionGranted = true,
+                systemNotificationsEnabled = true,
+                alertChannelEnabled = false,
+            ),
+        )
+        assertEquals(
+            AlertToggleAction.ENABLE,
+            BackgroundKeepalive.decideAlertToggle(
+                wantChecked = true,
+                permissionGranted = true,
+                systemNotificationsEnabled = true,
+                alertChannelEnabled = true,
+            ),
+        )
     }
 
     @Test
-    fun `formatMultiSessionNotification strips trailing separator when all titles are blank`() {
+    fun `decideAlertPermissionResult handles user denial fast auto-reject and slow cold-start USER_FIXED block`() {
+        // Granted with everything ready -> enable directly.
         assertEquals(
-            "2 active · prod, db",
-            BackgroundKeepalive.formatMultiSessionNotification(2, listOf("prod", "db")) { n, s -> "$n active · $s" },
+            AlertToggleAction.ENABLE,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = true,
+                systemNotificationsEnabled = true,
+                alertChannelEnabled = true,
+                wasRationaleBefore = false,
+                isRationaleAfter = false,
+                rationaleEverSeen = false,
+                elapsedMs = 800L,
+            ),
         )
+        // Granted at runtime permission layer, but master app notifications are turned off in Settings.
         assertEquals(
-            "2 active",
-            BackgroundKeepalive.formatMultiSessionNotification(2, listOf(" ", "")) { n, s -> "$n active · $s" },
+            AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = true,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = true,
+                wasRationaleBefore = false,
+                isRationaleAfter = false,
+                rationaleEverSeen = false,
+                elapsedMs = 500L,
+            ),
+        )
+        // Granted, but alert channel was muted -> open channel settings without prematurely enabling pref.
+        assertEquals(
+            AlertToggleAction.OPEN_ALERT_CHANNEL_SETTINGS,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = true,
+                systemNotificationsEnabled = true,
+                alertChannelEnabled = false,
+                wasRationaleBefore = false,
+                isRationaleAfter = false,
+                rationaleEverSeen = false,
+                elapsedMs = 500L,
+            ),
+        )
+        // User intentionally tapped "Don't allow" on first prompt (rationale becomes true after).
+        assertEquals(
+            AlertToggleAction.DISABLE,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = false,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = false,
+                wasRationaleBefore = false,
+                isRationaleAfter = true,
+                rationaleEverSeen = false,
+                elapsedMs = 900L,
+            ),
+        )
+        // User intentionally tapped "Don't allow" on second prompt (rationale was true before).
+        assertEquals(
+            AlertToggleAction.DISABLE,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = false,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = false,
+                wasRationaleBefore = true,
+                isRationaleAfter = false,
+                rationaleEverSeen = true,
+                elapsedMs = 1_200L,
+            ),
+        )
+        // Fast silent OS auto-rejection (<350ms, rationale false before & after) -> open app notification settings.
+        assertEquals(
+            AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = false,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = false,
+                wasRationaleBefore = false,
+                isRationaleAfter = false,
+                rationaleEverSeen = false,
+                elapsedMs = 45L,
+            ),
+        )
+        // Slow cold-start permissioncontroller on USER_FIXED (elapsedMs = 800ms > 350ms, rationaleEverSeen = true) -> open settings!
+        assertEquals(
+            AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS,
+            BackgroundKeepalive.decideAlertPermissionResult(
+                granted = false,
+                systemNotificationsEnabled = false,
+                alertChannelEnabled = false,
+                wasRationaleBefore = false,
+                isRationaleAfter = false,
+                rationaleEverSeen = true,
+                elapsedMs = 800L,
+            ),
         )
     }
 

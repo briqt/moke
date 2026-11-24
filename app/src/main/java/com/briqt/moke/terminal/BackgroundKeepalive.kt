@@ -1,23 +1,33 @@
 package com.briqt.moke.terminal
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ActivityNotFoundException
+import android.app.NotificationManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-
-data class LiveSessionInfo(
-    val id: String,
-    val title: String,
-)
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 
 enum class FgsUpdateAction {
     NONE,
     NOTIFY,
     STOP_FOREGROUND,
+}
+
+enum class AlertToggleAction {
+    ENABLE,
+    DISABLE,
+    REQUEST_PERMISSION,
+    OPEN_APP_NOTIFICATION_SETTINGS,
+    OPEN_ALERT_CHANNEL_SETTINGS,
 }
 
 /**
@@ -74,7 +84,9 @@ class ForegroundServiceState {
 object BackgroundKeepalive {
 
     const val RESUME_THAW_GRACE_MS = 2_500L
-    const val DEFAULT_MAX_SUMMARY_TITLE_CODE_POINTS = 24
+    const val SILENT_PERMISSION_DENY_THRESHOLD_MS = 350L
+    private const val PERM_PREFS = "moke_perm_state"
+    private const val KEY_NOTIF_RATIONALE_SEEN = "notif_rationale_seen"
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean = runCatching {
         val pm = context.getSystemService(PowerManager::class.java)
@@ -99,22 +111,136 @@ object BackgroundKeepalive {
         }
     }
 
+    fun isPostNotificationsPermissionGranted(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    fun areAppNotificationsAllowed(context: Context): Boolean = runCatching {
+        isPostNotificationsPermissionGranted(context) &&
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }.getOrDefault(false)
+
+    fun isSessionNotificationChannelEnabled(context: Context): Boolean = runCatching {
+        if (!areAppNotificationsAllowed(context)) return false
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = nm.getNotificationChannel(MokeSessionService.CHANNEL_ID) ?: run {
+            MokeSessionService.ensureChannel(context)
+            nm.getNotificationChannel(MokeSessionService.CHANNEL_ID)
+        }
+        (channel?.importance ?: NotificationManager.IMPORTANCE_LOW) != NotificationManager.IMPORTANCE_NONE
+    }.getOrDefault(false)
+
+    fun isAlertNotificationChannelEnabled(context: Context): Boolean = runCatching {
+        if (!areAppNotificationsAllowed(context)) return false
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = nm.getNotificationChannel(TerminalAlerts.CHANNEL_ID) ?: run {
+            TerminalAlerts.ensureChannel(context)
+            nm.getNotificationChannel(TerminalAlerts.CHANNEL_ID)
+        }
+        (channel?.importance ?: NotificationManager.IMPORTANCE_HIGH) != NotificationManager.IMPORTANCE_NONE
+    }.getOrDefault(false)
+
+    fun wasNotifRationaleEverSeen(context: Context): Boolean = runCatching {
+        context.getSharedPreferences(PERM_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_NOTIF_RATIONALE_SEEN, false)
+    }.getOrDefault(false)
+
+    fun recordNotifRationaleIfSeen(context: Context, seenNow: Boolean) {
+        if (!seenNow) return
+        runCatching {
+            context.getSharedPreferences(PERM_PREFS, Context.MODE_PRIVATE).edit {
+                putBoolean(KEY_NOTIF_RATIONALE_SEEN, true)
+            }
+        }
+    }
+
+    fun openAppNotificationSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        if (!startSettingsIntent(context, intent)) {
+            openAppDetailsSettings(context)
+        }
+    }
+
+    fun openSessionNotificationChannelSettings(context: Context) {
+        runCatching { MokeSessionService.ensureChannel(context) }
+        openChannelSettings(context, MokeSessionService.CHANNEL_ID)
+    }
+
+    fun openAlertNotificationChannelSettings(context: Context) {
+        runCatching { TerminalAlerts.ensureChannel(context) }
+        openChannelSettings(context, TerminalAlerts.CHANNEL_ID)
+    }
+
+    private fun openChannelSettings(context: Context, channelId: String) {
+        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+        if (!startSettingsIntent(context, intent)) {
+            openAppNotificationSettings(context)
+        }
+    }
+
+    tailrec fun findActivity(context: Context?): Activity? = when (context) {
+        is Activity -> context
+        is ContextWrapper -> findActivity(context.baseContext)
+        else -> null
+    }
+
     private fun startSettingsIntent(context: Context, intent: Intent): Boolean {
-        if (context !is Activity) {
+        if (findActivity(context) == null) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return try {
             context.startActivity(intent)
             true
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (_: SecurityException) {
+        } catch (_: RuntimeException) {
             false
         }
     }
 
-    fun singleLiveSessionId(liveSessions: List<LiveSessionInfo>): String? =
-        liveSessions.singleOrNull()?.id
+    fun effectiveTerminalAlertsChecked(
+        prefEnabled: Boolean,
+        appNotificationsAllowed: Boolean,
+        alertChannelEnabled: Boolean,
+    ): Boolean = prefEnabled && appNotificationsAllowed && alertChannelEnabled
+
+    fun decideAlertToggle(
+        wantChecked: Boolean,
+        permissionGranted: Boolean,
+        systemNotificationsEnabled: Boolean,
+        alertChannelEnabled: Boolean,
+    ): AlertToggleAction {
+        if (!wantChecked) return AlertToggleAction.DISABLE
+        if (!permissionGranted) return AlertToggleAction.REQUEST_PERMISSION
+        if (!systemNotificationsEnabled) return AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS
+        if (!alertChannelEnabled) return AlertToggleAction.OPEN_ALERT_CHANNEL_SETTINGS
+        return AlertToggleAction.ENABLE
+    }
+
+    fun decideAlertPermissionResult(
+        granted: Boolean,
+        systemNotificationsEnabled: Boolean,
+        alertChannelEnabled: Boolean,
+        wasRationaleBefore: Boolean,
+        isRationaleAfter: Boolean,
+        rationaleEverSeen: Boolean,
+        elapsedMs: Long,
+    ): AlertToggleAction {
+        if (granted) {
+            if (!systemNotificationsEnabled) return AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS
+            if (!alertChannelEnabled) return AlertToggleAction.OPEN_ALERT_CHANNEL_SETTINGS
+            return AlertToggleAction.ENABLE
+        }
+        val permanentlyBlocked = !wasRationaleBefore && !isRationaleAfter &&
+            (rationaleEverSeen || elapsedMs in 0L until SILENT_PERMISSION_DENY_THRESHOLD_MS)
+        return if (permanentlyBlocked) {
+            AlertToggleAction.OPEN_APP_NOTIFICATION_SETTINGS
+        } else {
+            AlertToggleAction.DISABLE
+        }
+    }
 
     fun resolveOpenSessionTarget(
         requestedSessionId: String?,
@@ -123,38 +249,6 @@ object BackgroundKeepalive {
     ): String? = requestedSessionId?.takeIf { it in allSessionIds }
         ?: liveSessionIds.singleOrNull()
         ?: allSessionIds.singleOrNull()
-
-    fun liveSessionSummary(
-        titles: List<String>,
-        maxShown: Int = 2,
-        maxTitleCodePoints: Int = DEFAULT_MAX_SUMMARY_TITLE_CODE_POINTS,
-    ): String {
-        val cleaned = titles.map { it.trim() }.filter { it.isNotEmpty() }
-        if (cleaned.isEmpty() || maxShown <= 0) return ""
-        val formatted = if (cleaned.size >= 2 && maxTitleCodePoints > 0) {
-            cleaned.take(maxShown).map { truncateCodePoints(it, maxTitleCodePoints) }
-        } else {
-            cleaned.take(maxShown)
-        }
-        val shown = formatted.joinToString(", ")
-        return if (cleaned.size > maxShown) "$shown…" else shown
-    }
-
-    fun formatMultiSessionNotification(
-        count: Int,
-        titles: List<String>,
-        formatSummary: (Int, String) -> String,
-    ): String {
-        val summary = liveSessionSummary(titles)
-        if (summary.isNotEmpty()) return formatSummary(count, summary)
-        return formatSummary(count, "").trimEnd(' ', '·')
-    }
-
-    private fun truncateCodePoints(text: String, maxCodePoints: Int): String {
-        if (text.codePointCount(0, text.length) <= maxCodePoints) return text
-        val endIndex = text.offsetByCodePoints(0, maxCodePoints)
-        return text.substring(0, endIndex).trimEnd() + "…"
-    }
 
     fun shouldMarkEndedInBackground(
         dataReady: Boolean,

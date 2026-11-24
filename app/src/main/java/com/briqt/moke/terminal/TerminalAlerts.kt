@@ -54,7 +54,7 @@ object TerminalAlerts {
     /** 当前正在看的会话（终端页显示时设置，离开时清空）。 */
     @Volatile var visibleSessionId: String? = null
 
-    private const val CHANNEL_ID = "moke_alerts"
+    internal const val CHANNEL_ID = "moke_alerts"
 
     /** 同一会话两次提醒的最小间隔：程序连响几下只算一次，不刷屏。 */
     private const val MIN_INTERVAL_MS = 5_000L
@@ -80,6 +80,10 @@ object TerminalAlerts {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         ensureChannel(context)
+        val sysNm = context.getSystemService(NotificationManager::class.java)
+        if ((sysNm?.getNotificationChannel(CHANNEL_ID)?.importance
+                ?: NotificationManager.IMPORTANCE_HIGH) == NotificationManager.IMPORTANCE_NONE
+        ) return
         val headline = title?.takeIf { it.isNotBlank() }
         val message = body?.takeIf { it.isNotBlank() }
         val intent = Intent(context, MainActivity::class.java)
@@ -125,12 +129,13 @@ object TerminalAlerts {
     /** 每个会话一条通知：新的提醒覆盖旧的。避开前台服务通知所用的 id。 */
     private fun notificationId(sessionId: String): Int = 0x4D4B0000 or (sessionId.hashCode() and 0xFFFF)
 
-    private fun ensureChannel(context: Context) {
+    internal fun ensureChannel(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
         val ch = NotificationChannel(
             CHANNEL_ID,
             context.localized(R.string.alert_channel_name),
             NotificationManager.IMPORTANCE_HIGH,
         ).apply { description = "" }
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+        nm.createNotificationChannel(ch)
     }
 }

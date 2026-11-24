@@ -1,23 +1,18 @@
 package com.briqt.moke
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.data.ThemeMode
 import com.briqt.moke.terminal.MokeSessionService
@@ -28,31 +23,8 @@ import com.briqt.moke.ui.theme.MokeTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val notifPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒绝也不影响会话，仅无常驻通知 */ }
-
-    private var notifPermissionAsked = false
-
     // 与 setContent 里 viewModel() 拿到的是同一个实例（同一 ViewModelStore）。
     private val vm: MokeViewModel by viewModels()
-
-    /**
-     * Android 13+ 需授权才会显示后台保活通知（拒绝仅影响通知，不影响会话）。
-     *
-     * **等到真的开了第一个会话再问**：冷启动就弹权限窗时，用户还没连过任何主机，无从判断这个
-     * 权限是干什么用的；而这条通知只在有会话（前台服务）时才存在。
-     */
-    private fun requestNotifPermissionOnce() {
-        if (notifPermissionAsked) return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        notifPermissionAsked = true
-        notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
 
     // 应用内语言：按所选语言包裹 context（切换语言后 recreate() 重新走这里）。
     override fun attachBaseContext(newBase: Context) {
@@ -81,11 +53,6 @@ class MainActivity : ComponentActivity() {
             }
             // 把解析好的明暗回灌 VM：终端配色的「随明暗联动」据此选用哪一套。
             LaunchedEffect(dark) { vm.setAppIsDark(dark) }
-            // 开出第一个活动会话时才问后台通知权限（见 requestNotifPermissionOnce）。
-            val hasSession by vm.sessions.sessions.collectAsState()
-            LaunchedEffect(hasSession) {
-                if (hasSession.any { it.keepAliveEligible && it.alive.value }) requestNotifPermissionOnce()
-            }
             // 系统栏图标明暗随主题：浅色主题下必须切 light 样式，否则白底上的白图标看不见。
             // 运行中切换系统深浅色时，系统处理配置变化会在我们之后再按窗口主题重置一次栏样式（时序竞争，
             // 实测时有时无），所以稍后再补设一次，以最后一次为准。

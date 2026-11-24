@@ -8,14 +8,19 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.briqt.moke.LocaleManager
 import com.briqt.moke.MainActivity
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
@@ -34,7 +39,8 @@ import kotlinx.coroutines.flow.onEach
 
 /**
  * 前台服务：只要还有需要后台保活的活动会话（`keepAliveEligible && alive`）就常驻，借前台优先级与唤醒锁
- * 让退后台/关屏时进程、CPU 定时器与 Wi-Fi 收发不被冻结。活动会话归零时按最新 `startId` 安全停服并释放锁。
+ * 让退后台/关屏时进程、CPU 定时器与 Wi-Fi 收发不被冻结。单次运行只提交一次静态低打扰前台通知（仅在通知从不可投递变为
+ * 可投递、或通知仍在栏内且界面语言切换时同步刷新，绝不复活用户划掉的通知），活动会话归零时按最新 `startId` 安全停服并释放锁。
  */
 class MokeSessionService : Service() {
 
@@ -42,41 +48,39 @@ class MokeSessionService : Service() {
     private val fgsState = ForegroundServiceState()
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var lastChannelDeliverable = false
+    private var lastLangTag = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
-        ensureChannel()
+        ensureChannel(this)
         initLocks()
         val sessions = (application as MokeApplication).sessions
         sessions.sessions
             .flatMapLatest { list ->
                 val eligible = list.filter { it.keepAliveEligible }
                 if (eligible.isEmpty()) {
-                    flowOf(emptyList())
+                    flowOf(false)
                 } else {
-                    combine(
-                        eligible.map { ts ->
-                            combine(ts.alive, ts.displayTitle) { isAlive, title ->
-                                if (isAlive) LiveSessionInfo(ts.id, title) else null
-                            }
-                        }
-                    ) { items -> items.filterNotNull() }
+                    combine(eligible.map { it.alive }) { aliveFlags ->
+                        aliveFlags.any { it }
+                    }
                 }
             }
             .distinctUntilChanged()
-            .onEach { live ->
-                if (live.isEmpty()) {
+            .onEach { hasLive ->
+                if (!hasLive) {
                     releaseLocks()
                 }
-                when (fgsState.onWorkChanged(live.isNotEmpty(), ::stopSelfResult)) {
-                    FgsUpdateAction.NOTIFY -> {
-                        acquireLocks()
-                        notificationManager().notify(NOTIF_ID, buildNotification(live))
+                when (fgsState.onWorkChanged(hasLive, ::stopSelfResult)) {
+                    FgsUpdateAction.NOTIFY -> acquireLocks()
+                    FgsUpdateAction.STOP_FOREGROUND -> {
+                        clearForegroundRunning()
+                        stopForegroundCompat()
                     }
-                    FgsUpdateAction.STOP_FOREGROUND -> stopForegroundCompat()
                     FgsUpdateAction.NONE -> Unit
                 }
             }
@@ -84,27 +88,39 @@ class MokeSessionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val live = currentLiveSessions()
+        startInFlightUntilElapsedMs = 0L
+        val hasLive = hasLiveSessions(application)
         val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
             0
         }
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(live), fgsType)
-        val stopped = fgsState.onStartCommand(startId, live.isNotEmpty(), ::stopSelfResult)
-        if (live.isEmpty()) {
+        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), fgsType)
+        val stopped = fgsState.onStartCommand(startId, hasLive, ::stopSelfResult)
+        if (!hasLive) {
             releaseLocks()
             if (stopped) {
+                clearForegroundRunning()
                 stopForegroundCompat()
             }
         } else if (fgsState.started) {
+            lastChannelDeliverable = BackgroundKeepalive.isSessionNotificationChannelEnabled(this)
+            lastLangTag = currentLangKey(this)
+            markForegroundRunning()
             acquireLocks()
         }
         // 无会话可续时不自动重启（连接无法凭空恢复）。
         return START_NOT_STICKY
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        syncOngoingNotificationOnMain()
+    }
+
     override fun onTimeout(startId: Int, fgsType: Int) {
+        startInFlightUntilElapsedMs = 0L
+        clearForegroundRunning()
         fgsState.onStop()
         scope.cancel()
         releaseLocks()
@@ -113,16 +129,25 @@ class MokeSessionService : Service() {
     }
 
     override fun onDestroy() {
+        clearForegroundRunning()
         fgsState.onStop()
         scope.cancel()
         releaseLocks()
         super.onDestroy()
     }
 
-    private fun currentLiveSessions(): List<LiveSessionInfo> =
-        (application as MokeApplication).sessions.sessions.value
-            .filter { it.keepAliveEligible && it.alive.value }
-            .map { LiveSessionInfo(it.id, it.displayTitle.value) }
+    private fun markForegroundRunning() {
+        activeInstance = this
+        isForegroundRunning = true
+    }
+
+    private fun clearForegroundRunning() {
+        if (activeInstance === this || activeInstance == null) {
+            activeInstance = null
+            isForegroundRunning = false
+            startInFlightUntilElapsedMs = 0L
+        }
+    }
 
     private fun initLocks() {
         runCatching {
@@ -164,52 +189,30 @@ class MokeSessionService : Service() {
         }
     }
 
-    private fun buildNotification(live: List<LiveSessionInfo>) =
+    private fun buildNotification() =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Moke")
-            .setContentText(
-                when {
-                    live.isEmpty() -> localized(R.string.notif_channel_desc)
-                    live.size == 1 -> localized(R.string.notif_session_single, live[0].title)
-                    else -> BackgroundKeepalive.formatMultiSessionNotification(
-                        count = live.size,
-                        titles = live.map { it.title },
-                    ) { count, summary ->
-                        localized(R.string.notif_sessions_summary, count, summary)
-                    }
-                }
-            )
+            .setContentTitle(localized(R.string.app_name))
+            .setContentText(localized(R.string.notif_channel_desc))
             .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
             .setShowWhen(false)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(
                 PendingIntent.getActivity(
                     this,
                     0,
                     Intent(this, MainActivity::class.java)
                         .setAction(MainActivity.ACTION_OPEN_SESSIONS)
-                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .apply {
-                            BackgroundKeepalive.singleLiveSessionId(live)?.let { sessionId ->
-                                putExtra(MainActivity.EXTRA_SESSION_ID, sessionId)
-                            }
-                        },
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             )
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
-
-    private fun ensureChannel() {
-        val ch = NotificationChannel(CHANNEL_ID, localized(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
-            description = localized(R.string.notif_channel_desc)
-            setShowBadge(false)
-        }
-        notificationManager().createNotificationChannel(ch)
-    }
-
-    private fun notificationManager() =
-        getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
     private fun stopForegroundCompat() {
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -217,27 +220,105 @@ class MokeSessionService : Service() {
 
     companion object {
         private const val TAG = "MokeSessionService"
-        private const val CHANNEL_ID = "moke_sessions"
+        internal const val CHANNEL_ID = "moke_sessions"
         private const val NOTIF_ID = 1001
         private const val WAKELOCK_TAG = "moke:session-keepalive"
         private const val WIFILOCK_TAG = "moke:session-wifi"
+        private const val START_IN_FLIGHT_WINDOW_MS = 4_000L
 
-        fun ensureRunning(context: Context): Boolean = try {
-            val appContext = context.applicationContext ?: context
-            val hasLive = (appContext as? MokeApplication)
+        @Volatile private var isForegroundRunning = false
+        @Volatile private var startInFlightUntilElapsedMs = 0L
+        @Volatile private var activeInstance: MokeSessionService? = null
+
+        internal fun ensureChannel(context: Context) {
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                context.localized(R.string.notif_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = context.localized(R.string.notif_channel_desc)
+                setShowBadge(false)
+            }
+            nm.createNotificationChannel(ch)
+        }
+
+        private fun currentLangKey(context: Context): String {
+            val tag = LocaleManager.currentTag(context)
+            return tag.ifEmpty { context.resources.configuration.locales[0]?.toLanguageTag().orEmpty() }
+        }
+
+        private fun hasLiveSessions(context: Context): Boolean =
+            (context.applicationContext as? MokeApplication)
                 ?.sessions
                 ?.sessions
                 ?.value
                 ?.any { it.keepAliveEligible && it.alive.value } == true
-            if (!hasLive) {
-                false
+
+        internal fun syncOngoingNotificationIfRunning() {
+            val mainLooper = runCatching { Looper.getMainLooper() }.getOrNull()
+            if (mainLooper != null && Looper.myLooper() != mainLooper) {
+                Handler(mainLooper).post { syncOngoingNotificationOnMain() }
             } else {
-                ContextCompat.startForegroundService(appContext, Intent(appContext, MokeSessionService::class.java))
-                true
+                syncOngoingNotificationOnMain()
             }
-        } catch (e: Exception) {
-            runCatching { Log.w(TAG, "Failed to start foreground service", e) }
-            false
+        }
+
+        private fun syncOngoingNotificationOnMain() {
+            val service = activeInstance ?: return
+            if (!isForegroundRunning || !service.fgsState.started || !hasLiveSessions(service)) return
+            runCatching {
+                val nowDeliverable = BackgroundKeepalive.isSessionNotificationChannelEnabled(service)
+                val nowLangTag = currentLangKey(service)
+                val nm = service.getSystemService(NotificationManager::class.java) ?: return
+                if (!service.lastChannelDeliverable && nowDeliverable) {
+                    ensureChannel(service)
+                    nm.notify(NOTIF_ID, service.buildNotification())
+                } else if (nowDeliverable && service.lastLangTag != nowLangTag) {
+                    ensureChannel(service)
+                    if (nm.activeNotifications.any { it.id == NOTIF_ID }) {
+                        nm.notify(NOTIF_ID, service.buildNotification())
+                    }
+                }
+                service.lastChannelDeliverable = nowDeliverable
+                service.lastLangTag = nowLangTag
+            }
+        }
+
+        fun ensureRunning(context: Context) {
+            try {
+                val appContext = context.applicationContext ?: context
+                val mainLooper = runCatching { Looper.getMainLooper() }.getOrNull()
+                if (mainLooper != null && Looper.myLooper() != mainLooper) {
+                    if (!hasLiveSessions(appContext)) return
+                    if (!isForegroundRunning && SystemClock.elapsedRealtime() >= startInFlightUntilElapsedMs) {
+                        Handler(mainLooper).post { ensureRunningOnMain(appContext) }
+                    } else if (isForegroundRunning) {
+                        Handler(mainLooper).post { syncOngoingNotificationOnMain() }
+                    }
+                } else {
+                    ensureRunningOnMain(appContext)
+                }
+            } catch (e: Exception) {
+                runCatching { Log.w(TAG, "Failed to start foreground service", e) }
+            }
+        }
+
+        private fun ensureRunningOnMain(appContext: Context) {
+            try {
+                if (!hasLiveSessions(appContext)) return
+                if (isForegroundRunning) {
+                    syncOngoingNotificationOnMain()
+                    return
+                }
+                val now = SystemClock.elapsedRealtime()
+                if (now < startInFlightUntilElapsedMs) return
+                ContextCompat.startForegroundService(appContext, Intent(appContext, MokeSessionService::class.java))
+                startInFlightUntilElapsedMs = now + START_IN_FLIGHT_WINDOW_MS
+            } catch (e: Exception) {
+                startInFlightUntilElapsedMs = 0L
+                runCatching { Log.w(TAG, "Failed to start foreground service", e) }
+            }
         }
     }
 }

@@ -68,13 +68,11 @@ import com.briqt.moke.ui.theme.extra
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.briqt.moke.terminal.BackgroundKeepalive
@@ -653,34 +651,37 @@ fun SliderSettingRow(
 }
 
 /**
- * Observes battery-optimization whitelist status across system settings/dialog returns, including
- * short delayed re-checks (`250ms` and `800ms`) for asynchronous PowerManager state propagation.
+ * Observes system permission/channel/whitelist state across settings/dialog returns, including
+ * short delayed re-checks (`250ms` and `800ms`) for asynchronous system service propagation.
  */
 @Composable
-fun rememberIgnoringBatteryOptimizations(extraTrigger: Any? = Unit): Boolean {
+fun <T> rememberSystemState(extraTrigger: Any? = Unit, query: (android.content.Context) -> T): T {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var ignoring by remember(context) {
-        mutableStateOf(BackgroundKeepalive.isIgnoringBatteryOptimizations(context))
+    val currentQuery by androidx.compose.runtime.rememberUpdatedState(query)
+    var state by remember(context) {
+        mutableStateOf(currentQuery(context))
     }
-    DisposableEffect(lifecycleOwner, context) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    val skipFirstImmediate = remember(context) { booleanArrayOf(true) }
     LaunchedEffect(lifecycleOwner, context, extraTrigger) {
-        ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+        if (!skipFirstImmediate[0]) {
+            state = currentQuery(context)
+        }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            if (skipFirstImmediate[0]) {
+                skipFirstImmediate[0] = false
+            } else {
+                state = currentQuery(context)
+            }
             delay(250)
-            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            state = currentQuery(context)
             delay(550)
-            ignoring = BackgroundKeepalive.isIgnoringBatteryOptimizations(context)
+            state = currentQuery(context)
         }
     }
-    return ignoring
+    return state
 }
+
+@Composable
+fun rememberIgnoringBatteryOptimizations(extraTrigger: Any? = Unit): Boolean =
+    rememberSystemState(extraTrigger, BackgroundKeepalive::isIgnoringBatteryOptimizations)
