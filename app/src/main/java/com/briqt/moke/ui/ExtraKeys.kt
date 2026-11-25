@@ -117,6 +117,27 @@ import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.briqt.moke.ui.theme.extra
 
+/** 上滑副动作：可发送按键序列或触发界面动作（更多面板 / 文本输入条）。 */
+sealed interface ExtraKeySecondary {
+    val label: String
+    val icon: ExtraKeyIcon?
+    val microHint: String
+
+    data class SendKey(
+        override val label: String,
+        val key: KeyId,
+        override val icon: ExtraKeyIcon? = null,
+        override val microHint: String = "",
+    ) : ExtraKeySecondary
+
+    data class TriggerAction(
+        val id: String,
+        override val label: String = "",
+        override val icon: ExtraKeyIcon? = null,
+        override val microHint: String = "",
+    ) : ExtraKeySecondary
+}
+
 /** 附加键：普通按键（字节由 `KeySeq` 按当前修饰统一编码）/ 修饰键 / 动作键。 */
 sealed interface ExtraKey {
     val label: String
@@ -126,7 +147,7 @@ sealed interface ExtraKey {
         override val label: String,
         val key: KeyId,
         val icon: ExtraKeyIcon? = null,
-        val secondary: Key? = null,
+        val secondary: ExtraKeySecondary? = null,
         val microHint: String = "",
     ) : ExtraKey
 
@@ -135,17 +156,26 @@ sealed interface ExtraKey {
         override val label: String,
         val kind: ModKind,
         val icon: ExtraKeyIcon? = null,
-        val secondary: Key? = null,
+        val secondary: ExtraKeySecondary? = null,
     ) : ExtraKey
 
     /**
-     * 动作键（[id] 交给上层处理）。
+     * 动作键（[id] 交给上层处理，支持自定义标签/图标覆盖与上滑副动作）。
      *
-     * 没有 label：这两个键的文案一定要本地化，渲染时按 [id] 取资源（见 KeyRow）。
+     * 默认 [label] 为空串：未覆盖时按 [id] 取本地化资源与默认图标（见 KeyRow）。
      */
-    data class Action(val id: String) : ExtraKey {
-        override val label: String get() = ""
-    }
+    data class Action(
+        val id: String,
+        override val label: String = "",
+        val icon: ExtraKeyIcon? = null,
+        val secondary: ExtraKeySecondary? = null,
+    ) : ExtraKey
+}
+
+internal fun ExtraKey.secondaryOrNull(): ExtraKeySecondary? = when (this) {
+    is ExtraKey.Key -> secondary
+    is ExtraKey.Mod -> secondary
+    is ExtraKey.Action -> secondary
 }
 
 fun ExtraKeyIcon.imageVector(): ImageVector = when (this) {
@@ -318,6 +348,7 @@ fun ExtraKeys(
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
+    onSecondaryAction: ((String) -> Unit)? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         CenteredItem(
@@ -339,6 +370,7 @@ fun ExtraKeys(
                         onToggleMod = onToggleMod,
                         onHoldMod = onHoldMod,
                         onAction = onAction,
+                        onSecondaryAction = onSecondaryAction,
                     )
                 }
             }
@@ -357,6 +389,7 @@ private fun KeyRow(
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
+    onSecondaryAction: ((String) -> Unit)? = null,
     slots: Int = 0,
 ) {
     val denseColumns = maxOf(row.size, slots) >= 8
@@ -365,37 +398,78 @@ private fun KeyRow(
             val state = if (key is ExtraKey.Mod) mods.state(key.kind) else ModState.Off
             val isComposer = key is ExtraKey.Action && key.id == ACTION_COMPOSER
             val isPanel = key is ExtraKey.Action && key.id == ACTION_PANEL
-            val label = when {
+            val defaultActionLabel = when {
                 isComposer -> stringResource(R.string.key_text)
                 isPanel -> stringResource(R.string.key_more)
+                else -> ""
+            }
+            val label = when (key) {
+                is ExtraKey.Action -> key.label.ifEmpty { defaultActionLabel }
                 else -> key.label
             }
-            val customIcon = when (key) {
+            val primaryIcon = when (key) {
                 is ExtraKey.Key -> key.icon?.imageVector()
                 is ExtraKey.Mod -> key.icon?.imageVector()
-                is ExtraKey.Action -> null
+                is ExtraKey.Action -> when {
+                    key.icon != null -> key.icon.imageVector()
+                    key.label.isNotEmpty() -> null
+                    isComposer -> Icons.Filled.EditNote
+                    isPanel -> if (panelOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp
+                    else -> null
+                }
             }
-            val secondaryKey = when (key) {
-                is ExtraKey.Key -> key.secondary
-                is ExtraKey.Mod -> key.secondary
-                is ExtraKey.Action -> null
+            val secondary = key.secondaryOrNull()
+            val secLabel: String?
+            val secIcon: ImageVector?
+            val secHint: String?
+            val secCallback: (() -> Unit)?
+            when (secondary) {
+                null -> {
+                    secLabel = null
+                    secIcon = null
+                    secHint = null
+                    secCallback = null
+                }
+                is ExtraKeySecondary.SendKey -> {
+                    secLabel = secondary.label
+                    secIcon = secondary.icon?.imageVector()
+                    secHint = secondary.microHint.ifEmpty { ExtraKeyLayout.takeVisualUnits(secondary.label, 3) }
+                    secCallback = { (onSecondaryKey ?: onKey)(secondary.key) }
+                }
+                is ExtraKeySecondary.TriggerAction -> {
+                    val secDefaultLabel = when (secondary.id) {
+                        ACTION_COMPOSER -> stringResource(R.string.key_text)
+                        ACTION_PANEL -> stringResource(R.string.key_more)
+                        else -> secondary.id
+                    }
+                    secLabel = secondary.label.ifEmpty { secDefaultLabel }
+                    secIcon = when {
+                        secondary.icon != null -> secondary.icon.imageVector()
+                        secondary.label.isNotEmpty() -> null
+                        secondary.id == ACTION_COMPOSER -> Icons.Filled.EditNote
+                        secondary.id == ACTION_PANEL -> if (panelOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp
+                        else -> null
+                    }
+                    secHint = if (secIcon != null) {
+                        null
+                    } else {
+                        secondary.microHint.ifEmpty { ExtraKeyLayout.takeVisualUnits(secLabel, 3) }
+                    }
+                    secCallback = { (onSecondaryAction ?: onAction)(secondary.id) }
+                }
             }
             val repeatable = key is ExtraKey.Key && KeySeq.isRepeatable(key.key)
             KeyCap(
                 label = label,
-                icon = when {
-                    isComposer -> Icons.Filled.EditNote
-                    isPanel -> if (panelOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp
-                    else -> customIcon
-                },
+                icon = primaryIcon,
                 active = state.active || (isPanel && panelOpen),
                 locked = state == ModState.Locked,
                 keyHeight = keyHeight,
                 denseColumns = denseColumns,
                 isRepeatable = repeatable,
-                secondaryLabel = secondaryKey?.label,
-                secondaryHint = secondaryKey?.let { it.microHint.ifEmpty { ExtraKeyLayout.takeVisualUnits(it.label, 3) } },
-                secondaryIcon = secondaryKey?.icon?.imageVector(),
+                secondaryLabel = secLabel,
+                secondaryHint = secHint,
+                secondaryIcon = secIcon,
                 modifier = Modifier.weight(1f),
                 onClick = {
                     when (key) {
@@ -409,9 +483,7 @@ private fun KeyRow(
                 } else {
                     null
                 },
-                onSecondary = secondaryKey?.let { sec ->
-                    { (onSecondaryKey ?: onKey)(sec.key) }
-                },
+                onSecondary = secCallback,
             )
         }
         repeat((slots - row.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
@@ -430,6 +502,7 @@ fun KeyboardPanel(
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
+    onAction: (String) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -482,7 +555,7 @@ fun KeyboardPanel(
                             onKey = onKey,
                             onToggleMod = onToggleMod,
                             onHoldMod = onHoldMod,
-                            onAction = {},
+                            onAction = onAction,
                             slots = if (perRow > 0) 0 else section.slots,
                         )
                     }

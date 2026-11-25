@@ -417,6 +417,34 @@ fun TerminalScreen(
             }
         }
     }
+    // 布局变更后若移走了「更多」面板触发位或修饰键，立即回收孤立状态防止隐式粘滞。
+    LaunchedEffect(ts.id, extraKeysLayout) {
+        val flat = extraKeyRows.flatten()
+        val hasPanelTrigger = flat.any { key ->
+            (key is ExtraKey.Action && key.id == ACTION_PANEL) ||
+                (key.secondaryOrNull() as? ExtraKeySecondary.TriggerAction)?.id == ACTION_PANEL
+        }
+        if (!hasPanelTrigger && panelOpen) {
+            panelOpen = false
+        }
+        val reachableMods = buildSet {
+            flat.filterIsInstance<ExtraKey.Mod>().forEach { add(it.kind) }
+            if (hasPanelTrigger) {
+                panelSections(extraKeysLayout).flatMap { it.rows.flatten() }
+                    .filterIsInstance<ExtraKey.Mod>()
+                    .forEach { add(it.kind) }
+            }
+        }
+        val cleaned = Modifiers(
+            ctrl = if (ModKind.Ctrl in reachableMods) mods.ctrl else ModState.Off,
+            alt = if (ModKind.Alt in reachableMods) mods.alt else ModState.Off,
+            shift = if (ModKind.Shift in reachableMods) mods.shift else ModState.Off,
+        )
+        if (cleaned != mods) {
+            mods = cleaned
+            syncMods(controller, cleaned)
+        }
+    }
     // 返回键先收起浮在终端上的东西，再离开终端页。
     BackHandler(enabled = tappedLink != null || panelOpen) {
         if (tappedLink != null) tappedLink = null else panelOpen = false
@@ -508,6 +536,12 @@ fun TerminalScreen(
                         onKey = { key -> mods = sendKey(ts, controller, mods, key) },
                         onToggleMod = { kind -> mods = applyMod(controller, mods, kind, hold = false) },
                         onHoldMod = { kind -> mods = applyMod(controller, mods, kind, hold = true) },
+                        onAction = { id ->
+                            if (id == ACTION_COMPOSER) {
+                                panelOpen = false
+                                showComposer = true
+                            }
+                        },
                         onDismiss = { panelOpen = false },
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
@@ -742,6 +776,7 @@ private fun KeyboardPanelOverlay(
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
     onHoldMod: (ModKind) -> Unit,
+    onAction: (String) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -758,6 +793,7 @@ private fun KeyboardPanelOverlay(
             onKey = onKey,
             onToggleMod = onToggleMod,
             onHoldMod = onHoldMod,
+            onAction = onAction,
             onDismiss = onDismiss,
         )
     }

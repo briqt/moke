@@ -19,13 +19,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -56,29 +56,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -86,7 +85,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
 import com.briqt.moke.R
 import com.briqt.moke.terminal.KeyId
@@ -115,9 +113,35 @@ private data class PreviewFeedback(
     val atMs: Long = 0L,
 )
 
+@Composable
+private fun ExtraKeySpec.localizedDefaultLabel(compactSymbols: Boolean): String = when {
+    this is ExtraKeySpec.Builtin && id == ACTION_PANEL -> stringResource(R.string.key_more)
+    this is ExtraKeySpec.Builtin && id == ACTION_COMPOSER -> stringResource(R.string.key_text)
+    else -> defaultLabel(compactSymbols)
+}
+
+@Composable
+private fun ExtraKeySpec.localizedEffectiveLabel(compactSymbols: Boolean): String {
+    val clean = ExtraKeyLayout.sanitizeCustomLabel(customLabel)
+    return if (clean.isNotEmpty()) clean else localizedDefaultLabel(compactSymbols)
+}
+
+private fun ExtraKeySpec.defaultActionIconOrNull(): ImageVector? = when {
+    this !is ExtraKeySpec.Builtin -> null
+    id == ACTION_PANEL -> Icons.Filled.KeyboardArrowUp
+    id == ACTION_COMPOSER -> Icons.Filled.EditNote
+    else -> null
+}
+
+private fun ExtraKeySpec.effectiveIcon(): ImageVector? {
+    customIcon?.let { return it.imageVector() }
+    if (ExtraKeyLayout.sanitizeCustomLabel(customLabel).isNotEmpty()) return null
+    return defaultActionIconOrNull()
+}
+
 /**
  * 「设置 → 终端与输入 → 底部快捷键」独立二级即时设置页：
- * 顶部 1:1 实时可按预览 + 双排槽位点选/长按拖拽互换 + 列数/键高/符号精简开关。
+ * 顶部 1:1 实时可按预览（固定高度零位移）+ 全列槽位点选/长按拖拽互换 + 列数/键高/符号精简开关。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -126,21 +150,38 @@ fun ExtraKeysSettingsScreen(
     onChange: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    val config = remember(stored) { ExtraKeyLayout.parseConfig(stored) }
+    var config by remember { mutableStateOf(ExtraKeyLayout.parseConfig(stored)) }
+    val pendingEncodedQueue = remember { ArrayDeque<String>() }
+
+    LaunchedEffect(stored) {
+        val matchIdx = pendingEncodedQueue.indexOf(stored)
+        if (matchIdx >= 0) {
+            repeat(matchIdx + 1) { pendingEncodedQueue.removeFirst() }
+        } else {
+            pendingEncodedQueue.clear()
+            val parsed = ExtraKeyLayout.parseConfig(stored)
+            if (parsed != config) config = parsed
+        }
+    }
+
     val currentConfig by rememberUpdatedState(config)
     val currentOnChange by rememberUpdatedState(onChange)
     var editingSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
 
-    LaunchedEffect(config.editableColumns) {
+    LaunchedEffect(config.columns) {
         val active = editingSlot
-        if (active != null && active.second >= config.editableColumns) {
+        if (active != null && active.second >= config.columns) {
             editingSlot = null
         }
     }
 
     fun applyConfig(next: ExtraKeyConfig) {
-        currentOnChange(ExtraKeyLayout.encodeConfig(next))
+        if (next == currentConfig) return
+        val encoded = ExtraKeyLayout.encodeConfig(next)
+        config = next
+        pendingEncodedQueue.addLast(encoded)
+        currentOnChange(encoded)
     }
 
     if (confirmReset) {
@@ -152,6 +193,8 @@ fun ExtraKeysSettingsScreen(
             onConfirm = {
                 confirmReset = false
                 editingSlot = null
+                config = ExtraKeyConfig.DEFAULT
+                pendingEncodedQueue.addLast("")
                 currentOnChange("")
             },
             onDismiss = { confirmReset = false },
@@ -264,7 +307,7 @@ fun ExtraKeysSettingsScreen(
     }
 
     val targetSlot = editingSlot
-    if (targetSlot != null && targetSlot.first in 0..1 && targetSlot.second in 0 until config.editableColumns) {
+    if (targetSlot != null && targetSlot.first in 0..1 && targetSlot.second in 0 until config.columns) {
         SlotEditorSheet(
             row = targetSlot.first,
             col = targetSlot.second,
@@ -296,7 +339,15 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
     var feedback by remember { mutableStateOf<PreviewFeedback?>(null) }
 
     LaunchedEffect(previewRows) {
-        val presentMods = previewRows.flatten().filterIsInstance<ExtraKey.Mod>().map { it.kind }.toSet()
+        val flat = previewRows.flatten()
+        val hasPanelTrigger = flat.any { key ->
+            (key is ExtraKey.Action && key.id == ACTION_PANEL) ||
+                (key.secondaryOrNull() as? ExtraKeySecondary.TriggerAction)?.id == ACTION_PANEL
+        }
+        if (!hasPanelTrigger && previewPanelOpen) {
+            previewPanelOpen = false
+        }
+        val presentMods = flat.filterIsInstance<ExtraKey.Mod>().map { it.kind }.toSet()
         val cleaned = Modifiers(
             ctrl = if (ModKind.Ctrl in presentMods) previewMods.ctrl else ModState.Off,
             alt = if (ModKind.Alt in presentMods) previewMods.alt else ModState.Off,
@@ -348,6 +399,27 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
         feedback = PreviewFeedback(text = text, baseText = text, atMs = SystemClock.uptimeMillis())
     }
 
+    fun recordAction(id: String, secondary: Boolean) {
+        val baseName = when (id) {
+            ACTION_PANEL -> {
+                previewPanelOpen = !previewPanelOpen
+                resources.getString(R.string.key_more)
+            }
+            ACTION_COMPOSER -> resources.getString(R.string.key_text)
+            else -> id
+        }
+        val text = if (secondary) resources.getString(R.string.extra_keys_preview_swipe, baseName) else baseName
+        feedback = PreviewFeedback(
+            text = text,
+            baseText = text,
+            isSecondary = secondary,
+            atMs = SystemClock.uptimeMillis(),
+        )
+    }
+
+    // 锁定最大预览键区高度（2×40dp + 间距 = 92dp），切换 28/34/40dp 档位时下方设置列表零位移。
+    val maxPreviewKeysHeight = (ExtraKeyHeight.COMFORTABLE.dp * 2 + 12).dp
+
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
             CenteredItem(
@@ -357,7 +429,8 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .height(28.dp)
+                        .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
@@ -365,6 +438,7 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
                         stringResource(R.string.extra_keys_preview_title),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                     )
                     Spacer(Modifier.width(12.dp))
                     val activeFeedback = feedback
@@ -379,9 +453,10 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
                     } else {
                         Text(
                             activeFeedback.text,
-                            fontFamily = MokeMono,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFamily = MokeMono,
+                                fontWeight = FontWeight.Medium,
+                            ),
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -389,28 +464,42 @@ private fun ExtraKeysLivePreview(config: ExtraKeyConfig) {
                     }
                 }
             }
-            ExtraKeys(
-                rows = previewRows,
-                mods = previewMods,
-                panelOpen = previewPanelOpen,
-                keyHeight = config.height,
-                onKey = { key -> recordKey(key, secondary = false) },
-                onSecondaryKey = { key -> recordKey(key, secondary = true) },
-                onToggleMod = { kind -> recordMod(kind, hold = false) },
-                onHoldMod = { kind -> recordMod(kind, hold = true) },
-                onAction = { id ->
-                    val actionText = when (id) {
-                        ACTION_PANEL -> {
-                            previewPanelOpen = !previewPanelOpen
-                            resources.getString(R.string.key_more)
-                        }
-                        ACTION_COMPOSER -> resources.getString(R.string.key_text)
-                        else -> id
-                    }
-                    feedback = PreviewFeedback(text = actionText, baseText = actionText, atMs = SystemClock.uptimeMillis())
-                },
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(maxPreviewKeysHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                ExtraKeys(
+                    rows = previewRows,
+                    mods = previewMods,
+                    panelOpen = previewPanelOpen,
+                    keyHeight = config.height,
+                    onKey = { key -> recordKey(key, secondary = false) },
+                    onSecondaryKey = { key -> recordKey(key, secondary = true) },
+                    onToggleMod = { kind -> recordMod(kind, hold = false) },
+                    onHoldMod = { kind -> recordMod(kind, hold = true) },
+                    onAction = { id -> recordAction(id, secondary = false) },
+                    onSecondaryAction = { id -> recordAction(id, secondary = true) },
+                )
+            }
         }
+    }
+}
+
+private class SlotGridLayoutHolder {
+    var gridCoords: LayoutCoordinates? = null
+    val cellCoords = HashMap<Pair<Int, Int>, LayoutCoordinates>()
+
+    fun snapshotRects(): Map<Pair<Int, Int>, Rect> {
+        val origin = gridCoords?.takeIf { it.isAttached } ?: return emptyMap()
+        val rects = HashMap<Pair<Int, Int>, Rect>(cellCoords.size)
+        for ((pos, cell) in cellCoords) {
+            if (cell.isAttached) {
+                rects[pos] = origin.localBoundingBoxOf(cell, clipBounds = false)
+            }
+        }
+        return rects
     }
 }
 
@@ -425,38 +514,37 @@ private fun EditableSlotGrid(
     val currentOnTap by rememberUpdatedState(onTapSlot)
     val currentOnSwap by rememberUpdatedState(onSwapSlots)
 
-    var gridOriginInRoot by remember { mutableStateOf(Offset.Zero) }
-    val cellRects = remember { mutableStateMapOf<Pair<Int, Int>, Rect>() }
+    val layoutHolder = remember { SlotGridLayoutHolder() }
     var draggingSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var hoverSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var dragTravel by remember { mutableFloatStateOf(0f) }
     val boundsMarginPx = with(density) { 20.dp.toPx() }
 
-    LaunchedEffect(config.editableColumns) {
-        cellRects.keys.removeAll { it.second >= config.editableColumns }
-        if (draggingSlot?.second?.let { it >= config.editableColumns } == true) {
+    LaunchedEffect(config.columns) {
+        layoutHolder.cellCoords.keys.removeAll { it.second >= config.columns }
+        if (draggingSlot?.second?.let { it >= config.columns } == true) {
             draggingSlot = null
             hoverSlot = null
             dragOffset = Offset.Zero
         }
     }
 
-    fun nearestTargetSlot(pointInGrid: Offset): Pair<Int, Int>? {
-        if (cellRects.isEmpty()) return null
-        val minX = cellRects.values.minOf { it.left } - boundsMarginPx
-        val maxEditableRight = cellRects.values.maxOf { it.right }
-        val minY = cellRects.values.minOf { it.top } - boundsMarginPx
-        val maxY = cellRects.values.maxOf { it.bottom } + boundsMarginPx
-        if (pointInGrid.x < minX || pointInGrid.x > maxEditableRight ||
+    fun nearestTargetSlot(pointInGrid: Offset, rects: Map<Pair<Int, Int>, Rect>): Pair<Int, Int>? {
+        if (rects.isEmpty()) return null
+        val minX = rects.values.minOf { it.left } - boundsMarginPx
+        val maxX = rects.values.maxOf { it.right } + boundsMarginPx
+        val minY = rects.values.minOf { it.top } - boundsMarginPx
+        val maxY = rects.values.maxOf { it.bottom } + boundsMarginPx
+        if (pointInGrid.x < minX || pointInGrid.x > maxX ||
             pointInGrid.y < minY || pointInGrid.y > maxY
         ) {
             return null
         }
-        cellRects.entries.firstOrNull { pointInGrid in it.value }?.let { return it.key }
+        rects.entries.firstOrNull { pointInGrid in it.value }?.let { return it.key }
         var best: Pair<Int, Int>? = null
         var bestDist = Float.MAX_VALUE
-        for ((pos, rect) in cellRects) {
+        for ((pos, rect) in rects) {
             val dx = pointInGrid.x - rect.center.x
             val dy = pointInGrid.y - rect.center.y
             val dist = hypot(dx, dy)
@@ -478,7 +566,7 @@ private fun EditableSlotGrid(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(10.dp)
-                .onGloballyPositioned { coords -> gridOriginInRoot = coords.positionInRoot() },
+                .onGloballyPositioned { coords -> layoutHolder.gridCoords = coords },
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             for (row in 0..1) {
@@ -488,37 +576,44 @@ private fun EditableSlotGrid(
                         .zIndex(if (draggingSlot?.first == row) 2f else 0f),
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    for (col in 0 until config.editableColumns) {
+                    for (col in 0 until config.columns) {
                         val pos = row to col
                         val slot = config.rows[row][col]
                         val isDragging = draggingSlot == pos
                         val isDropTarget = draggingSlot != null && hoverSlot == pos && hoverSlot != draggingSlot
-                        val primaryLabel = slot.primary.effectiveLabel(config.compactSymbols)
-                        val slotDesc = stringResource(R.string.extra_key_slot, row + 1, col + 1, primaryLabel)
+                        val primaryLabel = slot.primary.localizedEffectiveLabel(config.compactSymbols)
+                        val secondaryLabel = slot.secondary?.localizedEffectiveLabel(config.compactSymbols)
+                        val combinedLabel = if (secondaryLabel != null) {
+                            stringResource(R.string.key_with_secondary, primaryLabel, secondaryLabel)
+                        } else {
+                            primaryLabel
+                        }
+                        val slotDesc = stringResource(R.string.extra_key_slot, row + 1, col + 1, combinedLabel)
 
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .zIndex(if (isDragging) 2f else 0f)
                                 .onGloballyPositioned { coords ->
-                                    val topLeft = coords.positionInRoot() - gridOriginInRoot
-                                    cellRects[pos] = Rect(topLeft, coords.size.toSize())
+                                    layoutHolder.cellCoords[pos] = coords
                                 }
-                                .semantics(mergeDescendants = true) {
+                                .clearAndSetSemantics {
                                     role = Role.Button
                                     contentDescription = slotDesc
                                 }
                                 .clickable(enabled = draggingSlot == null) {
                                     currentOnTap(pos)
                                 }
-                                .pointerInput(pos, config.editableColumns) {
+                                .pointerInput(pos, config.columns) {
                                     var ownedDrag = false
+                                    var cachedRects: Map<Pair<Int, Int>, Rect> = emptyMap()
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = {
                                             if (draggingSlot != null) {
                                                 ownedDrag = false
                                                 return@detectDragGesturesAfterLongPress
                                             }
+                                            cachedRects = layoutHolder.snapshotRects()
                                             ownedDrag = true
                                             draggingSlot = pos
                                             hoverSlot = pos
@@ -531,8 +626,9 @@ private fun EditableSlotGrid(
                                             change.consume()
                                             dragOffset += amount
                                             dragTravel += amount.getDistance()
-                                            val startRect = cellRects[pos] ?: return@detectDragGesturesAfterLongPress
-                                            val matched = nearestTargetSlot(startRect.topLeft + change.position)
+                                            if (cachedRects.isEmpty()) cachedRects = layoutHolder.snapshotRects()
+                                            val startRect = cachedRects[pos] ?: return@detectDragGesturesAfterLongPress
+                                            val matched = nearestTargetSlot(startRect.topLeft + change.position, cachedRects)
                                             val prevHover = hoverSlot
                                             hoverSlot = matched
                                             if (matched != null && matched != prevHover && matched != draggingSlot) {
@@ -590,25 +686,6 @@ private fun EditableSlotGrid(
                             )
                         }
                     }
-
-                    // 行尾固定动作位（「更多」与「文本」只作空间对照，不可换掉）
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                            .alpha(0.45f),
-                        shape = MokeShapes.keycap,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (row == 0) Icons.Filled.KeyboardArrowUp else Icons.Filled.EditNote,
-                                contentDescription = stringResource(if (row == 0) R.string.key_more else R.string.key_text),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -623,12 +700,12 @@ private fun EditableSlotKeyFace(
     highlighted: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val label = slot.primary.effectiveLabel(compactSymbols)
-    val icon = slot.primary.customIcon?.imageVector()
+    val label = slot.primary.localizedEffectiveLabel(compactSymbols)
+    val icon = slot.primary.effectiveIcon()
     val secondary = slot.secondary
     val hasSecondary = secondary != null
-    val secondaryIcon = secondary?.customIcon?.imageVector()
-    val secondaryHint = secondary?.microHintLabel()
+    val secondaryIcon = secondary?.effectiveIcon()
+    val secondaryHint = if (secondary != null && secondaryIcon == null) secondary.microHintLabel() else null
     val density = LocalDensity.current
     val clampedDensity = remember(density) {
         Density(density.density, density.fontScale.coerceAtMost(1.1f))
@@ -725,6 +802,21 @@ private fun SlotEditorSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var activeTab by remember(row, col) { mutableStateOf(SlotActionTab.PRIMARY) }
+    val primaryScroll = rememberScrollState()
+    val secondaryScroll = rememberScrollState()
+    val activeScroll = if (activeTab == SlotActionTab.PRIMARY) primaryScroll else secondaryScroll
+
+    val windowSpec = rememberWindowAdaptiveSpec()
+    val density = LocalDensity.current
+    val topInsetDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val imeBottomDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
+    val maxAvailableBodyHeight = (windowSpec.heightDp.dp - topInsetDp - imeBottomDp - 56.dp).coerceAtLeast(160.dp)
+    val sheetBodyHeight = if (windowSpec.heightDp < 620) {
+        maxAvailableBodyHeight
+    } else {
+        (windowSpec.heightDp - 248).dp.coerceIn(420.dp, 620.dp).coerceAtMost(maxAvailableBodyHeight)
+    }
+    val compactSheet = sheetBodyHeight < 360.dp
 
     val activeSpec: ExtraKeySpec? = if (activeTab == SlotActionTab.PRIMARY) slot.primary else slot.secondary
     val sourceKind = when (activeSpec) {
@@ -747,145 +839,184 @@ private fun SlotEditorSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
     ) {
-        CenteredItem(maxWidth = MokeDimens.contentMaxWidth) {
+        CenteredItem(
+            maxWidth = MokeDimens.contentMaxWidth,
+            modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .height(sheetBodyHeight)
+                    .navigationBarsPadding(),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    EditableSlotKeyFace(
-                        slot = slot,
-                        compactSymbols = compactSymbols,
-                        denseColumns = false,
-                        highlighted = true,
-                        modifier = Modifier.width(62.dp).height(42.dp),
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.extra_keys_slot_editor_title, row + 1, col + 1),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
+                @Composable
+                fun HeaderRow(modifier: Modifier = Modifier) {
+                    Row(
+                        modifier = modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        EditableSlotKeyFace(
+                            slot = slot,
+                            compactSymbols = compactSymbols,
+                            denseColumns = false,
+                            highlighted = true,
+                            modifier = Modifier.width(62.dp).height(42.dp),
                         )
-                        val primarySummary = slot.primary.effectiveLabel(compactSymbols)
-                        val secondarySummary = slot.secondary?.effectiveLabel(compactSymbols)
-                            ?: stringResource(R.string.extra_keys_secondary_none)
-                        Text(
-                            "${stringResource(R.string.extra_keys_tab_primary)}: $primarySummary · ${stringResource(R.string.extra_keys_tab_secondary)}: $secondarySummary",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.extra_keys_done))
-                    }
-                }
-
-                // 主动作 / 上滑副动作切换
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ModePill(
-                        text = stringResource(R.string.extra_keys_tab_primary),
-                        selected = activeTab == SlotActionTab.PRIMARY,
-                        onClick = { activeTab = SlotActionTab.PRIMARY },
-                        modifier = Modifier.weight(1f),
-                    )
-                    ModePill(
-                        text = stringResource(R.string.extra_keys_tab_secondary),
-                        selected = activeTab == SlotActionTab.SECONDARY,
-                        onClick = { activeTab = SlotActionTab.SECONDARY },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                // 动作来源类型切换
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (activeTab == SlotActionTab.SECONDARY) {
-                        ChoiceChipButton(
-                            text = stringResource(R.string.extra_keys_secondary_none),
-                            selected = sourceKind == ActionSourceKind.NONE,
-                            onClick = { updateActiveSpec(null) },
-                        )
-                    }
-                    ChoiceChipButton(
-                        text = stringResource(R.string.extra_keys_type_builtin),
-                        selected = sourceKind == ActionSourceKind.BUILTIN,
-                        onClick = {
-                            if (sourceKind != ActionSourceKind.BUILTIN) {
-                                val defaultId = if (activeTab == SlotActionTab.PRIMARY) "esc" else "home"
-                                updateActiveSpec(ExtraKeySpec.Builtin(defaultId))
-                            }
-                        },
-                    )
-                    ChoiceChipButton(
-                        text = stringResource(R.string.extra_keys_type_combo),
-                        selected = sourceKind == ActionSourceKind.COMBO,
-                        onClick = {
-                            if (sourceKind != ActionSourceKind.COMBO) {
-                                updateActiveSpec(
-                                    ExtraKeySpec.CustomCombo(
-                                        steps = listOf(ComboStepSpec.PREFIX_CTRL_B, ComboStepSpec(ComboTarget.KEY_D)),
-                                    ),
-                                )
-                            }
-                        },
-                    )
-                }
-
-                key(activeTab) {
-                    when (activeSpec) {
-                        null -> {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                stringResource(R.string.extra_keys_secondary_none_hint),
+                                stringResource(R.string.extra_keys_slot_editor_title, row + 1, col + 1),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            val primarySummary = slot.primary.localizedEffectiveLabel(compactSymbols)
+                            val secondarySummary = slot.secondary?.localizedEffectiveLabel(compactSymbols)
+                                ?: stringResource(R.string.extra_keys_secondary_none)
+                            Text(
+                                "${stringResource(R.string.extra_keys_tab_primary)}: $primarySummary · ${stringResource(R.string.extra_keys_tab_secondary)}: $secondarySummary",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        is ExtraKeySpec.Builtin -> {
-                            BuiltinKeyGridPicker(
-                                selectedId = activeSpec.id,
-                                allowModifiers = activeTab == SlotActionTab.PRIMARY,
-                                compactSymbols = compactSymbols,
-                                onSelect = { pickedId ->
-                                    updateActiveSpec(ExtraKeySpec.Builtin(pickedId))
-                                },
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(R.string.extra_keys_done))
+                        }
+                    }
+                }
+
+                if (!compactSheet) {
+                    HeaderRow(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ModePill(
+                            text = stringResource(R.string.extra_keys_tab_primary),
+                            selected = activeTab == SlotActionTab.PRIMARY,
+                            onClick = { activeTab = SlotActionTab.PRIMARY },
+                            modifier = Modifier.weight(1f),
+                        )
+                        ModePill(
+                            text = stringResource(R.string.extra_keys_tab_secondary),
+                            selected = activeTab == SlotActionTab.SECONDARY,
+                            onClick = { activeTab = SlotActionTab.SECONDARY },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(activeScroll)
+                        .padding(horizontal = 16.dp)
+                        .padding(top = if (compactSheet) 4.dp else 12.dp, bottom = if (compactSheet) 12.dp else 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (compactSheet) {
+                        HeaderRow()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ModePill(
+                                text = stringResource(R.string.extra_keys_tab_primary),
+                                selected = activeTab == SlotActionTab.PRIMARY,
+                                onClick = { activeTab = SlotActionTab.PRIMARY },
+                                modifier = Modifier.weight(1f),
                             )
-                            DisplayOverrideSection(
-                                identityKey = Triple(row to col, activeTab, "builtin:${activeSpec.id}"),
-                                spec = activeSpec,
-                                compactSymbols = compactSymbols,
-                                onChange = { updated -> updateActiveSpec(updated) },
+                            ModePill(
+                                text = stringResource(R.string.extra_keys_tab_secondary),
+                                selected = activeTab == SlotActionTab.SECONDARY,
+                                onClick = { activeTab = SlotActionTab.SECONDARY },
+                                modifier = Modifier.weight(1f),
                             )
                         }
-                        is ExtraKeySpec.CustomCombo -> {
-                            ComboKeyBuilder(
-                                combo = activeSpec,
-                                onChange = { nextSteps ->
-                                    updateActiveSpec(activeSpec.copy(steps = nextSteps))
-                                },
+                    }
+
+                    // 动作来源类型切换
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (activeTab == SlotActionTab.SECONDARY) {
+                            ChoiceChipButton(
+                                text = stringResource(R.string.extra_keys_secondary_none),
+                                selected = sourceKind == ActionSourceKind.NONE,
+                                onClick = { updateActiveSpec(null) },
                             )
-                            DisplayOverrideSection(
-                                identityKey = Triple(row to col, activeTab, "combo"),
-                                spec = activeSpec,
-                                compactSymbols = compactSymbols,
-                                onChange = { updated -> updateActiveSpec(updated) },
-                            )
+                        }
+                        ChoiceChipButton(
+                            text = stringResource(R.string.extra_keys_type_builtin),
+                            selected = sourceKind == ActionSourceKind.BUILTIN,
+                            onClick = {
+                                if (sourceKind != ActionSourceKind.BUILTIN) {
+                                    val defaultId = if (activeTab == SlotActionTab.PRIMARY) "esc" else "home"
+                                    updateActiveSpec(ExtraKeySpec.Builtin(defaultId))
+                                }
+                            },
+                        )
+                        ChoiceChipButton(
+                            text = stringResource(R.string.extra_keys_type_combo),
+                            selected = sourceKind == ActionSourceKind.COMBO,
+                            onClick = {
+                                if (sourceKind != ActionSourceKind.COMBO) {
+                                    updateActiveSpec(
+                                        ExtraKeySpec.CustomCombo(
+                                            steps = listOf(ComboStepSpec.PREFIX_CTRL_B, ComboStepSpec(ComboTarget.KEY_D)),
+                                        ),
+                                    )
+                                }
+                            },
+                        )
+                    }
+
+                    key(activeTab) {
+                        when (activeSpec) {
+                            null -> {
+                                Text(
+                                    stringResource(R.string.extra_keys_secondary_none_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            is ExtraKeySpec.Builtin -> {
+                                BuiltinKeyGridPicker(
+                                    selectedId = activeSpec.id,
+                                    allowModifiers = activeTab == SlotActionTab.PRIMARY,
+                                    compactSymbols = compactSymbols,
+                                    onSelect = { pickedId ->
+                                        updateActiveSpec(ExtraKeySpec.Builtin(pickedId))
+                                    },
+                                )
+                                DisplayOverrideSection(
+                                    identityKey = Triple(row to col, activeTab, "builtin:${activeSpec.id}"),
+                                    spec = activeSpec,
+                                    compactSymbols = compactSymbols,
+                                    onChange = { updated -> updateActiveSpec(updated) },
+                                )
+                            }
+                            is ExtraKeySpec.CustomCombo -> {
+                                ComboKeyBuilder(
+                                    combo = activeSpec,
+                                    onChange = { nextSteps ->
+                                        updateActiveSpec(activeSpec.copy(steps = nextSteps))
+                                    },
+                                )
+                                DisplayOverrideSection(
+                                    identityKey = Triple(row to col, activeTab, "combo"),
+                                    spec = activeSpec,
+                                    compactSymbols = compactSymbols,
+                                    onChange = { updated -> updateActiveSpec(updated) },
+                                )
+                            }
                         }
                     }
                 }
@@ -907,6 +1038,33 @@ private fun BuiltinKeyGridPicker(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // 面板与输入辅助动作（更多按键 / 文本）：点按与上滑均可选
+        Text(
+            stringResource(R.string.extra_keys_section_tools),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ActionPickerChip(
+                icon = Icons.Filled.KeyboardArrowUp,
+                label = stringResource(R.string.key_more),
+                selected = selectedId == ACTION_PANEL,
+                onClick = { onSelect(ACTION_PANEL) },
+                modifier = Modifier.weight(1f),
+            )
+            ActionPickerChip(
+                icon = Icons.Filled.EditNote,
+                label = stringResource(R.string.key_text),
+                selected = selectedId == ACTION_COMPOSER,
+                onClick = { onSelect(ACTION_COMPOSER) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
         ExtraKeyLayout.groups.forEach { (titleRes, rawIds) ->
             val ids = if (allowModifiers) rawIds else rawIds.filterNot(ExtraKeyLayout::isModifierId)
             if (ids.isNotEmpty()) {
@@ -951,7 +1109,7 @@ private fun ComboKeyBuilder(
     val targetStep = combo.steps[targetStepIndex]
 
     var selectedCategory by remember(isTwoStep) { mutableStateOf(targetStep.target.category) }
-    var showCustomCtrlLetters by remember { mutableStateOf(false) }
+    var showCustomCtrlLetters by remember(isTwoStep) { mutableStateOf(false) }
 
     val encodedPreview = remember(combo.steps) {
         KeySeq.describeBytes(KeySeq.encode(combo.toKeyId()))
@@ -1129,26 +1287,34 @@ private fun ComboKeyBuilder(
 
         val targets = remember(selectedCategory) { ComboTarget.forCategory(selectedCategory) }
         val cols = if (selectedCategory == ComboTargetCategory.NAVIGATION || selectedCategory == ComboTargetCategory.FUNCTION) 6 else 7
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            targets.chunked(cols).forEach { rowTargets ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    rowTargets.forEach { target ->
-                        val display = if (target.category == ComboTargetCategory.LETTERS && !targetStep.shift && !targetStep.ctrl) {
-                            target.shortGlyph
-                        } else {
-                            target.display
+        // 按最多 5 行（5×36dp + 4×4dp = 196dp）预留网格最小高度，切换分类时下方区域与滚动条不抽动。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 196.dp),
+            contentAlignment = Alignment.TopStart,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                targets.chunked(cols).forEach { rowTargets ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        rowTargets.forEach { target ->
+                            val display = if (target.category == ComboTargetCategory.LETTERS && !targetStep.shift && !targetStep.ctrl) {
+                                target.shortGlyph
+                            } else {
+                                target.display
+                            }
+                            PickerKeyChip(
+                                label = display,
+                                selected = targetStep.target == target,
+                                onClick = {
+                                    val updated = targetStep.copy(target = target)
+                                    onChange(if (isTwoStep) listOf(combo.steps[0], updated) else listOf(updated))
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
-                        PickerKeyChip(
-                            label = display,
-                            selected = targetStep.target == target,
-                            onClick = {
-                                val updated = targetStep.copy(target = target)
-                                onChange(if (isTwoStep) listOf(combo.steps[0], updated) else listOf(updated))
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
+                        repeat(cols - rowTargets.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    repeat(cols - rowTargets.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -1217,6 +1383,7 @@ private fun DisplayOverrideSection(
         when (mode) {
             DisplayOverrideMode.DEFAULT -> Unit
             DisplayOverrideMode.TEXT -> {
+                val defaultHintLabel = spec.localizedDefaultLabel(compactSymbols)
                 OutlinedTextField(
                     value = textFieldValue,
                     onValueChange = { newValue ->
@@ -1250,7 +1417,7 @@ private fun DisplayOverrideSection(
                     colors = mokeTextFieldColors(),
                     placeholder = {
                         Text(
-                            "${spec.defaultLabel(compactSymbols)} (${stringResource(R.string.extra_keys_display_text_hint)})",
+                            "$defaultHintLabel (${stringResource(R.string.extra_keys_display_text_hint)})",
                             fontFamily = MokeMono,
                         )
                     },
@@ -1265,6 +1432,7 @@ private fun DisplayOverrideSection(
                             iconRow.forEach { iconSpec ->
                                 val selected = spec.customIcon == iconSpec
                                 Surface(
+                                    selected = selected,
                                     onClick = { onChange(spec.withDisplay("", iconSpec)) },
                                     modifier = Modifier.weight(1f).height(38.dp),
                                     shape = MokeShapes.keycap,
@@ -1305,6 +1473,7 @@ private fun ModePill(
     modifier: Modifier = Modifier,
 ) {
     Surface(
+        selected = selected,
         onClick = onClick,
         modifier = modifier.heightIn(min = 38.dp),
         shape = MokeShapes.control,
@@ -1331,6 +1500,7 @@ private fun ChoiceChipButton(
     mono: Boolean = false,
 ) {
     Surface(
+        selected = selected,
         onClick = onClick,
         shape = MokeShapes.pill,
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -1345,6 +1515,39 @@ private fun ChoiceChipButton(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun ActionPickerChip(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier.height(36.dp),
+        shape = MokeShapes.keycap,
+        color = if (selected) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (selected) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1367,6 +1570,7 @@ private fun PickerKeyChip(
         else -> 12.sp
     }
     Surface(
+        selected = selected,
         onClick = onClick,
         modifier = modifier.height(36.dp),
         shape = MokeShapes.keycap,

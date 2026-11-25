@@ -121,7 +121,7 @@ class ExtraKeyLayoutTest {
     }
 
     @Test
-    fun `JSON v1 支持列数档位 高度档位 精简符号 副动作 组合键及标签图标来回编解码`() {
+    fun `JSON v2 支持列数档位 高度档位 精简符号 副动作 组合键及标签图标来回编解码`() {
         for (cols in listOf(6, 7, 8)) {
             for (height in ExtraKeyHeight.entries) {
                 for (compact in listOf(false, true)) {
@@ -143,6 +143,7 @@ class ExtraKeyLayoutTest {
 
                     val encoded = ExtraKeyLayout.encodeConfig(cfg)
                     assertTrue(encoded.startsWith("{"))
+                    assertTrue(encoded.contains("\"v\":2"))
                     assertTrue(encoded.toByteArray(Charsets.UTF_8).size <= ExtraKeyLayout.MAX_STORED_BYTES)
                     val decoded = ExtraKeyLayout.parseConfig(encoded)
                     assertEquals(cfg, decoded)
@@ -156,8 +157,9 @@ class ExtraKeyLayoutTest {
                     val firstSlot = rendered[0][0] as ExtraKey.Key
                     assertEquals("W←", firstSlot.label)
                     assertEquals("\u001b[1;5D", KeySeq.encode(firstSlot.key))
-                    assertEquals(ExtraKeyIcon.SPLIT_VERTICAL, firstSlot.secondary?.icon)
-                    assertEquals("\u0002%", KeySeq.encode(firstSlot.secondary!!.key))
+                    val firstSec = firstSlot.secondary as ExtraKeySecondary.SendKey
+                    assertEquals(ExtraKeyIcon.SPLIT_VERTICAL, firstSec.icon)
+                    assertEquals("\u0002%", KeySeq.encode(firstSec.key))
 
                     val leftSlot = rendered[1][2] as ExtraKey.Key
                     assertEquals("↖", leftSlot.secondary?.microHint)
@@ -167,10 +169,115 @@ class ExtraKeyLayoutTest {
     }
 
     @Test
+    fun `行尾更多与文本彻底放开自定义 互换 上滑触发及v1兼容无损`() {
+        // 1. 替换最右侧两格为普通按键/组合键，并把「更多」与「文本」挂为上滑副动作
+        val custom = ExtraKeyConfig.DEFAULT
+            .assignPrimary(0, 6, ExtraKeySpec.Builtin("pgup", customLabel = "上页"))
+            .assignSecondary(0, 6, ExtraKeySpec.Builtin(ACTION_PANEL))
+            .assignPrimary(1, 6, ExtraKeySpec.Builtin("enter"))
+            .assignSecondary(1, 6, ExtraKeySpec.Builtin(ACTION_COMPOSER, customLabel = "长文"))
+            .swapSlots(0 to 0, 1 to 6)
+
+        val encoded = ExtraKeyLayout.encodeConfig(custom)
+        val decoded = ExtraKeyLayout.parseConfig(encoded)
+        assertEquals(custom, decoded)
+
+        val rows = ExtraKeyLayout.rows(encoded)
+        // (0,0) 与 (1,6) 已互换：(0,0) 为 Enter + 上滑文本("长文")，(1,6) 为 ESC
+        val topLeft = rows[0][0] as ExtraKey.Key
+        assertEquals("Enter", topLeft.label)
+        val topLeftSec = topLeft.secondary as ExtraKeySecondary.TriggerAction
+        assertEquals(ACTION_COMPOSER, topLeftSec.id)
+        assertEquals("长文", topLeftSec.label)
+
+        val topRight = rows[0][6] as ExtraKey.Key
+        assertEquals("上页", topRight.label)
+        val topRightSec = topRight.secondary as ExtraKeySecondary.TriggerAction
+        assertEquals(ACTION_PANEL, topRightSec.id)
+
+        assertEquals("ESC", (rows[1][6] as ExtraKey.Key).label)
+
+        // 移走底部主键「文本」后，扩展面板顶部「已从底部移走」自动收留文本入口
+        assertEquals(listOf(ACTION_COMPOSER), ExtraKeyLayout.displacedDefaults(custom))
+        val panelDisplaced = panelSections(encoded).first().rows.flatten()
+        assertEquals(1, panelDisplaced.size)
+        assertEquals(ACTION_COMPOSER, (panelDisplaced.single() as ExtraKey.Action).id)
+
+        // 2. 动作键本身也支持自定义文字/图标覆盖与上滑副动作
+        val styledActions = ExtraKeyConfig.DEFAULT
+            .assignPrimary(0, 6, ExtraKeySpec.Builtin(ACTION_PANEL, customLabel = "展开"))
+            .assignSecondary(0, 6, ExtraKeySpec.Builtin("f12"))
+            .assignPrimary(1, 6, ExtraKeySpec.Builtin(ACTION_COMPOSER, customIcon = ExtraKeyIcon.TERMINAL))
+        val styledRows = ExtraKeyLayout.rows(ExtraKeyLayout.encodeConfig(styledActions))
+        val panelKey = styledRows[0][6] as ExtraKey.Action
+        assertEquals("展开", panelKey.label)
+        assertEquals("F12", (panelKey.secondary as ExtraKeySecondary.SendKey).label)
+        val composerKey = styledRows[1][6] as ExtraKey.Action
+        assertEquals(ExtraKeyIcon.TERMINAL, composerKey.icon)
+
+        // 3. 兼容 v0.2.4-rc.1 的 JSON v1（每排存 cols-1 格，读取时自动补齐行尾默认 panel / composer）
+        val v1Json = """{"v":1,"cols":6,"height":"COMPACT","compact":true,"rows":[""" +
+            """[{"p":{"t":"id","id":"esc"}},{"p":{"t":"id","id":"ctrl"}},{"p":{"t":"id","id":"alt"}},{"p":{"t":"id","id":"up"}},{"p":{"t":"id","id":"home"}}],""" +
+            """[{"p":{"t":"id","id":"tab"}},{"p":{"t":"id","id":"btab"}},{"p":{"t":"id","id":"left"}},{"p":{"t":"id","id":"down"}},{"p":{"t":"id","id":"right"}}]],""" +
+            """"stash":[[{"p":{"t":"id","id":"f1"}}],[{"p":{"t":"id","id":"f2"}}]]}"""
+        val upgradedV1 = ExtraKeyLayout.parseConfig(v1Json)
+        assertEquals(6, upgradedV1.columns)
+        assertEquals(6, upgradedV1.rows[0].size)
+        assertEquals(6, upgradedV1.rows[1].size)
+        assertEquals(ExtraKeySpec.Builtin(ACTION_PANEL), upgradedV1.rows[0][5].primary)
+        assertEquals(ExtraKeySpec.Builtin(ACTION_COMPOSER), upgradedV1.rows[1][5].primary)
+        val expandedFromV1 = upgradedV1.resizeColumns(7)
+        assertEquals(ExtraKeySpec.Builtin("f1"), expandedFromV1.rows[0][5].primary)
+        assertEquals(ExtraKeySpec.Builtin(ACTION_PANEL), expandedFromV1.rows[0][6].primary)
+        assertEquals(ExtraKeySpec.Builtin("f2"), expandedFromV1.rows[1][5].primary)
+        assertEquals(ExtraKeySpec.Builtin(ACTION_COMPOSER), expandedFromV1.rows[1][6].primary)
+
+        // 4. 当行尾已改为普通键，甚至动作键移至次末格、末格放普通键时，7<->6 与 8<->7<->6<->8 均精确无损保序恢复
+        val customTail7 = ExtraKeyConfig.DEFAULT
+            .assignPrimary(0, 6, ExtraKeySpec.Builtin("f9"))
+            .assignPrimary(1, 6, ExtraKeySpec.Builtin("enter"))
+        val shrunkCustomTail6 = customTail7.resizeColumns(6)
+        assertEquals(listOf("esc", "ctrl", "alt", "up", "home", "end"), shrunkCustomTail6.rows[0].map { (it.primary as ExtraKeySpec.Builtin).id })
+        assertEquals(customTail7, shrunkCustomTail6.resizeColumns(7))
+
+        // B1 回归：把「更多」与 END 互换（动作键在次末格 col 5，普通键在末格 col 6），缩到 6 列再扩回 7 列不串位
+        val swappedTail7 = ExtraKeyConfig.DEFAULT.swapSlots(0 to 5, 0 to 6)
+        assertEquals(listOf("esc", "ctrl", "alt", "up", "home", ACTION_PANEL, "end"), swappedTail7.rows[0].map { (it.primary as ExtraKeySpec.Builtin).id })
+        val swappedRoundTrip7 = ExtraKeyLayout.parseConfig(ExtraKeyLayout.encodeConfig(swappedTail7.resizeColumns(6))).resizeColumns(7)
+        assertEquals(swappedTail7, swappedRoundTrip7)
+
+        val swappedTail8 = ExtraKeyConfig.DEFAULT
+            .resizeColumns(8)
+            .swapSlots(0 to 6, 0 to 7) // [..., end, panel, pgup]
+            .swapSlots(1 to 6, 1 to 7) // [..., cc, composer, pgdn]
+        assertEquals(
+            swappedTail8,
+            ExtraKeyLayout.parseConfig(ExtraKeyLayout.encodeConfig(swappedTail8.resizeColumns(6))).resizeColumns(8),
+        )
+        assertEquals(
+            swappedTail8,
+            ExtraKeyLayout.parseConfig(
+                ExtraKeyLayout.encodeConfig(
+                    ExtraKeyLayout.parseConfig(ExtraKeyLayout.encodeConfig(swappedTail8.resizeColumns(7))).resizeColumns(6),
+                ),
+            ).resizeColumns(8),
+        )
+
+        // 5. 槽位改回默认后自动归一多余 stash，确保 isDefault 恢复为 true
+        val editedThenRestored = ExtraKeyConfig.DEFAULT
+            .resizeColumns(8)
+            .assignPrimary(0, 5, ExtraKeySpec.Builtin("f1"))
+            .resizeColumns(7)
+            .assignPrimary(0, 5, ExtraKeySpec.Builtin("end"))
+        assertTrue(editedThenRestored.isDefault)
+        assertEquals("", ExtraKeyLayout.encodeConfig(editedThenRestored))
+    }
+
+    @Test
     fun `列数在 6 7 8 之间切换保留倒T方向键且补齐与兜底面板一致`() {
         val six = ExtraKeyConfig.DEFAULT.resizeColumns(6)
         assertEquals(6, six.columns)
-        assertEquals(5, six.editableColumns)
+        assertEquals(6, six.editableColumns)
         val sixRows = ExtraKeyLayout.rows(six)
         assertEquals("↑", sixRows[0][3].label)
         assertEquals(listOf("←", "↓", "→"), sixRows[1].subList(2, 5).map { it.label })
@@ -179,7 +286,7 @@ class ExtraKeyLayoutTest {
 
         val eight = ExtraKeyConfig.DEFAULT.resizeColumns(8)
         assertEquals(8, eight.columns)
-        assertEquals(7, eight.editableColumns)
+        assertEquals(8, eight.editableColumns)
         val eightRows = ExtraKeyLayout.rows(eight)
         assertEquals("↑", eightRows[0][3].label)
         assertEquals(listOf("←", "↓", "→"), eightRows[1].subList(2, 5).map { it.label })
@@ -352,6 +459,7 @@ class ExtraKeyLayoutTest {
             "{",
             "{not json}",
             """{"v":2,"cols":7,"height":"STANDARD","compact":false,"rows":[[],[]]}""",
+            """{"v":3,"cols":7,"height":"STANDARD","compact":false,"rows":[[],[]]}""",
             validJson.replace("\"cols\":7", "\"cols\":5"),
             validJson.replace("\"cols\":7", "\"cols\":9"),
             validJson.replace("\"COMFORTABLE\"", "\"HUGE\""),
@@ -373,6 +481,7 @@ class ExtraKeyLayoutTest {
             validJson.dropLast(1) + ""","stash":[[]]}""",
             validJson.dropLast(1) + ""","stash":[[{"p":{"t":"id","id":"f1"}},{"p":{"t":"id","id":"f2"}}],[]]}""",
             validJson.dropLast(1) + ""","stash":[[{"p":{"t":"id","id":"f1"},"s":{"t":"id","id":"ctrl"}}],[]]}""",
+            validJson.dropLast(1) + ""","stash":[[{"p":{"t":"id","id":"f1"},"end":"bad"}],[]]}""",
             ExtraKeyLayout.encodeConfig(ExtraKeyConfig.DEFAULT.resizeColumns(8)).dropLast(1) +
                 ""","stash":[[{"p":{"t":"id","id":"f1"}}],[]]}""",
             // 旧版紧凑串含重复修饰键或超 64 KiB

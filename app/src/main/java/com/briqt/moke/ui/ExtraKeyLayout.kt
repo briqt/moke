@@ -310,7 +310,36 @@ sealed interface ExtraKeySpec {
         }
     }
 
-    fun toExtraKey(compactSymbols: Boolean, secondary: ExtraKey.Key? = null): ExtraKey {
+    fun toSecondary(compactSymbols: Boolean): ExtraKeySecondary? {
+        if (isModifier) return null
+        val cleanLabel = ExtraKeyLayout.sanitizeCustomLabel(customLabel)
+        return when (this) {
+            is Builtin -> when (val base = ExtraKeyLayout.key(id)) {
+                is ExtraKey.Mod -> null
+                is ExtraKey.Key -> ExtraKeySecondary.SendKey(
+                    label = effectiveLabel(compactSymbols),
+                    key = base.key,
+                    icon = customIcon,
+                    microHint = microHintLabel(),
+                )
+                is ExtraKey.Action -> ExtraKeySecondary.TriggerAction(
+                    id = base.id,
+                    label = cleanLabel,
+                    icon = customIcon,
+                    microHint = if (cleanLabel.isNotEmpty()) ExtraKeyLayout.takeVisualUnits(cleanLabel, 3) else "",
+                )
+            }
+            is CustomCombo -> ExtraKeySecondary.SendKey(
+                label = effectiveLabel(compactSymbols),
+                key = toKeyId(),
+                icon = customIcon,
+                microHint = microHintLabel(),
+            )
+        }
+    }
+
+    fun toExtraKey(compactSymbols: Boolean, secondary: ExtraKeySecondary? = null): ExtraKey {
+        val cleanLabel = ExtraKeyLayout.sanitizeCustomLabel(customLabel)
         val displayLabel = effectiveLabel(compactSymbols)
         return when (this) {
             is Builtin -> when (val base = ExtraKeyLayout.key(id)) {
@@ -326,7 +355,12 @@ sealed interface ExtraKeySpec {
                     icon = customIcon,
                     secondary = secondary,
                 )
-                is ExtraKey.Action -> base
+                is ExtraKey.Action -> ExtraKey.Action(
+                    id = base.id,
+                    label = cleanLabel,
+                    icon = customIcon,
+                    secondary = secondary,
+                )
             }
             is CustomCombo -> ExtraKey.Key(
                 label = displayLabel,
@@ -344,84 +378,119 @@ data class ExtraKeySlot(
     val secondary: ExtraKeySpec? = null,
 ) {
     fun toExtraKey(compactSymbols: Boolean): ExtraKey {
-        val secKey = secondary
-            ?.takeUnless { it.isModifier }
-            ?.let { secSpec ->
-                val built = secSpec.toExtraKey(compactSymbols, secondary = null) as? ExtraKey.Key ?: return@let null
-                built.copy(microHint = secSpec.microHintLabel())
-            }
-        return primary.toExtraKey(compactSymbols, secondary = secKey)
+        val sec = secondary?.toSecondary(compactSymbols)
+        return primary.toExtraKey(compactSymbols, secondary = sec)
     }
 }
 
-/** 底部两排快捷键完整配置。 */
+/** 暂存的列槽位条目：[atEnd] 区分从行尾直接裁下（末格为普通键）还是从锚定动作键左侧裁下。 */
+data class StashedExtraKeySlot(
+    val slot: ExtraKeySlot,
+    val atEnd: Boolean = false,
+)
+
+/** 底部两排快捷键完整配置（每排全部 [columns] 格均可自由编辑与互换）。 */
 data class ExtraKeyConfig(
     val columns: Int = ExtraKeyLayout.DEFAULT_COLUMNS,
     val height: ExtraKeyHeight = ExtraKeyHeight.STANDARD,
     val compactSymbols: Boolean = false,
     val rows: List<List<ExtraKeySlot>> = DEFAULT_ROWS,
-    val stashedCols: List<List<ExtraKeySlot>> = EMPTY_STASH,
+    val stashedCols: List<List<StashedExtraKeySlot>> = EMPTY_STASH,
 ) {
-    val editableColumns: Int get() = columns - 1
+    val editableColumns: Int get() = columns
     val isDefault: Boolean get() = this == DEFAULT
 
-    /** 调整每排总列数（6 / 7 / 8），缩减时暂存末尾槽位，扩回时优先无损恢复。 */
+    /**
+     * 调整每排总列数（6 / 7 / 8），逐列缩减暂存或逐列扩回无损恢复。
+     *
+     * 若某排末格仍为内置动作键（更多 / 文本），则在末格左侧相邻处暂存或补齐；
+     * 若末格已改为普通键（含动作键左移后右侧放普通键），则按 [StashedExtraKeySlot.atEnd] 精确在行尾暂存与恢复。
+     */
     fun resizeColumns(newColumns: Int): ExtraKeyConfig {
         val clamped = newColumns.coerceIn(ExtraKeyLayout.MIN_COLUMNS, ExtraKeyLayout.MAX_COLUMNS)
         if (clamped == columns) return this
-        val targetEditable = clamped - 1
-        val maxStash = ExtraKeyLayout.MAX_COLUMNS - 1 - targetEditable
-        if (targetEditable < editableColumns) {
-            val keptRows = rows.map { it.take(targetEditable) }
-            val candidateStash = rows.mapIndexed { rowIndex, row ->
-                val prev = stashedCols.getOrElse(rowIndex) { emptyList() }
-                (row.drop(targetEditable) + prev).take(maxStash)
-            }
-            val normalizedStash = normalizeStash(keptRows, candidateStash)
-            return copy(
-                columns = clamped,
-                rows = keptRows,
-                stashedCols = normalizedStash,
-            )
+        var current = this
+        while (current.columns > clamped) {
+            current = current.shrinkOneColumn()
         }
+        while (current.columns < clamped) {
+            current = current.expandOneColumn()
+        }
+        return current
+    }
 
+    private fun shrinkOneColumn(): ExtraKeyConfig {
+        val nextCols = columns - 1
+        val maxStash = ExtraKeyLayout.MAX_COLUMNS - nextCols
+        val keptRows = mutableListOf<List<ExtraKeySlot>>()
+        val candidateStash = mutableListOf<List<StashedExtraKeySlot>>()
+        for (rowIndex in 0..1) {
+            val row = rows[rowIndex]
+            val prev = stashedCols.getOrElse(rowIndex) { emptyList() }
+            if (hasAnchoredTailAction(row)) {
+                val tail = row.last()
+                val removed = row[row.size - 2]
+                keptRows += row.dropLast(2) + tail
+                candidateStash += (listOf(StashedExtraKeySlot(removed, atEnd = false)) + prev).take(maxStash)
+            } else {
+                val removed = row.last()
+                keptRows += row.dropLast(1)
+                candidateStash += (listOf(StashedExtraKeySlot(removed, atEnd = true)) + prev).take(maxStash)
+            }
+        }
+        return copy(
+            columns = nextCols,
+            rows = keptRows,
+            stashedCols = normalizeStash(keptRows, candidateStash),
+        )
+    }
+
+    private fun expandOneColumn(): ExtraKeyConfig {
+        val nextCols = columns + 1
+        val maxStash = ExtraKeyLayout.MAX_COLUMNS - nextCols
         val usedIds = rows.flatten()
             .mapNotNull { (it.primary as? ExtraKeySpec.Builtin)?.id }
             .toMutableSet()
-        val remainingStash = mutableListOf<List<ExtraKeySlot>>()
+        val remainingStash = mutableListOf<List<StashedExtraKeySlot>>()
         val resizedRows = rows.mapIndexed { rowIndex, row ->
-            val list = row.toMutableList()
             val queue = ArrayDeque(stashedCols.getOrElse(rowIndex) { emptyList() })
             val candidates = if (rowIndex == 0) ROW0_PAD_CANDIDATES else ROW1_PAD_CANDIDATES
-            while (list.size < targetEditable) {
-                val restored = queue.removeFirstOrNull()
-                if (restored != null) {
-                    val primary = restored.primary
-                    val resolvedSlot = if (
-                        primary is ExtraKeySpec.Builtin &&
-                        ExtraKeyLayout.isModifierId(primary.id) &&
-                        primary.id in usedIds
-                    ) {
-                        val fallback = ExtraKeyLayout.allNonModifierIds.firstOrNull { it !in usedIds } ?: "esc"
-                        usedIds += fallback
-                        restored.copy(primary = ExtraKeySpec.Builtin(fallback))
-                    } else {
-                        if (primary is ExtraKeySpec.Builtin) usedIds += primary.id
-                        restored
-                    }
-                    list += resolvedSlot
+            val restoredEntry = queue.removeFirstOrNull()
+            val newRow = if (restoredEntry != null) {
+                val primary = restoredEntry.slot.primary
+                val resolvedSlot = if (
+                    primary is ExtraKeySpec.Builtin &&
+                    ExtraKeyLayout.isModifierId(primary.id) &&
+                    primary.id in usedIds
+                ) {
+                    val fallback = ExtraKeyLayout.allNonModifierIds.firstOrNull { it !in usedIds } ?: "esc"
+                    usedIds += fallback
+                    restoredEntry.slot.copy(primary = ExtraKeySpec.Builtin(fallback))
                 } else {
-                    val pick = candidates.firstOrNull { it !in usedIds }
-                        ?: ExtraKeyLayout.allNonModifierIds.first { it !in usedIds }
-                    usedIds += pick
-                    list += ExtraKeySlot(ExtraKeySpec.Builtin(pick))
+                    if (primary is ExtraKeySpec.Builtin) usedIds += primary.id
+                    restoredEntry.slot
+                }
+                if (!restoredEntry.atEnd && hasAnchoredTailAction(row)) {
+                    row.dropLast(1) + resolvedSlot + row.last()
+                } else {
+                    row + resolvedSlot
+                }
+            } else {
+                val pick = candidates.firstOrNull { it !in usedIds }
+                    ?: ExtraKeyLayout.allNonModifierIds.first { it !in usedIds }
+                usedIds += pick
+                val padSlot = ExtraKeySlot(ExtraKeySpec.Builtin(pick))
+                if (hasAnchoredTailAction(row)) {
+                    row.dropLast(1) + padSlot + row.last()
+                } else {
+                    row + padSlot
                 }
             }
             remainingStash += queue.take(maxStash)
-            list.toList()
+            newRow
         }
         return copy(
-            columns = clamped,
+            columns = nextCols,
             rows = resizedRows,
             stashedCols = normalizeStash(resizedRows, remainingStash),
         )
@@ -434,12 +503,12 @@ data class ExtraKeyConfig(
      * 自动将 `(r2, c2)` 的主动作与当前槽位原主动作互换（两侧已配的副动作均原样保留）。
      */
     fun assignPrimary(row: Int, col: Int, spec: ExtraKeySpec): ExtraKeyConfig {
-        if (row !in 0..1 || col !in 0 until editableColumns) return this
+        if (row !in 0..1 || col !in 0 until columns) return this
         val next = rows.map { it.toMutableList() }
         val previousPrimary = next[row][col].primary
         if (spec is ExtraKeySpec.Builtin && ExtraKeyLayout.isModifierId(spec.id)) {
             for (r in 0..1) {
-                for (c in 0 until editableColumns) {
+                for (c in 0 until columns) {
                     if (r == row && c == col) continue
                     val existing = next[r][c].primary
                     if (existing is ExtraKeySpec.Builtin && existing.id == spec.id) {
@@ -454,16 +523,18 @@ data class ExtraKeyConfig(
             }
         }
         next[row][col] = next[row][col].copy(primary = spec)
-        return copy(rows = next.map { it.toList() })
+        val builtRows = next.map { it.toList() }
+        return copy(rows = builtRows, stashedCols = normalizeStash(builtRows, stashedCols))
     }
 
-    /** 设置指定槽位的上滑副动作（修饰键不允许作为副动作）。 */
+    /** 设置指定槽位的上滑副动作（修饰键不允许作为副动作，其余内置键、组合键与面板/文本动作均可）。 */
     fun assignSecondary(row: Int, col: Int, spec: ExtraKeySpec?): ExtraKeyConfig {
-        if (row !in 0..1 || col !in 0 until editableColumns) return this
+        if (row !in 0..1 || col !in 0 until columns) return this
         if (spec != null && spec.isModifier) return this
         val next = rows.map { it.toMutableList() }
         next[row][col] = next[row][col].copy(secondary = spec)
-        return copy(rows = next.map { it.toList() })
+        val builtRows = next.map { it.toList() }
+        return copy(rows = builtRows, stashedCols = normalizeStash(builtRows, stashedCols))
     }
 
     /** 拖拽互换两个槽位的整套主/副动作配置。 */
@@ -471,14 +542,15 @@ data class ExtraKeyConfig(
         if (from == to) return this
         val (r1, c1) = from
         val (r2, c2) = to
-        if (r1 !in 0..1 || r2 !in 0..1 || c1 !in 0 until editableColumns || c2 !in 0 until editableColumns) {
+        if (r1 !in 0..1 || r2 !in 0..1 || c1 !in 0 until columns || c2 !in 0 until columns) {
             return this
         }
         val next = rows.map { it.toMutableList() }
         val tmp = next[r1][c1]
         next[r1][c1] = next[r2][c2]
         next[r2][c2] = tmp
-        return copy(rows = next.map { it.toList() })
+        val builtRows = next.map { it.toList() }
+        return copy(rows = builtRows, stashedCols = normalizeStash(builtRows, stashedCols))
     }
 
     private fun fallbackNonModId(grid: List<List<ExtraKeySlot>>): String {
@@ -489,32 +561,39 @@ data class ExtraKeyConfig(
     companion object {
         private val ROW0_PAD_CANDIDATES = listOf("end", "pgup", "home", "del", "ins", "esc", "f1", "f2", "f3", "f4")
         private val ROW1_PAD_CANDIDATES = listOf("cc", "pgdn", "btab", "bs", "enter", "tab", "cd", "cz", "cb", "cr")
-        val EMPTY_STASH: List<List<ExtraKeySlot>> = listOf(emptyList(), emptyList())
+        val EMPTY_STASH: List<List<StashedExtraKeySlot>> = listOf(emptyList(), emptyList())
 
         val DEFAULT_ROWS: List<List<ExtraKeySlot>> = listOf(
-            listOf("esc", "ctrl", "alt", "up", "home", "end").map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) },
-            listOf("tab", "btab", "left", "down", "right", "cc").map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) },
+            listOf("esc", "ctrl", "alt", "up", "home", "end", ACTION_PANEL).map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) },
+            listOf("tab", "btab", "left", "down", "right", "cc", ACTION_COMPOSER).map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) },
         )
 
         val DEFAULT = ExtraKeyConfig()
 
-        /** 若暂存区与空暂存时自动补齐生成的默认槽位完全一致，省去冗余暂存以保持纯净默认态。 */
+        private fun hasAnchoredTailAction(row: List<ExtraKeySlot>): Boolean {
+            val tailPrimary = row.lastOrNull()?.primary as? ExtraKeySpec.Builtin ?: return false
+            return ExtraKeyLayout.isActionId(tailPrimary.id)
+        }
+
+        /** 若暂存区与空暂存时逐列自动补齐生成的槽位及插入位置完全一致，省去冗余暂存以保持纯净默认态。 */
         private fun normalizeStash(
             activeRows: List<List<ExtraKeySlot>>,
-            stash: List<List<ExtraKeySlot>>,
-        ): List<List<ExtraKeySlot>> {
+            stash: List<List<StashedExtraKeySlot>>,
+        ): List<List<StashedExtraKeySlot>> {
             if (stash.all { it.isEmpty() }) return EMPTY_STASH
             val usedIds = activeRows.flatten()
                 .mapNotNull { (it.primary as? ExtraKeySpec.Builtin)?.id }
                 .toMutableSet()
             val synthetic = (0..1).map { rowIndex ->
+                val row = activeRows[rowIndex]
+                val expectedAtEnd = !hasAnchoredTailAction(row)
                 val count = stash.getOrElse(rowIndex) { emptyList() }.size
                 val candidates = if (rowIndex == 0) ROW0_PAD_CANDIDATES else ROW1_PAD_CANDIDATES
                 (0 until count).map {
                     val pick = candidates.firstOrNull { it !in usedIds }
                         ?: ExtraKeyLayout.allNonModifierIds.first { it !in usedIds }
                     usedIds += pick
-                    ExtraKeySlot(ExtraKeySpec.Builtin(pick))
+                    StashedExtraKeySlot(ExtraKeySlot(ExtraKeySpec.Builtin(pick)), atEnd = expectedAtEnd)
                 }
             }
             return if (stash == synthetic) EMPTY_STASH else stash.map { it.toList() }
@@ -525,8 +604,8 @@ data class ExtraKeyConfig(
 /**
  * 底部两排快捷键布局与编解码。
  *
- * 每排最后一个位置固定：「更多」打开全键盘，「文本」打开文本段。
- * 同时兼容旧版 `id1,id2,...|id7,...` 紧凑串与新版 JSON v1 结构，任何损坏或超限配置安全回退默认。
+ * 全部列位均可自定义（默认行尾为「更多」与「文本」）。
+ * 同时兼容旧版 `id1,id2,...|id7,...` 紧凑串、JSON v1（隐式行尾）与 JSON v2（全列存储），任何损坏或超限配置安全回退默认。
  */
 object ExtraKeyLayout {
     const val SLOTS = 6
@@ -535,12 +614,16 @@ object ExtraKeyLayout {
     const val MAX_COLUMNS = 8
     const val MAX_CUSTOM_LABEL_CHARS = 4
     const val MAX_STORED_BYTES = 65_536
-    private const val JSON_VERSION = 1
+    private const val JSON_VERSION_V1 = 1
+    private const val JSON_VERSION = 2
 
     const val DEFAULT =
         "esc,ctrl,alt,up,home,end|tab,btab,left,down,right,cc"
 
-    /** 选择列表的分组：标题资源 + 这一组的 id。 */
+    /** 面板与输入辅助动作 id（文案与默认图标由 UI 层本地化渲染）。 */
+    val actionIds: List<String> = listOf(ACTION_PANEL, ACTION_COMPOSER)
+
+    /** 选择列表的终端按键分组：标题资源 + 这一组的 id。 */
     val groups: List<Pair<Int, List<String>>> = listOf(
         R.string.keys_section_edit to listOf(
             "ctrl", "alt", "shift", "esc", "tab", "btab",
@@ -560,11 +643,13 @@ object ExtraKeyLayout {
 
     fun isModifierId(id: String): Boolean = id == "ctrl" || id == "alt" || id == "shift"
 
+    fun isActionId(id: String): Boolean = id == ACTION_PANEL || id == ACTION_COMPOSER
+
     fun rows(stored: String?): List<List<ExtraKey>> = rows(parseConfig(stored))
 
     fun rows(config: ExtraKeyConfig): List<List<ExtraKey>> = listOf(
-        config.rows[0].map { it.toExtraKey(config.compactSymbols) } + ExtraKey.Action(ACTION_PANEL),
-        config.rows[1].map { it.toExtraKey(config.compactSymbols) } + ExtraKey.Action(ACTION_COMPOSER),
+        config.rows[0].map { it.toExtraKey(config.compactSymbols) },
+        config.rows[1].map { it.toExtraKey(config.compactSymbols) },
     )
 
     /** 两排主槽位 id（兼容旧接口；JSON 配置中自定义组合槽位记为 `"custom"`）。非法存储整表退回 [DEFAULT]。 */
@@ -586,7 +671,7 @@ object ExtraKeyLayout {
         return parseLegacySlotsOrNull(stored) ?: parseLegacySlotsOrNull(DEFAULT)!!
     }
 
-    /** 解析完整配置（支持空串、旧版竖线串与 JSON v1；任何损坏或超体积输入安全退回 [ExtraKeyConfig.DEFAULT]）。 */
+    /** 解析完整配置（支持空串、旧版竖线串、JSON v1 与 JSON v2；任何损坏或超体积输入安全退回 [ExtraKeyConfig.DEFAULT]）。 */
     fun parseConfig(stored: String?): ExtraKeyConfig {
         if (stored.isNullOrBlank() || exceedsMaxUtf8Bytes(stored)) return ExtraKeyConfig.DEFAULT
         if (stored.trimStart().startsWith("{")) {
@@ -597,11 +682,14 @@ object ExtraKeyLayout {
             columns = DEFAULT_COLUMNS,
             height = ExtraKeyHeight.STANDARD,
             compactSymbols = false,
-            rows = legacy.map { row -> row.map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) } },
+            rows = listOf(
+                legacy[0].map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) } + ExtraKeySlot(ExtraKeySpec.Builtin(ACTION_PANEL)),
+                legacy[1].map { ExtraKeySlot(ExtraKeySpec.Builtin(it)) } + ExtraKeySlot(ExtraKeySpec.Builtin(ACTION_COMPOSER)),
+            ),
         )
     }
 
-    /** 编码完整配置；完全等于默认配置时存为空串 `""`，其余存为紧凑 JSON v1。 */
+    /** 编码完整配置；完全等于默认配置时存为空串 `""`，其余存为紧凑 JSON v2。 */
     fun encodeConfig(config: ExtraKeyConfig): String {
         if (config.isDefault) return ""
         return JSONObject().apply {
@@ -620,8 +708,10 @@ object ExtraKeyLayout {
                 put("stash", JSONArray().apply {
                     for (r in 0..1) {
                         put(JSONArray().apply {
-                            config.stashedCols.getOrElse(r) { emptyList() }.forEach { slot ->
-                                put(encodeSlot(slot))
+                            config.stashedCols.getOrElse(r) { emptyList() }.forEach { entry ->
+                                val obj = encodeSlot(entry.slot)
+                                if (entry.atEnd) obj.put("end", true)
+                                put(obj)
                             }
                         })
                     }
@@ -768,7 +858,7 @@ object ExtraKeyLayout {
             val ids = row.split(',')
             if (ids.size != SLOTS) return null
             for (id in ids) {
-                if (id !in byId) return null
+                if (id !in byId || isActionId(id)) return null
                 if (isModifierId(id) && !seenMods.add(id)) return null
             }
             ids
@@ -790,11 +880,12 @@ object ExtraKeyLayout {
     private fun parseJsonConfigOrNull(stored: String): ExtraKeyConfig? = runCatching {
         if (exceedsMaxUtf8Bytes(stored)) return null
         val o = JSONObject(stored)
-        if (o.optInt("v", -1) != JSON_VERSION) return null
+        val version = o.optInt("v", -1)
+        if (version != JSON_VERSION_V1 && version != JSON_VERSION) return null
         val cols = o.optInt("cols", DEFAULT_COLUMNS)
         if (cols !in MIN_COLUMNS..MAX_COLUMNS) return null
-        val editableCols = cols - 1
-        val maxStashPerRow = MAX_COLUMNS - 1 - editableCols
+        val storedRowLen = if (version == JSON_VERSION_V1) cols - 1 else cols
+        val maxStashPerRow = MAX_COLUMNS - cols
         val heightName = o.optString("height", ExtraKeyHeight.STANDARD.name)
         val height = ExtraKeyHeight.entries.firstOrNull { it.name == heightName } ?: return null
         if (o.has("compact") && o.opt("compact") !is Boolean) return null
@@ -805,8 +896,8 @@ object ExtraKeyLayout {
         val seenModifiers = mutableSetOf<String>()
         val parsedRows = (0..1).map { r ->
             val rowArr = rowsArr.optJSONArray(r) ?: return null
-            if (rowArr.length() != editableCols) return null
-            (0 until editableCols).map { c ->
+            if (rowArr.length() != storedRowLen) return null
+            val rowSlots = (0 until storedRowLen).map { c ->
                 val slotObj = rowArr.optJSONObject(c) ?: return null
                 val slot = parseSlotOrNull(slotObj) ?: return null
                 val primary = slot.primary
@@ -814,6 +905,12 @@ object ExtraKeyLayout {
                     if (!seenModifiers.add(primary.id)) return null
                 }
                 slot
+            }
+            if (version == JSON_VERSION_V1) {
+                val tailId = if (r == 0) ACTION_PANEL else ACTION_COMPOSER
+                rowSlots + ExtraKeySlot(ExtraKeySpec.Builtin(tailId))
+            } else {
+                rowSlots
             }
         }
 
@@ -825,7 +922,12 @@ object ExtraKeyLayout {
                 if (rowStashArr.length() > maxStashPerRow) return null
                 (0 until rowStashArr.length()).map { i ->
                     val slotObj = rowStashArr.optJSONObject(i) ?: return null
-                    parseSlotOrNull(slotObj) ?: return null
+                    if (slotObj.has("end") && slotObj.opt("end") !is Boolean) return null
+                    val slot = parseSlotOrNull(slotObj) ?: return null
+                    StashedExtraKeySlot(
+                        slot = slot,
+                        atEnd = version != JSON_VERSION_V1 && slotObj.optBoolean("end", false),
+                    )
                 }
             }
         } else {
@@ -920,6 +1022,7 @@ object ExtraKeyLayout {
     private val DEFAULT_SLOT_IDS: List<String> = listOf(
         "esc", "ctrl", "alt", "up", "home", "end",
         "tab", "btab", "left", "down", "right", "cc",
+        ACTION_COMPOSER,
     )
 
     /** 精简符号映射：全部字符均经 `jetbrains_mono.ttf` 实轮廓核验，零缺字风险。 */
@@ -956,6 +1059,8 @@ object ExtraKeyLayout {
         "down" to "↓",
         "left" to "←",
         "right" to "→",
+        ACTION_PANEL to "↑",
+        ACTION_COMPOSER to "TXT",
     )
 
     private val byId: Map<String, ExtraKey> = buildMap {
@@ -983,5 +1088,7 @@ object ExtraKeyLayout {
             k("c$c", "^${c.uppercaseChar()}", KeyId.Macro(ctrlOf(c)))
         }
         put("altenter", macro("ALT⏎", "\u001b\r"))
+        put(ACTION_PANEL, ExtraKey.Action(ACTION_PANEL))
+        put(ACTION_COMPOSER, ExtraKey.Action(ACTION_COMPOSER))
     }
 }
