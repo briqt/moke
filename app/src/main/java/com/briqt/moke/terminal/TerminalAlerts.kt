@@ -15,6 +15,9 @@ import androidx.core.content.ContextCompat
 import com.briqt.moke.MainActivity
 import com.briqt.moke.R
 import com.briqt.moke.localized
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 终端提醒：远端程序响铃（BEL）或发出通知序列（OSC 9 / OSC 777）时，若用户此刻不在这个会话里，
@@ -27,9 +30,14 @@ object TerminalAlerts {
     /** 设置「响铃与通知提醒」的镜像（`MokeApplication` 维护）。默认关闭。 */
     @Volatile var enabled: Boolean = false
 
-    /** 应用界面是否在前台（`MainActivity` 的 onStart / onStop 维护）。 */
+    private var startedCount: Int = 0
+    private val _appVisibleFlow = MutableStateFlow(false)
+
+    /** 应用界面是否在前台（`MainActivity` 的 onStart / onStop 维护，兼容 Activity 重建期间的生命周期交叠）。 */
     @Volatile var appVisible: Boolean = false
         private set
+
+    val appVisibleFlow: StateFlow<Boolean> = _appVisibleFlow.asStateFlow()
 
     /** 最近一次进入后台的单调时间戳（`SystemClock.elapsedRealtime()`）；未发生过为 -1。 */
     @Volatile var lastBackgroundedAtElapsedMs: Long = -1L
@@ -40,15 +48,38 @@ object TerminalAlerts {
         private set
 
     fun onAppStarted(nowElapsedMs: Long = SystemClock.elapsedRealtime()) {
-        if (lastBackgroundedAtElapsedMs >= 0L && !appVisible) {
-            lastResumedAtElapsedMs = nowElapsedMs
+        synchronized(this) {
+            val wasVisible = startedCount > 0
+            startedCount += 1
+            if (!wasVisible && lastBackgroundedAtElapsedMs >= 0L) {
+                lastResumedAtElapsedMs = nowElapsedMs
+            }
+            appVisible = true
         }
-        appVisible = true
+        _appVisibleFlow.value = true
     }
 
     fun onAppStopped(nowElapsedMs: Long = SystemClock.elapsedRealtime()) {
-        appVisible = false
-        lastBackgroundedAtElapsedMs = nowElapsedMs
+        val nowVisible: Boolean
+        synchronized(this) {
+            startedCount = (startedCount - 1).coerceAtLeast(0)
+            nowVisible = startedCount > 0
+            appVisible = nowVisible
+            if (!nowVisible) {
+                lastBackgroundedAtElapsedMs = nowElapsedMs
+            }
+        }
+        _appVisibleFlow.value = nowVisible
+    }
+
+    internal fun resetVisibilityForTest() {
+        synchronized(this) {
+            startedCount = 0
+            appVisible = false
+            lastBackgroundedAtElapsedMs = -1L
+            lastResumedAtElapsedMs = -1L
+        }
+        _appVisibleFlow.value = false
     }
 
     /** 当前正在看的会话（终端页显示时设置，离开时清空）。 */

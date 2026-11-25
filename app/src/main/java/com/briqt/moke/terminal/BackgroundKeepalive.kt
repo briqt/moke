@@ -88,6 +88,18 @@ object BackgroundKeepalive {
     private const val PERM_PREFS = "moke_perm_state"
     private const val KEY_NOTIF_RATIONALE_SEEN = "notif_rationale_seen"
 
+    /** 设置「后台保持唤醒」的进程级镜像（默认开启）。 */
+    @Volatile var wakeLockEnabled: Boolean = true
+
+    fun shouldCreateWifiLock(sdkInt: Int): Boolean =
+        sdkInt < Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+
+    fun shouldHoldBackgroundLocks(
+        hasLiveSessions: Boolean,
+        wakeLockEnabled: Boolean,
+        appVisible: Boolean,
+    ): Boolean = hasLiveSessions && wakeLockEnabled && !appVisible
+
     fun isIgnoringBatteryOptimizations(context: Context): Boolean = runCatching {
         val pm = context.getSystemService(PowerManager::class.java)
         pm?.isIgnoringBatteryOptimizations(context.packageName) ?: true

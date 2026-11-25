@@ -137,11 +137,56 @@ class SyncBundleTest {
             SyncBundle.decode(JSONObject().put("format", 99).toString().toByteArray())
             fail()
         } catch (_: SyncBundle.NewerFormatException) { }
-        val loose = SyncBundle.decode("""{"format":1,"hosts":{"items":[{"label":"no id"},{"id":"ok"}]},"keys":[{"id":"bad-no-pem","name":"n"}],"networks":[{"id":"x"}],"settings":{"a":{"t":"zz","v":1}}}""".toByteArray())
+        val loose = SyncBundle.decode("""{"format":1,"hosts":{"items":[{"label":"no id"},{"id":"ok"}]},"keys":[{"id":"bad-no-pem","name":"n"},{"name":"missing-both"}],"networks":[{"id":"x"}],"settings":{"a":{"t":"zz","v":1}}}""".toByteArray())
         assertEquals(listOf("ok"), loose.hosts.map { it.id })
         assertEquals(emptyList<KeyEntry>(), loose.keys)
         assertEquals(emptyList<NetworkEntry>(), loose.networks)
         assertEquals(emptyMap<String, PrefValue>(), loose.settings)
         assertNull(loose.language)
+    }
+
+    @Test
+    fun `keys 数组缺少 id 字段的异常备份重复解码与合并恢复保持幂等不产生重复密钥`() {
+        val rawBackup = JSONObject()
+            .put("format", 1)
+            .put("meta", JSONObject().put("version", "0.2.4").put("createdAt", "2026-11-24T12:00:00+08:00"))
+            .put(
+                "keys",
+                JSONArray()
+                    .put(JSONObject().put("name", "idless-key").put("privateKeyPem", "-----BEGIN KEY-----\nXYZ\n-----END KEY-----").put("passphrase", "p1"))
+                    .put(JSONObject().put("id", "").put("name", "idless-key-dup").put("privateKeyPem", "-----BEGIN KEY-----\r\nXYZ\r\n-----END KEY-----\n").put("passphrase", "p1")),
+            )
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+
+        val decoded1 = SyncBundle.decode(rawBackup)
+        val decoded2 = SyncBundle.decode(rawBackup)
+        val expectedId = deterministicKeyId("-----BEGIN KEY-----\nXYZ\n-----END KEY-----", "p1")
+
+        assertEquals(1, decoded1.keys.size)
+        assertEquals(expectedId, decoded1.keys.single().id)
+        assertEquals(decoded1.keys, decoded2.keys)
+
+        val firstRestore = RestorePlanner.plan(
+            bundle = decoded1,
+            local = LocalState(emptyList(), emptyList(), emptyMap(), emptyList(), emptyList(), emptyList()),
+            categories = setOf(RestoreCategory.KEYS),
+            mode = RestoreMode.MERGE,
+            defaultDeviceName = "phone",
+        )
+        val firstKeys = firstRestore.keys!!
+        assertEquals(1, firstKeys.result.size)
+
+        // Restoring the exact same malformed backup a second time must produce ZERO added keys!
+        val secondRestore = RestorePlanner.plan(
+            bundle = SyncBundle.decode(rawBackup),
+            local = LocalState(emptyList(), emptyList(), emptyMap(), emptyList(), emptyList(), firstKeys.result),
+            categories = setOf(RestoreCategory.KEYS),
+            mode = RestoreMode.MERGE,
+            defaultDeviceName = "phone",
+        )
+        val secondKeys = secondRestore.keys!!
+        assertEquals(1, secondKeys.result.size)
+        assertTrue(secondKeys.diff.isEmpty)
     }
 }

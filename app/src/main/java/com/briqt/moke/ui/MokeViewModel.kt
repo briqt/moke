@@ -202,6 +202,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val backgroundWakeLock: StateFlow<Boolean> = settings.backgroundWakeLock
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_BACKGROUND_WAKE_LOCK)
 
     /**
      * 首连是否自动信任主机密钥（默认关=先问一次）。
@@ -1308,6 +1310,8 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setTerminalAlerts(on: Boolean) = viewModelScope.launch { settings.setTerminalAlerts(on) }
 
     fun setKeepScreenOn(on: Boolean) = viewModelScope.launch { settings.setKeepScreenOn(on) }
+
+    fun setBackgroundWakeLock(on: Boolean) = viewModelScope.launch { settings.setBackgroundWakeLock(on) }
 
     /** 恢复外观默认（配色/字体/字号/行距/字距/光标）。 */
     fun resetAppearanceDefaults() = viewModelScope.launch { settings.resetAppearanceDefaults() }

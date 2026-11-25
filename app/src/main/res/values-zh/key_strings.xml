@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="menu_keys">密钥</string>
-    <string name="menu_keys_empty">SSH 私钥与生成</string>
+    <string name="menu_keys_empty">生成或导入私钥</string>
     <plurals name="menu_keys_summary">
         <item quantity="other">%1$d 把密钥</item>
     </plurals>

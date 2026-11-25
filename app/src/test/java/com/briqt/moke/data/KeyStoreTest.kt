@@ -43,6 +43,37 @@ class KeyStoreTest : PreferencesStoreFixture() {
     }
 
     @Test
+    fun `KeyEntry fromJson derives deterministic id when id is missing or blank and skips empty entries`() {
+        val missingIdJson = JSONObject()
+            .put("name", "Recovered Key")
+            .put("privateKeyPem", "  ${entryA.privateKeyPem}\r\n")
+            .put("passphrase", entryA.passphrase)
+        val blankIdJson = JSONObject(missingIdJson.toString()).put("id", "   ")
+
+        val expectedId = deterministicKeyId(entryA.privateKeyPem, entryA.passphrase)
+        val first = KeyEntry.fromJson(missingIdJson)
+        val second = KeyEntry.fromJson(missingIdJson)
+        val fromBlank = KeyEntry.fromJson(blankIdJson)
+
+        assertEquals(expectedId, first.id)
+        assertEquals(expectedId, second.id)
+        assertEquals(expectedId, fromBlank.id)
+
+        val noPemNoId = KeyEntry.fromJson(JSONObject().put("name", "Broken"))
+        assertEquals("", noPemNoId.id)
+
+        val parsed = parseKeys(
+            JSONArray()
+                .put(missingIdJson)
+                .put(blankIdJson)
+                .put(JSONObject().put("name", "Broken"))
+                .toString(),
+        )
+        assertEquals(1, parsed.size)
+        assertEquals(expectedId, parsed.single().id)
+    }
+
+    @Test
     fun `commit creates renames rejects duplicate names and deletes`() = runBlocking {
         val prefs = preferences(entryA)
         val store = store(prefs)

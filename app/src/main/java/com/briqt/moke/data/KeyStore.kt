@@ -43,16 +43,27 @@ data class KeyEntry(
     }
 
     companion object {
-        fun fromJson(o: JSONObject): KeyEntry = KeyEntry(
-            id = o.optString("id", UUID.randomUUID().toString()),
-            name = o.optString("name", ""),
-            privateKeyPem = o.optString("privateKeyPem", ""),
-            passphrase = o.optString("passphrase", ""),
-            publicKey = o.optString("publicKey", ""),
-            fingerprint = o.optString("fingerprint", ""),
-            algorithmLabel = o.optString("algorithmLabel", ""),
-            createdAt = o.optLong("createdAt", 0L),
-        )
+        fun fromJson(o: JSONObject): KeyEntry {
+            val privateKeyPem = o.optString("privateKeyPem", "")
+            val passphrase = o.optString("passphrase", "")
+            val rawId = o.optString("id", "").trim()
+            val normalizedPem = normalizeKeyPem(privateKeyPem)
+            val id = when {
+                rawId.isNotEmpty() -> rawId
+                normalizedPem.isNotEmpty() -> deterministicKeyId(normalizedPem, passphrase)
+                else -> ""
+            }
+            return KeyEntry(
+                id = id,
+                name = o.optString("name", ""),
+                privateKeyPem = privateKeyPem,
+                passphrase = passphrase,
+                publicKey = o.optString("publicKey", ""),
+                fingerprint = o.optString("fingerprint", ""),
+                algorithmLabel = o.optString("algorithmLabel", ""),
+                createdAt = o.optLong("createdAt", 0L),
+            )
+        }
     }
 }
 
@@ -170,7 +181,13 @@ class KeyStore internal constructor(
 
 internal fun parseKeys(json: String): List<KeyEntry> = runCatching {
     val arr = JSONArray(json)
-    (0 until arr.length()).map { KeyEntry.fromJson(arr.getJSONObject(it)) }
+    (0 until arr.length())
+        .mapNotNull { i ->
+            arr.optJSONObject(i)?.let(KeyEntry::fromJson)?.takeIf {
+                it.id.isNotBlank() && normalizeKeyPem(it.privateKeyPem).isNotEmpty()
+            }
+        }
+        .distinctBy { it.id }
 }.getOrDefault(emptyList())
 
 internal fun encodeKeys(list: List<KeyEntry>, encrypt: (String) -> String): String? {

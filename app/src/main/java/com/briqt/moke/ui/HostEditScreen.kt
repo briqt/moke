@@ -164,7 +164,7 @@ fun HostEditScreen(
     val showKeyDropdownError = keyError != null && keyState is ListState.Ready && (submitted || keyMissing)
     val jumpNeedsKey = jumpHost != null && jumpHost.jumpHostId.isEmpty() && jumpHost.usesKeyStore()
     val jumpKeyMissing = jumpNeedsKey && keyState is ListState.Ready &&
-        (jumpHost!!.keyId.isBlank() || loadedKeys.none { it.id == jumpHost.keyId && it.privateKeyPem.isNotBlank() })
+        (jumpHost.keyId.isBlank() || loadedKeys.none { it.id == jumpHost.keyId && it.privateKeyPem.isNotBlank() })
     val jumpError = when {
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Loading -> stringResource(R.string.route_loading)
         jumpHostId.isNotEmpty() && hostStoreState == ListState.Unreadable -> stringResource(R.string.hosts_unreadable_title)

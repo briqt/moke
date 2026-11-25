@@ -68,6 +68,9 @@ class MokeApplication : Application() {
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             settings.terminalAlerts.collect { com.briqt.moke.terminal.TerminalAlerts.enabled = it }
         }
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            settings.backgroundWakeLock.collect { com.briqt.moke.terminal.BackgroundKeepalive.wakeLockEnabled = it }
+        }
     }
 
     private fun cleanLegacyTempKeys() {

@@ -26,8 +26,8 @@
 
     <string name="extra_keys_slot_editor_title">第 %1$d 排 · 第 %2$d 格</string>
     <string name="extra_keys_done">完成</string>
-    <string name="extra_keys_tab_primary">主动作</string>
-    <string name="extra_keys_tab_secondary">上滑副动作</string>
+    <string name="extra_keys_tab_primary">点按</string>
+    <string name="extra_keys_tab_secondary">上滑</string>
     <string name="extra_keys_secondary_none">无</string>
     <string name="extra_keys_secondary_none_hint">上滑此键不触发额外动作。</string>
 

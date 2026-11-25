@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BatterySaver
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
@@ -65,6 +66,7 @@ fun TerminalSettingsScreen(
     keyboardMode: KeyboardMode,
     tmuxScrollSetup: Boolean,
     keepScreenOn: Boolean,
+    backgroundWakeLock: Boolean,
     confirmClose: Boolean,
     autoTrustNewHostKey: Boolean,
     terminalAlerts: Boolean,
@@ -74,6 +76,7 @@ fun TerminalSettingsScreen(
     onKeyboardMode: (KeyboardMode) -> Unit,
     onTmuxScrollSetup: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
+    onBackgroundWakeLock: (Boolean) -> Unit,
     onConfirmClose: (Boolean) -> Unit,
     onAutoTrustNewHostKey: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -233,6 +236,13 @@ fun TerminalSettingsScreen(
                             BackgroundKeepalive.openAppDetailsSettings(context)
                         }
                     },
+                )
+                SwitchRow(
+                    icon = Icons.Filled.Bolt,
+                    title = stringResource(R.string.menu_background_wakelock),
+                    subtitle = stringResource(R.string.menu_background_wakelock_desc),
+                    checked = backgroundWakeLock,
+                    onCheckedChange = onBackgroundWakeLock,
                 )
                 SwitchRow(
                     icon = Icons.Filled.NotificationsActive,

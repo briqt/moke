@@ -1,5 +1,7 @@
 package com.briqt.moke.terminal
 
+import android.os.Build
+import com.briqt.moke.data.SettingsStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,6 +9,93 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackgroundKeepaliveTest {
+
+    @Test
+    fun `background wake lock is enabled by default`() {
+        assertTrue(SettingsStore.DEFAULT_BACKGROUND_WAKE_LOCK)
+        assertTrue(BackgroundKeepalive.wakeLockEnabled)
+    }
+
+    @Test
+    fun `shouldCreateWifiLock only enables high-perf wifi lock on API 30 to 33`() {
+        assertTrue(BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION_CODES.R))
+        assertTrue(BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION_CODES.S))
+        assertTrue(BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION_CODES.S_V2))
+        assertTrue(BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION_CODES.TIRAMISU))
+        assertFalse(BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION_CODES.UPSIDE_DOWN_CAKE))
+        assertFalse(BackgroundKeepalive.shouldCreateWifiLock(35))
+    }
+
+    @Test
+    fun `shouldHoldBackgroundLocks requires live sessions enabled switch and app in background`() {
+        // Default switch OFF -> never holds wake/wifi locks even in background with live sessions.
+        assertFalse(
+            BackgroundKeepalive.shouldHoldBackgroundLocks(
+                hasLiveSessions = true,
+                wakeLockEnabled = false,
+                appVisible = false,
+            ),
+        )
+        // Switch ON, but app is in foreground -> must NOT hold locks!
+        assertFalse(
+            BackgroundKeepalive.shouldHoldBackgroundLocks(
+                hasLiveSessions = true,
+                wakeLockEnabled = true,
+                appVisible = true,
+            ),
+        )
+        // Switch ON, app in background, but no live sessions -> must NOT hold locks.
+        assertFalse(
+            BackgroundKeepalive.shouldHoldBackgroundLocks(
+                hasLiveSessions = false,
+                wakeLockEnabled = true,
+                appVisible = false,
+            ),
+        )
+        // Switch ON + live sessions + app in background -> holds locks.
+        assertTrue(
+            BackgroundKeepalive.shouldHoldBackgroundLocks(
+                hasLiveSessions = true,
+                wakeLockEnabled = true,
+                appVisible = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `TerminalAlerts visibility tracks overlapping activity recreate without false background transition`() {
+        TerminalAlerts.resetVisibilityForTest()
+        try {
+            assertFalse(TerminalAlerts.appVisible)
+            assertFalse(TerminalAlerts.appVisibleFlow.value)
+
+            TerminalAlerts.onAppStarted(nowElapsedMs = 1_000L)
+            assertTrue(TerminalAlerts.appVisible)
+            assertTrue(TerminalAlerts.appVisibleFlow.value)
+            assertEquals(-1L, TerminalAlerts.lastBackgroundedAtElapsedMs)
+
+            // Activity recreate: new instance starts before old instance stops.
+            TerminalAlerts.onAppStarted(nowElapsedMs = 2_000L)
+            TerminalAlerts.onAppStopped(nowElapsedMs = 2_050L)
+            assertTrue(TerminalAlerts.appVisible)
+            assertTrue(TerminalAlerts.appVisibleFlow.value)
+            assertEquals(-1L, TerminalAlerts.lastBackgroundedAtElapsedMs)
+
+            // Genuine move to background when last started Activity stops.
+            TerminalAlerts.onAppStopped(nowElapsedMs = 3_000L)
+            assertFalse(TerminalAlerts.appVisible)
+            assertFalse(TerminalAlerts.appVisibleFlow.value)
+            assertEquals(3_000L, TerminalAlerts.lastBackgroundedAtElapsedMs)
+
+            // Returning to foreground records resume timestamp.
+            TerminalAlerts.onAppStarted(nowElapsedMs = 8_500L)
+            assertTrue(TerminalAlerts.appVisible)
+            assertTrue(TerminalAlerts.appVisibleFlow.value)
+            assertEquals(8_500L, TerminalAlerts.lastResumedAtElapsedMs)
+        } finally {
+            TerminalAlerts.resetVisibilityForTest()
+        }
+    }
 
     @Test
     fun `resolveOpenSessionTarget prefers valid requested session then single live session over dead scrollback`() {

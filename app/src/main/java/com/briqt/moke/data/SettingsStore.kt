@@ -64,6 +64,8 @@ class SettingsStore(
     private val confirmCloseKey = booleanPreferencesKey("confirm_close_session")
     // 终端页是否保持屏幕常亮（看长任务输出方便，但耗电）。
     private val keepScreenOnKey = booleanPreferencesKey("keep_screen_on")
+    // 退到后台后是否持有唤醒锁（及 Android 11–13 的高性能 Wi-Fi 锁）。
+    private val backgroundWakeLockKey = booleanPreferencesKey("background_wake_lock")
     // 首次连接一台新主机时，是否直接信任它的主机密钥（不弹确认）。
     private val autoTrustNewHostKeyKey = booleanPreferencesKey("auto_trust_new_host_key")
     private val terminalAlertsKey = booleanPreferencesKey("terminal_alerts")
@@ -92,6 +94,7 @@ class SettingsStore(
         const val MAX_SPACING = 1.3f
         // 空回退沿用系统字体；主字体默认值由 FontCatalog.DEFAULT_ID 定义。
         const val DEFAULT_FALLBACK_FONT_ID = ""
+        const val DEFAULT_BACKGROUND_WAKE_LOCK = true
 
         /** 把任意字号规整到 0.5 网格并夹到范围内（避免浮点漂移）。 */
         fun snapFontSize(v: Float): Float =
@@ -201,6 +204,11 @@ class SettingsStore(
     /** 终端页保持屏幕常亮（默认开——与历史行为一致；关掉更省电）。 */
     val keepScreenOn: Flow<Boolean> = preferencesStore.data.map { prefs ->
         prefs[keepScreenOnKey] ?: true
+    }
+
+    /** 退到后台后持有唤醒锁（默认关；开启会增加耗电）。 */
+    val backgroundWakeLock: Flow<Boolean> = preferencesStore.data.map { prefs ->
+        prefs[backgroundWakeLockKey] ?: DEFAULT_BACKGROUND_WAKE_LOCK
     }
 
     /**
@@ -381,6 +389,10 @@ class SettingsStore(
         preferencesStore.edit { it[keepScreenOnKey] = on }
     }
 
+    suspend fun setBackgroundWakeLock(on: Boolean) {
+        preferencesStore.edit { it[backgroundWakeLockKey] = on }
+    }
+
     suspend fun setAutoTrustNewHostKey(on: Boolean) {
         preferencesStore.edit { it[autoTrustNewHostKeyKey] = on }
     }
@@ -437,7 +449,7 @@ class SettingsStore(
     private val syncableStrings = listOf(colorSchemeKey, lightColorSchemeKey, primaryFontKey, fallbackFontKey,
         sessionGroupByKey, sessionSortByKey, extraKeysLayoutKey, themeModeKey, keyboardModeKey, filesSortKey)
     private val syncableBooleans = listOf(schemeFollowsThemeKey, cursorBlinkKey, extraKeysVisibleKey, dynamicColorKey,
-        tmuxScrollSetupKey, confirmCloseKey, keepScreenOnKey, autoTrustNewHostKeyKey, terminalAlertsKey,
+        tmuxScrollSetupKey, confirmCloseKey, keepScreenOnKey, backgroundWakeLockKey, autoTrustNewHostKeyKey, terminalAlertsKey,
         includePrereleaseKey, filesShowHiddenKey)
     private val syncableFloats = listOf(fontSizeKey, lineSpacingKey, letterSpacingKey)
     private val syncableInts = listOf(fontSizeKeyInt, cursorStyleKey)

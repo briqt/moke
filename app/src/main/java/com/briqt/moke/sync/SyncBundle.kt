@@ -134,7 +134,9 @@ data class SyncBundle(
             val keysArray = o.optJSONArray("keys")
             val hasKeysArray = keysArray != null
             val explicitKeys = if (keysArray == null) emptyList() else {
-                (0 until keysArray.length()).mapNotNull { i -> keysArray.optJSONObject(i)?.let(::importKey) }
+                (0 until keysArray.length())
+                    .mapNotNull { i -> keysArray.optJSONObject(i)?.let(::importKey) }
+                    .distinctBy { it.id }
             }
             val importedHosts = (0 until items.length()).mapNotNull { i ->
                 items.optJSONObject(i)?.let { importHost(it, stripCompatInlineKey = hasKeysArray) }

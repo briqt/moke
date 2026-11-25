@@ -144,6 +144,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val keyboardMode by vm.keyboardMode.collectAsState()
     val confirmClose by vm.confirmCloseSession.collectAsState()
     val keepScreenOn by vm.keepScreenOn.collectAsState()
+    val backgroundWakeLock by vm.backgroundWakeLock.collectAsState()
     val autoTrustNewHostKey by vm.autoTrustNewHostKey.collectAsState()
     val terminalAlerts by vm.terminalAlerts.collectAsState()
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
@@ -719,6 +720,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             keyboardMode = keyboardMode,
             tmuxScrollSetup = tmuxScrollSetup,
             keepScreenOn = keepScreenOn,
+            backgroundWakeLock = backgroundWakeLock,
             confirmClose = confirmClose,
             autoTrustNewHostKey = autoTrustNewHostKey,
             terminalAlerts = terminalAlerts,
@@ -726,6 +728,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             onKeyboardMode = { vm.setKeyboardMode(it) },
             onTmuxScrollSetup = { vm.setTmuxScrollSetup(it) },
             onKeepScreenOn = { vm.setKeepScreenOn(it) },
+            onBackgroundWakeLock = { vm.setBackgroundWakeLock(it) },
             onConfirmClose = { vm.setConfirmCloseSession(it) },
             onAutoTrustNewHostKey = { vm.setAutoTrustNewHostKey(it) },
             extraKeysLayout = extraKeysLayout,

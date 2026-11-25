@@ -399,6 +399,8 @@
     <string name="menu_terminal_input">Terminal &amp; input</string>
     <string name="ignore_battery_optimizations">Ignore battery optimizations</string>
     <string name="action_allow_background">Allow background</string>
+    <string name="menu_background_wakelock">Keep awake in background</string>
+    <string name="menu_background_wakelock_desc">Prevents disconnects when screen is off; uses more battery</string>
     <string name="menu_ongoing_notification">Ongoing notification</string>
     <string name="section_ui">Interface</string>
     <string name="menu_tmux_scroll_setup">tmux scrolling</string>

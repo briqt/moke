@@ -24,6 +24,7 @@ import com.briqt.moke.LocaleManager
 import com.briqt.moke.MainActivity
 import com.briqt.moke.MokeApplication
 import com.briqt.moke.R
+import com.briqt.moke.data.SettingsStore
 import com.briqt.moke.localized
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,9 +39,9 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
 /**
- * 前台服务：只要还有需要后台保活的活动会话（`keepAliveEligible && alive`）就常驻，借前台优先级与唤醒锁
- * 让退后台/关屏时进程、CPU 定时器与 Wi-Fi 收发不被冻结。单次运行只提交一次静态低打扰前台通知（仅在通知从不可投递变为
- * 可投递、或通知仍在栏内且界面语言切换时同步刷新，绝不复活用户划掉的通知），活动会话归零时按最新 `startId` 安全停服并释放锁。
+ * 前台服务：只要还有需要后台保活的活动会话（`keepAliveEligible && alive`）就常驻，借前台服务优先级
+ * 让退后台/关屏时进程不被冻结或回收。唤醒锁（及 Android 11–13 的高性能 Wi-Fi 锁）受「后台保持唤醒」开关控制，
+ * 且仅在应用退到后台后按需持有、回到前台即释放；Android 14+ 不持有后台无效的低延迟 Wi-Fi 锁。
  */
 class MokeSessionService : Service() {
 
@@ -48,6 +49,8 @@ class MokeSessionService : Service() {
     private val fgsState = ForegroundServiceState()
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var currentHasLive = false
+    private var currentWakeLockEnabled = BackgroundKeepalive.wakeLockEnabled
     private var lastChannelDeliverable = false
     private var lastLangTag = ""
 
@@ -72,24 +75,41 @@ class MokeSessionService : Service() {
             }
             .distinctUntilChanged()
             .onEach { hasLive ->
+                currentHasLive = hasLive
                 if (!hasLive) {
                     releaseLocks()
                 }
                 when (fgsState.onWorkChanged(hasLive, ::stopSelfResult)) {
-                    FgsUpdateAction.NOTIFY -> acquireLocks()
+                    FgsUpdateAction.NOTIFY -> syncLocks()
                     FgsUpdateAction.STOP_FOREGROUND -> {
+                        releaseLocks()
                         clearForegroundRunning()
                         stopForegroundCompat()
                     }
-                    FgsUpdateAction.NONE -> Unit
+                    FgsUpdateAction.NONE -> syncLocks()
                 }
             }
+            .launchIn(scope)
+
+        SettingsStore(this).backgroundWakeLock
+            .distinctUntilChanged()
+            .onEach { enabled ->
+                BackgroundKeepalive.wakeLockEnabled = enabled
+                currentWakeLockEnabled = enabled
+                syncLocks()
+            }
+            .launchIn(scope)
+
+        TerminalAlerts.appVisibleFlow
+            .onEach { syncLocks() }
             .launchIn(scope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInFlightUntilElapsedMs = 0L
         val hasLive = hasLiveSessions(application)
+        currentHasLive = hasLive
+        currentWakeLockEnabled = BackgroundKeepalive.wakeLockEnabled
         val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
@@ -107,7 +127,7 @@ class MokeSessionService : Service() {
             lastChannelDeliverable = BackgroundKeepalive.isSessionNotificationChannelEnabled(this)
             lastLangTag = currentLangKey(this)
             markForegroundRunning()
-            acquireLocks()
+            syncLocks()
         }
         // 无会话可续时不自动重启（连接无法凭空恢复）。
         return START_NOT_STICKY
@@ -155,18 +175,26 @@ class MokeSessionService : Service() {
                 ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG)
                 ?.apply { setReferenceCounted(false) }
         }
-        runCatching {
-            // API 30–33 uses WIFI_MODE_FULL_HIGH_PERF (active while backgrounded/screen-off);
-            // API 34 deprecated WIFI_MODE_FULL_HIGH_PERF and maps it internally to WIFI_MODE_FULL_LOW_LATENCY.
-            val wifiMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-            } else {
+        if (BackgroundKeepalive.shouldCreateWifiLock(Build.VERSION.SDK_INT)) {
+            runCatching {
                 @Suppress("DEPRECATION")
-                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                wifiLock = applicationContext.getSystemService(WifiManager::class.java)
+                    ?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, WIFILOCK_TAG)
+                    ?.apply { setReferenceCounted(false) }
             }
-            wifiLock = applicationContext.getSystemService(WifiManager::class.java)
-                ?.createWifiLock(wifiMode, WIFILOCK_TAG)
-                ?.apply { setReferenceCounted(false) }
+        }
+    }
+
+    private fun syncLocks() {
+        val shouldHold = fgsState.started && BackgroundKeepalive.shouldHoldBackgroundLocks(
+            hasLiveSessions = currentHasLive,
+            wakeLockEnabled = currentWakeLockEnabled,
+            appVisible = TerminalAlerts.appVisible,
+        )
+        if (shouldHold) {
+            acquireLocks()
+        } else {
+            releaseLocks()
         }
     }
 

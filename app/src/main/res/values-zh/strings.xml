@@ -393,6 +393,8 @@
     <string name="menu_terminal_input">终端与输入</string>
     <string name="ignore_battery_optimizations">忽略电池优化</string>
     <string name="action_allow_background">忽略电池优化</string>
+    <string name="menu_background_wakelock">后台保持唤醒</string>
+    <string name="menu_background_wakelock_desc">防止息屏断连，会增加耗电</string>
     <string name="menu_ongoing_notification">常驻通知</string>
     <string name="section_ui">界面</string>
     <string name="menu_tmux_scroll_setup">tmux 滚屏</string>

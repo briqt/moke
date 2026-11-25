@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -393,13 +395,16 @@ fun FilesScreen(
         )
     }
 
-    if (showQueue) {
+    if (showQueue && tasks.isNotEmpty()) {
         TransferQueueSheet(
             tasks = tasks,
             onResume = onTaskResume,
             onCancel = onTaskCancel,
             onRemove = onTaskRemove,
-            onClearFinished = onClearFinished,
+            onClearFinished = {
+                onClearFinished()
+                if (tasks.none { it.active || it.state == TransferState.FAILED }) showQueue = false
+            },
             onDismiss = { showQueue = false },
         )
     }
@@ -621,11 +626,15 @@ private fun TransferBar(tasks: List<TransferTask>, activeCount: Int, onExpand: (
         ?: tasks.maxByOrNull { it.createdAt }
         ?: tasks.first()
     Surface(
+        onClick = onExpand,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        CenteredItem {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        CenteredItem(modifier = Modifier.navigationBarsPadding()) {
+            Column(
+                modifier = Modifier.sizeIn(minHeight = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         if (running.direction == com.briqt.moke.terminal.sftp.TransferDirection.UPLOAD) Icons.Filled.Upload

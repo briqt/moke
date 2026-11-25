@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="menu_keys">Keys</string>
-    <string name="menu_keys_empty">SSH keys and generation</string>
+    <string name="menu_keys_empty">Generate or import keys</string>
     <plurals name="menu_keys_summary">
         <item quantity="one">%1$d key</item>
         <item quantity="other">%1$d keys</item>
