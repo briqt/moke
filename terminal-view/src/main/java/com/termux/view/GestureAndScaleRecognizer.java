@@ -15,7 +15,7 @@ final class GestureAndScaleRecognizer {
         boolean onScroll(MotionEvent e, float dx, float dy);
         boolean onFling(MotionEvent e, float velocityX, float velocityY);
         boolean onScale(float focusX, float focusY, float scale);
-        /** True consumes this entire sequence (for example a tap that stops old inertia). */
+        /** 返回 true 时只抑制点击和长按，仍允许本次触摸转为拖动。 */
         boolean onDown(float x, float y);
         boolean onUp(MotionEvent e);
         void onLongPress(MotionEvent e);
@@ -30,7 +30,7 @@ final class GestureAndScaleRecognizer {
     private long downTime = -1, tapDownTime = -1;
     private float pendingX, pendingY, downX, downY;
     private final int tapSlopSquared;
-    private boolean tapEligible;
+    private boolean tapEligible, stoppedFling;
 
     GestureAndScaleRecognizer(Context context, Listener target) {
         listener = target;
@@ -96,8 +96,11 @@ final class GestureAndScaleRecognizer {
             pendingX = pendingY = 0;
             downX = event.getX();
             downY = event.getY();
-            tapEligible = true;
-            owner = listener.onDown(event.getX(), event.getY()) ? Owner.CONSUMED : Owner.PENDING;
+            stoppedFling = listener.onDown(event.getX(), event.getY());
+            tapEligible = !stoppedFling;
+            owner = Owner.PENDING;
+            if (stoppedFling) tapDownTime = -1;
+            gestures.setIsLongpressEnabled(!stoppedFling);
         } else if ((action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) && tapEligible) {
             float dx = event.getX() - downX, dy = event.getY() - downY;
             if (dx * dx + dy * dy > tapSlopSquared) {
@@ -116,7 +119,11 @@ final class GestureAndScaleRecognizer {
         }
         // Multi-touch owns the entire sequence, including the last remaining finger.
         scale.onTouchEvent(event);
-        if (owner == Owner.PENDING || owner == Owner.SCROLL) gestures.onTouchEvent(event);
+        if (owner == Owner.PENDING || owner == Owner.SCROLL) {
+            // 仅刹停的触摸不留作双击起点；下一次轻点应独立识别。
+            if (stoppedFling && owner == Owner.PENDING && action == MotionEvent.ACTION_UP) cancelDetector();
+            else gestures.onTouchEvent(event);
+        }
         if (action == MotionEvent.ACTION_UP) {
             if (owner == Owner.PENDING && tapEligible && listener.onUp(event)) tapDownTime = -1;
             owner = Owner.IDLE;

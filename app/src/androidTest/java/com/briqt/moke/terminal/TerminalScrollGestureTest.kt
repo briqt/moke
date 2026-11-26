@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalTransport
+import com.termux.view.ScrollMotion
 import com.termux.view.TerminalView
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Callable
@@ -165,7 +166,7 @@ class TerminalScrollGestureTest {
     }
 
     @Test
-    fun sixLineTouchDragSendsThreeRemoteWheelNotches() {
+    fun sixLineTouchDragSendsSixRemoteWheelNotches() {
         output("\u001b[?1000h\u001b[?1006h")
         val steps = onMain {
             val view = fixture.view
@@ -185,9 +186,41 @@ class TerminalScrollGestureTest {
         touches(*steps.toTypedArray(), pumpRemoteFrames = true)
 
         onMain {
-            assertEquals("Six line heights must send three wheel notches at the starting cell",
-                "\u001b[<64;4;5M".repeat(3), fixture.transport.text())
+            assertEquals("Six line heights must send six wheel notches at the starting cell",
+                "\u001b[<64;4;5M".repeat(6), fixture.transport.text())
             assertEquals(0, fixture.keyboardRequests)
+        }
+    }
+
+    @Test
+    fun dragCanReverseAnActiveFlingWithoutReplayingOldWheelEvents() = assertDragAfterFling(reverse = true)
+
+    @Test
+    fun dragCanContinueInTheSameDirectionAfterStoppingAnActiveFling() = assertDragAfterFling(reverse = false)
+
+    @Test
+    fun tapThatStopsAnActiveFlingDoesNotClickButTheNextTapWorks() {
+        output("\u001b[?1000;1006h")
+
+        touchAfterFling(*tap().toTypedArray())
+        awaitTapConfirmation()
+        onMain { assertClickCount(0) }
+
+        touches(*tap().toTypedArray())
+        awaitTapConfirmation()
+        onMain { assertClickCount(1) }
+    }
+
+    @Test
+    fun localTapImmediatelyAfterBrakingStillRequestsTheKeyboard() {
+        val rows = onMain { fixture.view.mEmulator.mRows }
+        output("\u001b[?2004h" + (0 until rows + 60).joinToString("") { "line-$it\r\n" })
+
+        touchAfterFling(*(tap() + tap(startMs = 110)).toTypedArray())
+        awaitTapConfirmation()
+        onMain {
+            assertEquals("Only the tap after braking should request the keyboard", 1, fixture.keyboardRequests)
+            assertEquals("Scrolling the local history must not send input", "", fixture.transport.text())
         }
     }
 
@@ -280,26 +313,24 @@ class TerminalScrollGestureTest {
     }
 
     @Test
-    fun alternateScrollRequestRoutesArrowsEvenWithBracketedPasteEnabled() {
+    fun untrackedAlternateScreenRoutesArrowsWithOrWithoutAlternateScrollMode() {
         output("\u001b[?1049h\u001b[?1l\u001b[?2004h")
         onMain {
             assertTrue(fixture.view.mEmulator.isAlternateBufferActive)
             assertTrue(fixture.view.mEmulator.isBracketedPasteMode)
         }
-        touches(*dragAndCancel().toTypedArray(), pumpRemoteFrames = true)
-        onMain {
-            assertEquals("Bracketed paste alone must not imply arrow scrolling", "", fixture.transport.text())
-        }
 
-        output("\u001b[?1007h")
-        touches(*dragAndCancel().toTypedArray(), pumpRemoteFrames = true)
-
-        onMain {
-            val actual = fixture.transport.text()
-            val up = "\u001b[A"
-            assertTrue("Explicit alternate scrolling must emit input", actual.isNotEmpty())
-            assertEquals("The entire batch must consist only of Up keys", up.repeat(actual.length / up.length), actual)
-            assertEquals(0, fixture.keyboardRequests)
+        for (request in listOf("\u001b[?1007l", "\u001b[?1007h")) {
+            output(request)
+            touches(*dragAndCancel().toTypedArray(), pumpRemoteFrames = true)
+            onMain {
+                val actual = fixture.transport.text()
+                val up = "\u001b[A"
+                assertTrue("An untracked alternate screen must receive input", actual.isNotEmpty())
+                assertEquals("The entire batch must consist only of Up keys", up.repeat(actual.length / up.length), actual)
+                assertEquals(0, fixture.keyboardRequests)
+                fixture.transport.clear()
+            }
         }
     }
 
@@ -385,6 +416,66 @@ class TerminalScrollGestureTest {
 
     private fun step(delayMs: Long, action: Int, vararg points: Pair<Float, Float>) = TouchStep(delayMs, action, points.toList())
 
+    private fun assertDragAfterFling(reverse: Boolean) {
+        output("\u001b[?1000;1006h")
+        val (start, end) = onMain {
+            val view = fixture.view
+            val x = view.width * 0.5f
+            val top = x to view.height * 0.25f
+            val bottom = x to view.height * 0.75f
+            if (reverse) bottom to top else top to bottom
+        }
+        touchAfterFling(
+            step(0, MotionEvent.ACTION_DOWN, start),
+            step(40, MotionEvent.ACTION_MOVE, end),
+            step(80, MotionEvent.ACTION_CANCEL, end),
+        )
+        awaitTapConfirmation()
+        onMain {
+            val actual = fixture.transport.text()
+            val direction = if (reverse) 65 else 64
+            val wheel = Regex("\u001b\\[<$direction;[0-9]+;[0-9]+M")
+            assertTrue("The drag must scroll even when its press stopped a fling", actual.isNotEmpty())
+            assertEquals("Dispatch only wheel events in the new drag direction", "", actual.replace(wheel, ""))
+            assertEquals(0, fixture.keyboardRequests)
+        }
+    }
+
+    /** 在同一轮主线程回调中注入相邻手势，避免惯性先于测试手势结束。 */
+    private fun touchAfterFling(vararg next: TouchStep) = onMain {
+        val view = fixture.view
+        fun point(fraction: Float) = view.width * 0.5f to view.height * fraction
+        val first = listOf(
+            step(0, MotionEvent.ACTION_DOWN, point(0.25f)),
+            step(20, MotionEvent.ACTION_MOVE, point(0.40f)),
+            step(40, MotionEvent.ACTION_MOVE, point(0.60f)),
+            step(60, MotionEvent.ACTION_UP, point(0.75f)),
+        )
+        val start = SystemClock.uptimeMillis() - 70L - next.last().delayMs
+        // 只推进拖动帧，把抬手排入的惯性帧留给下一次按下取消。
+        first.forEach { dispatchTouch(it, start, start + it.delayMs, pumpRemoteFrames = it.action == MotionEvent.ACTION_MOVE) }
+        val motion = TerminalView::class.java.getDeclaredField("mMotion").apply { isAccessible = true }
+            .get(view) as ScrollMotion
+        assertTrue("The first gesture must leave an active fling", motion.isRunning)
+        if (view.mEmulator.isMouseTrackingActive) {
+            assertTrue("The first drag must have sent wheel events", fixture.transport.text().contains("\u001b[<64;"))
+        } else {
+            assertTrue("The first drag must have moved into local history", view.topRow < 0)
+            assertEquals("", fixture.transport.text())
+        }
+        fixture.transport.clear()
+        val nextStart = start + 70L
+        var down = nextStart
+        next.forEach {
+            val eventTime = nextStart + it.delayMs
+            if (it.action == MotionEvent.ACTION_DOWN) down = eventTime
+            dispatchTouch(it, down, eventTime, pumpRemoteFrames = true)
+            if (it.action == MotionEvent.ACTION_DOWN) {
+                assertFalse("The second press must stop the old fling", motion.isRunning)
+            }
+        }
+    }
+
     /** Schedule real-time events on the main looper; never sleep or wait on that thread. */
     private fun touches(vararg steps: TouchStep, pumpRemoteFrames: Boolean = false, afterStep: ((Int) -> Unit)? = null) {
         val completed = CountDownLatch(1)
@@ -399,31 +490,8 @@ class TerminalScrollGestureTest {
                         try {
                             val now = SystemClock.uptimeMillis()
                             if (touch.action == MotionEvent.ACTION_DOWN) downTime = now
-                            val properties = Array(touch.points.size) { pointer ->
-                                MotionEvent.PointerProperties().apply {
-                                    id = pointer
-                                    toolType = MotionEvent.TOOL_TYPE_FINGER
-                                }
-                            }
-                            val coordinates = Array(touch.points.size) { pointer ->
-                                MotionEvent.PointerCoords().apply {
-                                    x = touch.points[pointer].first
-                                    y = touch.points[pointer].second
-                                    pressure = 1f
-                                    size = 1f
-                                }
-                            }
-                            val event = MotionEvent.obtain(
-                                downTime, now, touch.action, touch.points.size, properties, coordinates,
-                                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
-                            )
-                            try {
-                                assertTrue(fixture.view.onTouchEvent(event))
-                                if (pumpRemoteFrames) pumpPendingScrollFrame()
-                                afterStep?.invoke(index)
-                            } finally {
-                                event.recycle()
-                            }
+                            dispatchTouch(touch, downTime, now, pumpRemoteFrames)
+                            afterStep?.invoke(index)
                         } catch (error: Throwable) {
                             failure.set(error)
                             completed.countDown()
@@ -439,6 +507,33 @@ class TerminalScrollGestureTest {
             onMain { mainHandler.removeCallbacksAndMessages(token) }
         }
         failure.get()?.let { throw it }
+    }
+
+    private fun dispatchTouch(touch: TouchStep, downTime: Long, eventTime: Long, pumpRemoteFrames: Boolean) {
+        val properties = Array(touch.points.size) { pointer ->
+            MotionEvent.PointerProperties().apply {
+                id = pointer
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
+        val coordinates = Array(touch.points.size) { pointer ->
+            MotionEvent.PointerCoords().apply {
+                x = touch.points[pointer].first
+                y = touch.points[pointer].second
+                pressure = 1f
+                size = 1f
+            }
+        }
+        val event = MotionEvent.obtain(
+            downTime, eventTime, touch.action, touch.points.size, properties, coordinates,
+            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
+        )
+        try {
+            assertTrue(fixture.view.onTouchEvent(event))
+            if (pumpRemoteFrames) pumpPendingScrollFrame()
+        } finally {
+            event.recycle()
+        }
     }
 
     private fun pumpPendingScrollFrame() {
