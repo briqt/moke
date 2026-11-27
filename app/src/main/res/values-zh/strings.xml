@@ -463,8 +463,8 @@
     <string name="fwd_add">添加</string>
     <string name="fwd_add_title">添加端口转发</string>
     <string name="fwd_empty">还没有转发</string>
-    <string name="fwd_connecting">远端 %1$d · 正在建立…</string>
-    <string name="fwd_row_remote">远端 %1$d</string>
+    <string name="fwd_connecting">远端 %1$s · 正在建立…</string>
+    <string name="fwd_row_remote">远端 %1$s</string>
     <string name="fwd_failed">转发不可用</string>
     <string name="fwd_copy_address">复制地址</string>
     <string name="fwd_stop">停止</string>

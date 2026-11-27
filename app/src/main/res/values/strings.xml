@@ -469,8 +469,8 @@
     <string name="fwd_add">Add</string>
     <string name="fwd_add_title">Add port forward</string>
     <string name="fwd_empty">No forwards yet</string>
-    <string name="fwd_connecting">Remote %1$d · connecting…</string>
-    <string name="fwd_row_remote">Remote %1$d</string>
+    <string name="fwd_connecting">Remote %1$s · connecting…</string>
+    <string name="fwd_row_remote">Remote %1$s</string>
     <string name="fwd_failed">Forward unavailable</string>
     <string name="fwd_copy_address">Copy address</string>
     <string name="fwd_stop">Stop</string>

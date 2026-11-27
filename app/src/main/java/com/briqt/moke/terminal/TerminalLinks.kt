@@ -42,11 +42,25 @@ object TerminalLinks {
     }
 
     /** 指向本机回环地址的链接（`localhost` / `127.0.0.1` / `0.0.0.0` / `[::1]`）：在手机上直接打开没有意义。 */
-    fun isLocal(url: String): Boolean {
-        val host = url.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#')
-            .let { if (it.startsWith("[")) it.substringBefore(']') + "]" else it.substringBefore(':') }
-            .lowercase()
-        return host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "[::1]"
+    fun isLocal(url: String): Boolean = localAuthorityOf(url) != null
+
+    internal data class LocalAuthority(val scheme: String, val host: String, val portSuffix: String)
+
+    internal fun localAuthorityOf(url: String): LocalAuthority? {
+        val scheme = url.substringBefore("://").lowercase()
+        if (scheme != "http" && scheme != "https") return null
+        val authority = url.substringAfter("://", "").substringBefore('/').substringBefore('?').substringBefore('#')
+        val host = (if (authority.startsWith("[")) {
+            val end = authority.indexOf(']')
+            if (end == -1) return null
+            authority.substring(0, end + 1)
+        } else {
+            authority.substringBefore(':')
+        }).lowercase()
+        return when (host) {
+            "localhost", "127.0.0.1", "0.0.0.0", "[::1]" -> LocalAuthority(scheme, host, authority.substring(host.length))
+            else -> null
+        }
     }
 
     /**

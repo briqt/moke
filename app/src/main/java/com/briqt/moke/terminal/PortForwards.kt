@@ -38,12 +38,17 @@ class PortForwards(private val transport: ForwardCapable) {
     /** [parsePorts] 的结果：合法端口（去重保序）与无法识别的原文片段。 */
     data class Parsed(val ports: List<Int>, val invalid: List<String>)
 
-    data class Entry(val remotePort: Int, val remoteHost: String, val localPort: Int, val state: State) {
+    data class Target(val port: Int, val host: String = DEFAULT_REMOTE_HOST) {
+        val address: String get() = if (':' in host) "[$host]:$port" else "$host:$port"
+    }
+
+    data class Entry(val target: Target, val localPort: Int, val state: State) {
         /** 在手机上访问这条转发的地址。 */
         val localUrl: String get() = "http://127.0.0.1:$localPort/"
     }
 
     private class Running(
+        val client: SSHClient,
         val forwarder: LocalPortForwarder,
         val socket: ServerSocket,
         val thread: Thread,
@@ -53,31 +58,33 @@ class PortForwards(private val transport: ForwardCapable) {
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
-    private val running = HashMap<Int, Running>()
+    private val running = HashMap<Target, Running>()
     private val lock = Any()
     /** 会话已关（[stopAll] 之后）：还在途中的 [start] 不得再登记新转发。受 [lock] 保护。 */
     private var closed = false
 
+    fun start(remotePort: Int): Int? = start(Target(remotePort))
+
     /**
-     * 转发远端 [remotePort]（阻塞，勿在主线程调用）。已有同一远端端口的活动转发时直接复用。
+     * 转发远端 [target]（阻塞，勿在主线程调用）。只复用远端地址与端口都相同的活动转发。
      * [localPort] 为空或被占用时由系统分配。返回实际的本地端口；失败返回 null。
      */
-    fun start(remotePort: Int, localPort: Int? = null, remoteHost: String = DEFAULT_REMOTE_HOST): Int? {
+    fun start(target: Target, localPort: Int? = null): Int? {
         synchronized(lock) {
             if (closed) return null
-            _entries.value.firstOrNull { it.remotePort == remotePort && it.state == State.ACTIVE }?.let { return it.localPort }
+            activePort(target)?.let { return it }
         }
-        val client = runCatching { transport.acquireForwardClient() }.getOrNull() ?: return fail(remotePort, remoteHost, localPort)
+        val client = runCatching { transport.acquireForwardClient() }.getOrNull() ?: return fail(target, localPort)
         val socket = runCatching { bind(localPort) }.getOrElse {
             transport.releaseForwardClient()
-            return fail(remotePort, remoteHost, localPort)
+            return fail(target, localPort)
         }
         val forwarder = runCatching {
-            client.newLocalPortForwarder(Parameters(LOOPBACK, socket.localPort, remoteHost, remotePort), socket)
+            client.newLocalPortForwarder(Parameters(LOOPBACK, socket.localPort, target.host, target.port), socket)
         }.getOrElse {
             runCatching { socket.close() }
             transport.releaseForwardClient()
-            return fail(remotePort, remoteHost, localPort)
+            return fail(target, localPort)
         }
         lateinit var r: Running
         val thread = Thread({
@@ -92,9 +99,9 @@ class PortForwards(private val transport: ForwardCapable) {
             val owned = synchronized(lock) {
                 if (r.stopped) false else {
                     r.stopped = true
-                    if (running[remotePort] === r) {
-                        running.remove(remotePort)
-                        _entries.update { list -> list.map { if (it.remotePort == remotePort) it.copy(state = State.FAILED) else it } }
+                    if (running[target] === r) {
+                        running.remove(target)
+                        _entries.update { list -> list.map { if (it.target == target) it.copy(state = State.FAILED) else it } }
                     }
                     true
                 }
@@ -103,27 +110,29 @@ class PortForwards(private val transport: ForwardCapable) {
                 runCatching { socket.close() }
                 transport.releaseForwardClient()
             }
-        }, "moke-fwd-$remotePort").apply { isDaemon = true }
-        r = Running(forwarder, socket, thread)
+        }, "moke-fwd-${target.port}").apply { isDaemon = true }
+        r = Running(client, forwarder, socket, thread)
         synchronized(lock) {
-            if (closed) {
-                r.stopped = true
+            // 建连期间同一目标可能已建立；只复用仍有可用 SSH 连接的监听。
+            val existing = activePort(target)
+            if (closed || existing != null || !client.isConnected || !client.isAuthenticated) {
                 runCatching { socket.close() }
                 transport.releaseForwardClient()
-                return null
+                if (closed) return null
+                return existing ?: fail(target, localPort)
             }
-            running.put(remotePort, r)?.let { old -> stopRunning(old) }
-            upsert(Entry(remotePort, remoteHost, socket.localPort, State.ACTIVE))
+            running.put(target, r)?.let { stopRunning(it) }
+            upsert(Entry(target, socket.localPort, State.ACTIVE))
         }
         thread.start()
         return socket.localPort
     }
 
     /** 停止并移除一条转发（含失败条目）。 */
-    fun stop(remotePort: Int) {
+    fun stop(target: Target) {
         synchronized(lock) {
-            running.remove(remotePort)?.let { stopRunning(it) }
-            _entries.update { list -> list.filterNot { it.remotePort == remotePort } }
+            running.remove(target)?.let { stopRunning(it) }
+            _entries.update { list -> list.filterNot { it.target == target } }
         }
     }
 
@@ -148,13 +157,22 @@ class PortForwards(private val transport: ForwardCapable) {
         transport.releaseForwardClient()
     }
 
+    private fun activePort(target: Target): Int? = running[target]?.takeIf {
+        !it.socket.isClosed && it.client.isConnected && it.client.isAuthenticated
+    }?.socket?.localPort
+
     private fun upsert(e: Entry) {
-        _entries.update { list -> if (list.any { it.remotePort == e.remotePort }) list.map { if (it.remotePort == e.remotePort) e else it } else list + e }
+        _entries.update { list -> if (list.any { it.target == e.target }) list.map { if (it.target == e.target) e else it } else list + e }
     }
 
-    private fun fail(remotePort: Int, remoteHost: String, localPort: Int?): Int? {
-        synchronized(lock) { upsert(Entry(remotePort, remoteHost, localPort ?: 0, State.FAILED)) }
-        return null
+    private fun fail(target: Target, localPort: Int?): Int? {
+        synchronized(lock) {
+            if (closed) return null
+            activePort(target)?.let { return it }
+            running.remove(target)?.let { stopRunning(it) }
+            upsert(Entry(target, localPort ?: 0, State.FAILED))
+            return null
+        }
     }
 
     /** 优先用指定的本地端口；被占用（或未指定）时交给系统分配。 */
@@ -190,17 +208,23 @@ class PortForwards(private val transport: ForwardCapable) {
             return Parsed(ports.toList(), invalid)
         }
 
-        /**
-         * 本机回环链接要转发的远端端口；没写端口时按协议默认（http 80 / https 443）。
-         * 非本机链接、端口写得不对（非数字、越界）返回 null——不能猜一个端口去转发。
-         */
-        fun remotePortOf(url: String): Int? {
-            if (!TerminalLinks.isLocal(url)) return null
-            val scheme = url.substringBefore("://").lowercase()
-            val authority = url.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#')
-            val portText = if (authority.startsWith("[")) authority.substringAfter(']', "").removePrefix(":") else authority.substringAfter(':', "")
-            if (portText.isEmpty()) return if (scheme == "https") 443 else 80
-            return portText.toIntOrNull()?.takeIf { it in 1..65535 }
+        /** 解析远端回环链接，保留显式地址；通配监听地址仍按默认回环目标打开。 */
+        fun targetOf(url: String): Target? {
+            val authority = TerminalLinks.localAuthorityOf(url) ?: return null
+            val suffix = authority.portSuffix
+            val port = if (suffix.isEmpty() || suffix == ":") {
+                if (authority.scheme == "https") 443 else 80
+            } else {
+                val digits = suffix.drop(1)
+                if (suffix[0] != ':' || digits.any { it !in '0'..'9' }) return null
+                digits.toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+            }
+            val host = when (authority.host) {
+                "0.0.0.0" -> DEFAULT_REMOTE_HOST
+                "[::1]" -> "::1"
+                else -> authority.host
+            }
+            return Target(port, host)
         }
 
         /**

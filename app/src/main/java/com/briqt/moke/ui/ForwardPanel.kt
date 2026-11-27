@@ -30,6 +30,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,14 +63,15 @@ fun ForwardPanel(
     val entries by forwards.entries.collectAsState()
     val scope = rememberCoroutineScope()
     var adding by remember { mutableStateOf(false) }
-    // 正在建立的远端端口（建连可能要几秒，期间给个"连接中"而不是毫无反应）。
-    var pending by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    val pending = remember { mutableStateMapOf<Any, PortForwards.Target>() }
 
-    fun start(remote: Int, local: Int?) {
-        pending = pending + remote
-        scope.launch {
-            withContext(Dispatchers.IO) { forwards.start(remote, local) }
-            pending = pending - remote
+    suspend fun start(target: PortForwards.Target, local: Int?): Boolean {
+        val request = Any()
+        pending[request] = target
+        return try {
+            withContext(Dispatchers.IO) { forwards.start(target, local) != null }
+        } finally {
+            pending.remove(request)
         }
     }
 
@@ -103,24 +105,24 @@ fun ForwardPanel(
                     }
                 }
                 items(
-                    pending.filter { p -> entries.none { it.remotePort == p && it.state == PortForwards.State.ACTIVE } },
-                    key = { "pending:$it" },
-                ) { p ->
+                    pending.values.distinct().filter { target -> entries.none { it.target == target && it.state == PortForwards.State.ACTIVE } },
+                    key = { "pending:${it.address}" },
+                ) { target ->
                     Text(
-                        stringResource(R.string.fwd_connecting, p),
+                        stringResource(R.string.fwd_connecting, target.address),
                         fontFamily = MokeMono,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 12.dp),
                     )
                 }
-                items(entries, key = { "forward:${it.remotePort}" }) { e ->
+                items(entries, key = { "forward:${it.target.address}" }) { e ->
                     ForwardRow(
                         entry = e,
                         onOpen = { onOpen(e.localUrl) },
                         onCopy = { onCopy(e.localUrl) },
-                        onRetry = { start(e.remotePort, e.localPort.takeIf { it > 0 }) },
-                        onStop = { scope.launch(Dispatchers.IO) { forwards.stop(e.remotePort) } },
+                        onRetry = { scope.launch { start(e.target, e.localPort.takeIf { it > 0 }) } },
+                        onStop = { scope.launch(Dispatchers.IO) { forwards.stop(e.target) } },
                     )
                 }
             }
@@ -130,12 +132,9 @@ fun ForwardPanel(
     if (adding) {
         AddForwardDialog(
             onConfirm = { remote, local ->
-                pending = pending + remote
-                try {
-                    val success = withContext(Dispatchers.IO) { forwards.start(remote, local) != null }
-                    if (success) adding = false
-                    success
-                } finally { pending = pending - remote }
+                val success = start(PortForwards.Target(remote), local)
+                if (success) adding = false
+                success
             },
             onDismiss = { adding = false },
         )
@@ -157,7 +156,7 @@ private fun ForwardRow(
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                stringResource(R.string.fwd_row_remote, entry.remotePort),
+                stringResource(R.string.fwd_row_remote, entry.target.address),
                 fontFamily = MokeMono,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,

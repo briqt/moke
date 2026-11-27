@@ -556,16 +556,16 @@ fun TerminalScreen(
                             // 本机链接：先把远端端口转到手机，再打开改写后的地址（一步完成，转发会留在面板里）。
                             onForwardOpen = run {
                                 val forwards = ts.forwards
-                                val remotePort = PortForwards.remotePortOf(url)
-                                if (forwards == null || remotePort == null || !alive) null else {
+                                val target = PortForwards.targetOf(url)
+                                if (forwards == null || target == null || !alive) null else {
                                     {
                                         tappedLink = null
                                         scope.launch {
-                                            val local = withContext(Dispatchers.IO) { forwards.start(remotePort) }
+                                            val local = withContext(Dispatchers.IO) { forwards.start(target) }
                                             if (local != null) {
                                                 openUrl(context, PortForwards.rewriteToLocal(url, local))
                                             } else {
-                                                Toast.makeText(context, resources.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, resources.getString(R.string.fwd_open_failed, target.port), Toast.LENGTH_LONG).show()
                                             }
                                         }
                                     }
