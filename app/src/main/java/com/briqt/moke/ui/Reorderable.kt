@@ -258,7 +258,7 @@ fun <T> GroupedReorderableList(
 }
 
 // 分组头在 LazyColumn 里的稳定 String 键：带控制符前缀，绝不与条目键（主机 id 的 UUID）冲突，且可进 Bundle。
-private const val GROUP_HEADER_PREFIX = " moke-hdr "
+private const val GROUP_HEADER_PREFIX = "\u0000moke-hdr\u0000"
 private fun headerKeyOf(group: String): String = GROUP_HEADER_PREFIX + group
 private fun isHeaderKey(key: Any?): Boolean = key is String && key.startsWith(GROUP_HEADER_PREFIX)
 private fun groupOfHeaderKey(key: Any?): String = (key as String).removePrefix(GROUP_HEADER_PREFIX)

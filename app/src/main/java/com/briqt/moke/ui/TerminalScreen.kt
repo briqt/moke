@@ -651,7 +651,7 @@ fun TerminalScreen(
                         scope.launch {
                             if (text.isNotEmpty()) ts.session.write(text)
                             // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
-                            // 否则「正文+尾部 CR」会被 raw 模式 TUI(如 claude / vim 插入态)判为粘贴，只插入换行而不提交。
+                            // 否则「正文+尾部 CR」会被 raw 模式全屏程序判为粘贴，只插入换行而不提交。
                             if (appendEnter) {
                                 if (text.isNotEmpty()) delay(40)
                                 ts.session.write("\r")

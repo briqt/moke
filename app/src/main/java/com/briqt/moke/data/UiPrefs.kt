@@ -12,7 +12,7 @@ enum class ThemeMode {
 
 /**
  * 终端软键盘模式——决定 `TerminalView.onCreateInputConnection` 上报的 inputType。
- * 部分厂商（如荣耀/华为）见到"密码变体"输入框会强制切到系统安全键盘，导致中文候选不可用，
+ * 部分系统见到"密码变体"输入框会强制切到系统安全键盘，导致中文候选不可用，
  * 故把它做成可切换项而非硬编码。
  *
  * - [SECURE]   字符模式：`TYPE_TEXT_VARIATION_VISIBLE_PASSWORD | NO_SUGGESTIONS`，逐字符提交，

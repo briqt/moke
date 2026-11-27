@@ -23,8 +23,7 @@ import java.security.Security
  * 这里在进程启动时把 "BC" 替换为随包的完整 BouncyCastle（bcprov-jdk18on），使其支持完整算法集。
  *
  * 会话管理器 [sessions] 提升到 **Application 作用域**：会话不随 Activity/ViewModel 销毁而消失，
- * 配合前台服务 [com.briqt.moke.terminal.MokeSessionService] 让会话在 app 退到后台/关屏时仍存活
- * （参考 Termux/ConnectBot 的前台服务持有会话思路）。
+ * 配合前台服务 [com.briqt.moke.terminal.MokeSessionService] 让会话在应用退到后台或关屏时保持存活。
  */
 class MokeApplication : Application() {
 
@@ -106,7 +105,7 @@ class MokeApplication : Application() {
      * 进程发生 OOM 时把堆快照写到 app 外部文件目录（`Android/data/<pkg>/files/moke-oom.hprof`），
      * 用于事后定位"到底谁把堆吃满了"。**正式包同样启用**：内存类问题只在真实使用中暴露，
      * 缺了这份快照就只能靠猜。只在崩溃那一刻写一次，正常运行零开销。
-     * 包住既有的默认 handler（LeakCanary 也会装 handler，链式委托保证互不吞掉）。
+     * 包住既有的默认 handler（链式委托保证与其它异常处理器互不吞掉）。
      * 路径预先算好，避免 OOM 时再分配字符串失败。
      */
     private fun installOomHprofDumper() {

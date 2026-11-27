@@ -1,11 +1,10 @@
 package com.termux.terminal;
 
 /**
- * 传输层抽象：把某种字节流通道（SSH shell / mosh / 本地 demo）接到一个 {@link TerminalSession}。
+ * 传输层抽象：把字节流通道（SSH / mosh / 预览样张）接到 {@link TerminalSession}。
  *
- * <p>这是 moke 项目总纲中 {@code ITerminalSession} 抽象的落地：{@link com.termux.view.TerminalView}
- * 只认 {@link TerminalSession}（渲染绑定），底层是 PTY、SSH 还是 UDP(mosh) 由本接口的实现决定。
- * 具体实现（SshTransport / MoshTransport / LocalDemoTransport）位于 app 层。
+ * <p>{@link com.termux.view.TerminalView} 只绑定 {@link TerminalSession}，底层走 SSH 还是 mosh
+ * 由本接口的实现决定；具体实现（SshTransport / MoshTransport / PreviewTransport）位于 app 层。
  *
  * <p>线程约定：
  * <ul>

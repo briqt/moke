@@ -14,15 +14,15 @@
 
 ## Features
 
-- **SSH / mosh**: password, PEM private-key and Tailscale SSH identity authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
+- **SSH / mosh**: password, SSH key (unified management, on-device generation, and multi-format import) and Tailscale SSH identity authentication, host-key fingerprint confirmation, SSH jump hosts, and per-host startup commands.
 - **Built-in Tailscale**: select visible devices in the app or connect using Tailscale IP addresses and MagicDNS hostnames, with support for official and self-hosted control servers. The userspace client does not use the system VPN slot.
 - **Proxies**: HTTP / HTTPS / SOCKS4 / SOCKS5 proxies, selectable per host.
 - **Sessions & tmux**: multiple sessions, background connections, remote tmux session management, and port forwarding that listens only on the device's loopback interface.
 - **Files**: SFTP browsing, uploads and downloads with resume, and sending file paths to the terminal.
-- **Terminal**: customizable extra keys, IME input, text-block input, links, clipboard and notification support, fonts and color schemes, and English / Chinese interfaces.
+- **Terminal**: customizable bottom extra keys and key combos, IME input, text-block input, links, clipboard and notification support, fonts and color schemes, and English / Chinese interfaces.
 - **Backup & restore**: upload end-to-end encrypted backups over HTTPS WebDAV, and preview changes before merging or replacing selected categories.
 
-Network credentials and tailnet login state are encrypted with the Android Keystore.
+Host credentials, SSH private keys, network credentials, and tailnet login state are encrypted with the Android Keystore.
 
 ## Use built-in Tailscale
 

@@ -121,7 +121,7 @@ class KeySeqTest {
         assertEquals("$e\t", KeySeq.encode(KeyId.Tab, alt = true))
     }
 
-    /** 行编辑型 TUI（claude code / codex）里"换行不提交"的常见约定。 */
+    /** 多行输入场景中"换行不直接提交"的常见约定。 */
     @Test
     fun `Alt+Enter 发 ESC 加回车`() {
         assertEquals("$e\r", KeySeq.encode(KeyId.Enter, alt = true))

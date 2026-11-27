@@ -97,7 +97,7 @@ class TmuxAttachTest {
     @Test
     fun `default session name is tmux-safe`() {
         // tmux 的会话名不能含 ':' 与 '.'。
-        assertEquals("tokyo-ssh", Tmux.defaultSessionName("tokyo ssh"))
+        assertEquals("prod-ssh", Tmux.defaultSessionName("prod ssh"))
         assertEquals("web-1", Tmux.defaultSessionName("web:1"))
         assertEquals("root-10-0-0-1", Tmux.defaultSessionName("root@10.0.0.1"))
         assertEquals("小说写作", Tmux.defaultSessionName("小说写作"))

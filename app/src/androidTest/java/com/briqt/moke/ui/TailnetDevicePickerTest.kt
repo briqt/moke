@@ -183,11 +183,12 @@ class TailnetDevicePickerTest {
     }
 
     private fun text(id: Int) = context.getString(id)
-    private fun find(value: String, description: Boolean = false): AccessibilityNodeInfo? {
+    private fun find(value: String, description: Boolean = false, actionable: Boolean = false): AccessibilityNodeInfo? {
         val root = inst.uiAutomation.rootInActiveWindow ?: return null
         fun visit(node: AccessibilityNodeInfo, exact: Boolean): AccessibilityNodeInfo? {
             val content = (if (description) node.contentDescription else node.text)?.toString()
-            if (if (description || exact) content == value else content?.contains(value) == true) return node
+            val matches = if (description || exact) content == value else content?.contains(value) == true
+            if (matches && (!actionable || clickable(node))) return node
             for (i in 0 until node.childCount) node.getChild(i)?.let { visit(it, exact)?.let { found -> return found } }
             return null
         }
@@ -203,8 +204,8 @@ class TailnetDevicePickerTest {
         return false
     }
     private fun click(value: String, description: Boolean = false) {
-        await("control: $value") { find(value, description) != null }
-        var node = find(value, description)!!
+        await("actionable control: $value") { find(value, description, actionable = true) != null }
+        var node = find(value, description, actionable = true)!!
         repeat(6) {
             if (node.isClickable) {
                 assertTrue("Control must be enabled: $value", node.isEnabled)

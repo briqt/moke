@@ -39,14 +39,14 @@ class TmuxNameDialogInputTest {
     @Test
     fun initialSelectionAndContinuousTypingRespectAManuallyMovedCaret() = withDialog { _, _ ->
         captureEvidence("initial-selection.png")
-        instrumentation.sendStringSync("a")
+        type("a")
         assertEditor("a", 1)
-        instrumentation.sendStringSync("b")
+        type("b")
         assertEditor("ab", 2)
 
         edit("move caret between letters") { setSelection(1, 1) }
         assertEditor("ab", 1)
-        instrumentation.sendStringSync("c")
+        type("c")
         assertEditor("acb", 2)
         captureEvidence("continuous-input.png")
     }
@@ -111,6 +111,15 @@ class TmuxNameDialogInputTest {
             assertEditor("moke", 0, 4)
             test(scenario, state)
         }
+    }
+
+    /** Commit plain characters without letting an active predictive system IME hijack prior letters as a composing span. */
+    private fun type(text: String) = edit("type '$text'") {
+        beginBatchEdit()
+        finishComposingText()
+        val committed = commitText(text, 1)
+        endBatchEdit()
+        committed
     }
 
     private fun edit(description: String, action: InputConnection.() -> Boolean) {
@@ -184,16 +193,18 @@ class TmuxNameDialogInputTest {
 
     private fun assertEditor(text: String, start: Int, end: Int = start) {
         val expected = EditorState(text, start, end)
-        val actual = awaitNode("editor state $expected") { node ->
+        var lastSeen: EditorState? = null
+        val actual = awaitNode({ "editor state $expected (lastSeen=$lastSeen)" }) { node ->
             if (node.isFocused && node.isEditable && node.className == "android.widget.EditText") {
-                EditorState(node.text?.toString().orEmpty(), node.textSelectionStart, node.textSelectionEnd)
-                    .takeIf { it == expected }
+                val cur = EditorState(node.text?.toString().orEmpty(), node.textSelectionStart, node.textSelectionEnd)
+                lastSeen = cur
+                cur.takeIf { it == expected }
             } else null
         }
         assertEquals(expected, actual)
     }
 
-    private fun <T : Any> awaitNode(description: String, read: (AccessibilityNodeInfo) -> T?): T {
+    private fun <T : Any> awaitNode(description: () -> String, read: (AccessibilityNodeInfo) -> T?): T {
         val deadline = SystemClock.uptimeMillis() + 5_000
         do {
             instrumentation.waitForIdleSync()
@@ -202,8 +213,11 @@ class TmuxNameDialogInputTest {
             }
             SystemClock.sleep(25)
         } while (SystemClock.uptimeMillis() < deadline)
-        throw AssertionError("Timed out waiting for $description in the active window")
+        throw AssertionError("Timed out waiting for ${description()} in the active window")
     }
+
+    private fun <T : Any> awaitNode(description: String, read: (AccessibilityNodeInfo) -> T?): T =
+        awaitNode({ description }, read)
 
     @Suppress("DEPRECATION")
     private fun <T : Any> readNode(node: AccessibilityNodeInfo, read: (AccessibilityNodeInfo) -> T?): T? {

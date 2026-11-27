@@ -18,7 +18,7 @@ android {
         versionName = "0.2.4-rc.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
+        // mosh native 仅打包 arm64-v8a（scripts/build-mosh-native.sh）。
         ndk { abiFilters += "arm64-v8a" }
     }
 

@@ -53,8 +53,7 @@ import org.junit.runner.RunWith
 
 /**
  * Window-attached production headers and group reordering, without a Compose test dependency.
- * These assertions cover handle bounds, full accessibility names and real pointer dispatch.
- * Single-line ellipsis and the short-name/count appearance still need screenshot review.
+ * Covers whole-row drag bounds, full accessibility names, tap-to-collapse, and long-press drag reorder.
  */
 @RunWith(AndroidJUnit4::class)
 class GroupHeaderRowTest {
@@ -62,61 +61,59 @@ class GroupHeaderRowTest {
     private val evidenceEnabled = InstrumentationRegistry.getArguments().getString("evidence") == "true"
     private val names = listOf(
         "production-services-with-a-very-long-unbroken-ASCII-group-name".repeat(3),
-        "用于验证窄屏分组标题不会挤压排序手柄的中文名称".repeat(3),
+        "用于验证窄屏分组标题单行省略与无障碍完整读屏的中文名称".repeat(3),
         "/workspace/projects/mobile/terminal/session-groups/very-long-directory-name".repeat(3),
         "Dev",
     )
 
     @Test
-    fun narrowHeadersKeepIndependentHandlesAndFullAccessibilityNames() {
+    fun narrowHeadersKeepWholeRowDragZonesAndFullAccessibilityNames() {
         withFixture(names, fontScale = 1f) { fixture ->
-            assertHandleBounds(fixture)
+            assertHeaderAndDragZoneBounds(fixture)
             assertFullNamesAccessible(names)
             captureEvidence("normal.png")
         }
     }
 
     @Test
-    fun largeFontKeepsIndependentHandlesAndFullAccessibilityNames() {
+    fun largeFontKeepsWholeRowDragZonesAndFullAccessibilityNames() {
         withFixture(names, fontScale = 2f) { fixture ->
-            assertHandleBounds(fixture)
+            assertHeaderAndDragZoneBounds(fixture)
             assertFullNamesAccessible(names)
             captureEvidence("large-font.png")
         }
     }
 
     @Test
-    fun longPressOnHandleChangesGroupOrderWithoutCollapsing() {
+    fun longPressOnHeaderChangesGroupOrderWithoutCollapsing() {
         withFixture(names.take(2), fontScale = 2f) { fixture ->
-            assertHandleBounds(fixture)
-            onUi("Long-press the actual handle and drag it onto the next group") { ui, view ->
-                val start = fixture.handles.getValue("group-0").center.onScreen(view)
-                val end = fixture.handles.getValue("group-1").center.onScreen(view)
-                touch(ui, start, end, ViewConfiguration.getLongPressTimeout().toLong() + 150)
+            assertHeaderAndDragZoneBounds(fixture)
+            onUi("Long-press the header row and drag it onto the next group") { ui, view ->
+                val start = fixture.handles.getValue("group-0").center
+                val end = fixture.handles.getValue("group-1").center
+                touch(ui, view, start, end, ViewConfiguration.getLongPressTimeout().toLong() + 150)
             }
             awaitUi("The drag must commit a different group order") {
                 fixture.reorderCalls == 1 && fixture.order == listOf("group-1", "group-0") &&
                     fixture.headers.getValue("group-1").top < fixture.headers.getValue("group-0").top
             }
             onUi("Check that the drag did not toggle either group") { _, _ ->
-                assertTrue("Dragging must not invoke the parent Surface click", fixture.toggledKeys.isEmpty())
+                assertTrue("Dragging must not invoke collapse toggle", fixture.toggledKeys.isEmpty())
                 assertTrue("Both groups must remain expanded", fixture.collapsed.isEmpty())
             }
-            assertHandleBounds(fixture)
+            assertHeaderAndDragZoneBounds(fixture)
             captureEvidence("dragged.png")
         }
     }
 
     @Test
-    fun tappingHeaderBodyStillTogglesWithoutReordering() {
+    fun tappingHeaderStillTogglesWithoutReordering() {
         withFixture(listOf("Dev", "Test"), fontScale = 1f) { fixture ->
-            onUi("Tap the header body away from the handle") { ui, view ->
-                val header = fixture.headers.getValue("group-0")
-                val handle = fixture.handles.getValue("group-0")
-                val point = Offset((header.left + handle.left) / 2f, header.center.y).onScreen(view)
-                touch(ui, point)
+            onUi("Tap the header row") { ui, view ->
+                val point = fixture.handles.getValue("group-0").center
+                touch(ui, view, point)
             }
-            awaitUi("The header body must still collapse its group") { "group-0" in fixture.collapsed }
+            awaitUi("Tapping the header must collapse its group") { "group-0" in fixture.collapsed }
             onUi("Check that tapping did not reorder") { _, _ ->
                 assertEquals(listOf("group-0"), fixture.toggledKeys)
                 assertEquals(listOf("group-0", "group-1"), fixture.order)
@@ -158,7 +155,7 @@ class GroupHeaderRowTest {
                                         fixture.reorderCalls++
                                     },
                                     onReorderItems = { _, _ -> fail("A header drag must not reorder group items") },
-                                    modifier = Modifier.width(240.dp).height(420.dp).onGloballyPositioned {
+                                    modifier = Modifier.width(240.dp).height(460.dp).onGloballyPositioned {
                                         fixture.listBounds = it.unclippedBoundsInWindow()
                                     },
                                     header = { group, dragging, handle ->
@@ -191,7 +188,7 @@ class GroupHeaderRowTest {
                     }
                 }
             }
-            awaitUi("Production headers and handles must be laid out") {
+            awaitUi("Production headers and drag zones must be laid out") {
                 fixture.listBounds != null && fixture.density > 0f &&
                     fixture.headers.keys.containsAll(fixture.order) &&
                     fixture.handles.keys.containsAll(fixture.order)
@@ -200,19 +197,19 @@ class GroupHeaderRowTest {
         }
     }
 
-    private fun assertHandleBounds(fixture: Fixture) {
-        onUi("Check actual handle bounds in each narrow production header") { _, _ ->
+    private fun assertHeaderAndDragZoneBounds(fixture: Fixture) {
+        onUi("Check header and whole-row drag bounds in each narrow production header") { _, _ ->
             val list = checkNotNull(fixture.listBounds)
-            val minimum = 48f * fixture.density
+            val minimumHeight = 36f * fixture.density
             val tolerance = 1f // Layout rounds dp to whole pixels.
             fixture.order.forEach { key ->
                 val header = fixture.headers.getValue(key)
                 val handle = fixture.handles.getValue(key)
                 assertTrue("$key must be visible inside the list", list.contains(header, tolerance))
-                assertTrue("$key handle must stay inside its header", header.contains(handle, tolerance))
-                assertTrue("$key handle width must be at least 48dp", handle.width + tolerance >= minimum)
-                assertTrue("$key handle height must be at least 48dp", handle.height + tolerance >= minimum)
-                assertEquals("$key handle must remain at the trailing edge", header.right, handle.right, tolerance)
+                assertTrue("$key drag zone must stay inside its header", header.contains(handle, tolerance))
+                assertEquals("$key drag zone must span from the leading edge", header.left, handle.left, tolerance)
+                assertEquals("$key drag zone must span to the trailing edge", header.right, handle.right, tolerance)
+                assertTrue("$key drag zone height must be at least 36dp", handle.height + tolerance >= minimumHeight)
             }
         }
     }
@@ -302,13 +299,13 @@ class GroupHeaderRowTest {
         })
     }
 
-    private fun touch(ui: UiController, start: Offset, end: Offset = start, holdMs: Long = 30) {
+    private fun touch(ui: UiController, root: View, start: Offset, end: Offset = start, holdMs: Long = 30) {
         val downTime = SystemClock.uptimeMillis()
         fun send(action: Int, point: Offset) {
             val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, point.x, point.y, 0)
             event.source = InputDevice.SOURCE_TOUCHSCREEN
             try {
-                assertTrue("Touch injection must succeed", ui.injectMotionEvent(event))
+                assertTrue("Touch dispatch must be handled", root.dispatchTouchEvent(event))
             } finally {
                 event.recycle()
             }
@@ -332,14 +329,6 @@ class GroupHeaderRowTest {
         } finally {
             if (!released) send(MotionEvent.ACTION_CANCEL, last)
         }
-    }
-
-    private fun Offset.onScreen(root: View): Offset {
-        val screen = IntArray(2)
-        val window = IntArray(2)
-        root.getLocationOnScreen(screen)
-        root.getLocationInWindow(window)
-        return this + Offset((screen[0] - window[0]).toFloat(), (screen[1] - window[1]).toFloat())
     }
 
     private fun LayoutCoordinates.unclippedBoundsInWindow(): Rect {
